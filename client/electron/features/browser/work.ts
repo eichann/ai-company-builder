@@ -617,20 +617,27 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The work: the page's writes held, each sent once within the frames.
       const afterReads = run.afterRead ?? []
       const befores = new Map<string, Array<[string, string]> | null>()
-      const readTop = async (address: string): Promise<Array<[string, string]> | null> => {
+      /** One read: the card's rows, and the whole answer text (the write ledger's read-back compares it losslessly). */
+      const readBoth = async (address: string): Promise<{ top: Array<[string, string]> | null; text: string | null }> => {
         try {
           const r = await reader.read(address, cut.signal)
-          return r.status === 200 ? topFields(r.body) : null
+          return r.status === 200 ? { top: topFields(r.body), text: r.body } : { top: null, text: null }
         } catch {
-          return null
+          return { top: null, text: null }
         }
       }
+      const readTop = async (address: string) => (await readBoth(address)).top
+      /** Each address read before a write, by the address itself, as its whole answer text (the read-back's "before"). */
+      const beforeAt = new Map<string, string | null>()
+      const readBefore = async (p: string, a: string) => {
+        const both = await readBoth(a)
+        befores.set(p, both.top)
+        beforeAt.set(a, both.text)
+      }
       // A literal after-read address is read before anything is written.
-      /** Each address read before a write, by the address itself (the write ledger's read-back compares exactly that one). */
-      const beforeAt = new Map<string, Array<[string, string]> | null>()
       for (const p of afterReads) {
         const a = beforeReadAddress(p, null)
-        if (a !== null && !befores.has(p)) { befores.set(p, await readTop(a)); beforeAt.set(a, befores.get(p) ?? null) }
+        if (a !== null && !befores.has(p)) await readBefore(p, a)
       }
       const workLog: BrowserRunLogStep[] = []
       const actions = { n: 0 }
@@ -642,7 +649,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           for (const p of afterReads) {
             if (befores.has(p)) continue
             const a = beforeReadAddress(p, heldPath)
-            if (a !== null) { befores.set(p, await readTop(a)); beforeAt.set(a, befores.get(p) ?? null) }
+            if (a !== null) await readBefore(p, a)
           }
         },
       })
@@ -662,7 +669,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const readBack = async (r: FrameWriteRecord | undefined): Promise<boolean> => {
         if (!r || r.path === null || typeof r.write !== 'number' || held.some(o => o !== r && o.path === r.path)) return false
         if (!afterReads.some(p => beforeReadAddress(p, r.path) === r.path) || !beforeAt.has(r.path)) return false
-        if (!readBackLanded(r.sent, beforeAt.get(r.path) ?? null, await readTop(r.path))) return false
+        if (!r.sentWhole || !readBackLanded(r.sent, beforeAt.get(r.path) ?? null, (await readBoth(r.path)).text)) return false
         const told = await deps.api.frameReport(companyId, run.runId, { write: r.write, result: 'done', reason: 'read-back' })
           .catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
         return told.kind === 'ok'

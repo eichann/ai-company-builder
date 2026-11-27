@@ -333,16 +333,45 @@ export function beforeReadAddress(pattern: string, heldPath: string | null): str
  * The write ledger's machine check (agent-browser.md "The write ledger across requests"): did a write whose answer was
  * lost land? Only when the very address it wrote to was read before it and again after, **every** field it sent now reads
  * exactly the sent value, and **at least one** of them read otherwise before (so the read shows a change to what was sent,
- * not a state that was already so). Anything less — nothing sent, a field missing, one value different, nothing changed,
- * a read missing — is no proof: the person is asked.
+ * not a state that was already so). Compared on the **whole** answers (`before` / `after`: the JSON objects' texts, never
+ * the card's shortened rows — Codex review: a 300-character cut or a field past the card's 30 would pass for equal or
+ * changed), each field a top-level text, number or boolean, the changed one present before too. Anything less — nothing
+ * sent, a field missing or not plain, one value different, nothing changed, a read missing or not a JSON object — is no
+ * proof: the person is asked. The caller also requires the write's own body to be whole (`sentBodyWhole`).
  */
-export function readBackLanded(sent: Readonly<Record<string, string>> | null, before: ReadonlyArray<[string, string]> | null, after: ReadonlyArray<[string, string]> | null): boolean {
-  if (!sent || !before || !after) return false
+export function readBackLanded(sent: Readonly<Record<string, string>> | null, before: string | null, after: string | null): boolean {
+  const was = jsonObject(before)
+  const now = jsonObject(after)
+  if (!sent || !was || !now) return false
   const fields = Object.entries(sent)
   if (fields.length === 0) return false
-  const was = new Map(before)
-  const now = new Map(after)
-  return fields.every(([k, v]) => now.get(k) === v) && fields.some(([k, v]) => was.get(k) !== v)
+  const plain = (o: Record<string, unknown>, k: string): string | null => {
+    if (!Object.prototype.hasOwnProperty.call(o, k)) return null
+    const x = o[k]
+    return typeof x === 'string' ? x : typeof x === 'number' || typeof x === 'boolean' ? String(x) : null
+  }
+  return fields.every(([k, v]) => plain(now, k) === v) && fields.some(([k, v]) => { const b = plain(was, k); return b !== null && b !== v })
+}
+const jsonObject = (text: string | null): Record<string, unknown> | null => {
+  if (text === null) return null
+  try {
+    const v: unknown = JSON.parse(text)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether `sentFields` holds the whole of what a held write said (the read-back may then speak for the write): every field
+ * but `_method` and the login / CSRF / session ones is one plain value — none repeated, none nested in JSON.
+ */
+export function sentBodyWhole(shape: HeldWriteShape): boolean {
+  for (const [k, values] of shape.fields) {
+    if (k === '_method' || isSensitiveFieldName(k)) continue
+    if (values.length !== 1 || values[0].includes('\u0000')) return false
+  }
+  return true
 }
 
 /** A page's JSON object as the card's rows: its top-level plain values (a list of plain values joined), at most 30. Null: not a JSON object. */

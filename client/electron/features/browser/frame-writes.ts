@@ -19,7 +19,7 @@
 // page's own retry is a new hold that needs a new unit. A write held when the run stops or the window goes is failed,
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
-  createdIdOf, pickFrame, readHeldWrite, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
+  createdIdOf, pickFrame, readHeldWrite, sentBodyWhole, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
   type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame, type WorkWriteSeen, type WorkWriteWhy,
 } from '../../../shared/browser-frame-writes'
 import { browserMadeFrom } from '../../../../shared/core/browser-skill'
@@ -43,6 +43,8 @@ export interface FrameWriteRecord {
   status: number | null
   /** What it sent (for the after-read card's machine check; never a login, CSRF or session field) and its path. */
   sent: Record<string, string> | null
+  /** `sent` is the whole of what the write said (`sentBodyWhole`): only then may the write ledger's read-back speak for it. */
+  sentWhole?: boolean
   path: string | null
   /** The site's answer as text, when it answered with success (what `{created}` is read from). */
   answerText: string | null
@@ -201,7 +203,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       if (originalMayHaveGone) {
         locked = true
         if (permitted) await report(permitted.write, 'unknown', 'context-changed')
-        keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null, write: permitted?.write ?? null, permittedAt: permitted?.permittedAt ?? null }, 'unknown')
+        keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), sentWhole: sentBodyWhole(shape), path: shape.path, answerText: null, write: permitted?.write ?? null, permittedAt: permitted?.permittedAt ?? null }, 'unknown')
         return fail
       }
       if (permitted && !(await report(permitted.write, 'not_sent', 'permit-late'))) locked = true
@@ -215,7 +217,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       // It may have reached the site: unknown, the run sends nothing more, and it is never sent again.
       locked = true
       await report(write, 'unknown', 'no-answer')
-      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null, ...ids }, 'unknown')
+      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), sentWhole: sentBodyWhole(shape), path: shape.path, answerText: null, ...ids }, 'unknown')
       return fail
     }
     // The core's one rule (browserWriteAnswerKind): 2xx / 3xx done; a 4xx that proves it was not taken → refused (the run
@@ -236,7 +238,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // refuse `site-refused` whole; independent review of #859) — the run is locked above anyway.
     const kept: BrowserRunWriteOutcome = kind === 'refused' ? (recorded ? 'site-refused' : 'unknown') : kind
     keep({
-      line, outcome: kept, status: kind === 'done' ? null : answer.status, sent: sentFields(shape), path: shape.path,
+      line, outcome: kept, status: kind === 'done' ? null : answer.status, sent: sentFields(shape), sentWhole: sentBodyWhole(shape), path: shape.path,
       answerText: kind === 'done' ? answer.body : null, ...ids,
     }, kept)
     // The page gets the site's answer (its Set-Cookie never: the window drops it too), so its flow goes on.

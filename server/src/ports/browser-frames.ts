@@ -120,9 +120,10 @@ export interface BrowserFrameRepository {
   insertLedger(row: WriteLedgerRow, recordedAt: string): void
   /**
    * The writes in doubt on this domain for this outside account, of any run (ended ones included, whatever their age):
-   * the ledger's rows whose write is `permitted` or `unknown` with no answer of the person. Oldest first.
+   * the ledger's rows whose write is `permitted` or `unknown` with no answer of the person. Oldest first. `target`: only
+   * that target's (the permit's check, an indexed lookup).
    */
-  ledgerDoubts(host: string, account: string): WriteDoubtRow[]
+  ledgerDoubts(host: string, account: string, target?: string): WriteDoubtRow[]
   /** Compare-and-set of a write's state; false when it was not `from`. */
   setWriteState(runId: string, seq: number, from: FrameWriteState, to: FrameWriteState, change: { settledAt: string; reason?: string | null }): boolean
 }

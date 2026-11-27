@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readBackLanded, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
+  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readBackLanded, readHeldWrite, sentBodyWhole, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -502,6 +502,8 @@ interface WorkWorld {
   frameGet: () => Promise<BrowserLinesAnswer>
   /** The server's answer to a read-back report (default: taken). */
   readBackTaken?: boolean
+  /** The body the page's 保存 sends (default: a title and a CSRF field). */
+  saveBody?: string
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
   now?: () => number
   onStep?: (prompt: string) => void
@@ -552,7 +554,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
       w.calls.push(`act ${action.do}`)
       // 保存 makes the page's write (to the frame), 自動保存 one outside it.
       if (action.do === 'click' && hooks) {
-        const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, '{"title":"冬のクーポン","_token":"csrf-9"}',
+        const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, w.saveBody ?? '{"title":"冬のクーポン","_token":"csrf-9"}',
           w.sendHangs ? () => new Promise<void>(() => {}) : w.siteDelayMs ? () => new Promise<void>(r => setTimeout(r, w.siteDelayMs)) : undefined)
         const pageHooks = hooks
         if (w.autosaveEveryMs !== undefined) {
@@ -1503,6 +1505,16 @@ test('the read-back: a write whose answer was lost is found done when its own ad
   assert.ok(untaken.w.calls.includes('frameReport done read-back'))
   assert.ok(viewOf(untaken.wiring)?.result?.confirm, 'still asked')
 
+  // A body the app could not read whole (a nested field it does not compare): no proof, whatever the read shows.
+  const nested = withDoubts([], {
+    site: { requests: [], answer: () => null }, saveBody: '{"title":"冬のクーポン","tags":["a"]}',
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false, afterRead: ['/coupons'] }) }),
+    reads: { '/coupons': '{"title":"秋のクーポン"}' },
+  })
+  nested.w.onStep = () => { nested.w.reads['/coupons'] = '{"title":"冬のクーポン"}' }
+  assert.equal(await nested.tool.execute({ site: HOST, task: 'x', skill: 'coupons' }), workWordsForAi({ kind: 'unknown' }, [], []))
+  assert.equal(nested.w.calls.includes('frameReport done read-back'), false)
+
   // Nothing changed (the value was already so), or the read differs: no proof → the person is asked as before.
   for (const [before, after] of [['冬のクーポン', '冬のクーポン'], ['秋のクーポン', '秋のクーポン']]) {
     const not = withDoubts([], {
@@ -1517,13 +1529,33 @@ test('the read-back: a write whose answer was lost is found done when its own ad
   }
 })
 
-test('readBackLanded: every sent value and a change, nothing less', () => {
+test('readBackLanded: every sent value and a change, on the whole answers, nothing less', () => {
   const sent = { title: '冬', price: '100' }
-  assert.equal(readBackLanded(sent, [['title', '秋'], ['price', '100']], [['title', '冬'], ['price', '100']]), true)
-  assert.equal(readBackLanded(sent, [['title', '冬'], ['price', '100']], [['title', '冬'], ['price', '100']]), false)
-  assert.equal(readBackLanded(sent, [['title', '秋']], [['title', '冬']]), false)
-  assert.equal(readBackLanded(sent, [['title', '秋'], ['price', '1']], [['title', '冬'], ['price', '99']]), false)
-  assert.equal(readBackLanded({}, [['a', '1']], [['a', '2']]), false)
-  assert.equal(readBackLanded(sent, null, [['title', '冬'], ['price', '100']]), false)
-  assert.equal(readBackLanded(null, [], []), false)
+  const j = (o: unknown) => JSON.stringify(o)
+  assert.equal(readBackLanded(sent, j({ title: '秋', price: 100 }), j({ title: '冬', price: 100 })), true)
+  assert.equal(readBackLanded(sent, j({ title: '冬', price: 100 }), j({ title: '冬', price: 100 })), false, 'nothing changed')
+  assert.equal(readBackLanded(sent, j({ title: '秋' }), j({ title: '冬' })), false, 'a field missing after')
+  assert.equal(readBackLanded(sent, j({ title: '秋', price: 1 }), j({ title: '冬', price: 99 })), false, 'one value differs')
+  assert.equal(readBackLanded({}, j({ a: 1 }), j({ a: 2 })), false, 'nothing sent')
+  assert.equal(readBackLanded(sent, null, j({ title: '冬', price: 100 })), false, 'no read before')
+  assert.equal(readBackLanded(null, '{}', '{}'), false)
+  assert.equal(readBackLanded(sent, '[]', j({ title: '冬', price: 100 })), false, 'not an object')
+  // Codex review: a long value cut for the card, or a field past the card's 30, must not pass.
+  const long = 'x'.repeat(300)
+  assert.equal(readBackLanded({ title: long }, j({ title: 'old' }), j({ title: `${long}WRONG` })), false, 'a longer value is not equal')
+  const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`a${i}`, i]))
+  assert.equal(readBackLanded({ title: 'same' }, j({ ...many, title: 'same' }), j({ title: 'same' })), false, 'present before, unchanged')
+  assert.equal(readBackLanded({ title: 'new' }, j({ other: 1 }), j({ title: 'new' })), false, 'absent before is no change')
+  assert.equal(readBackLanded({ title: 'new' }, j({ title: { deep: 1 } }), j({ title: 'new' })), false, 'not plain before')
+})
+
+test('sentBodyWhole: only a body read whole (no repeated or nested field) may be read back', () => {
+  const ok = readHeldWrite({ method: 'POST', url: `https://${HOST}/coupons/7`, host: HOST, contentType: JSON_TYPE, body: text('{"title":"冬","_token":"t"}') })
+  const nested = readHeldWrite({ method: 'POST', url: `https://${HOST}/coupons/7`, host: HOST, contentType: JSON_TYPE, body: text('{"title":"冬","tags":["a"]}') })
+  const repeated = readHeldWrite({ method: 'POST', url: `https://${HOST}/coupons/7`, host: HOST, contentType: FORM, body: text('title=a&title=b') })
+  assert.ok(ok.ok && nested.ok && repeated.ok)
+  if (!ok.ok || !nested.ok || !repeated.ok) return
+  assert.equal(sentBodyWhole(ok.shape), true)
+  assert.equal(sentBodyWhole(nested.shape), false)
+  assert.equal(sentBodyWhole(repeated.shape), false)
 })

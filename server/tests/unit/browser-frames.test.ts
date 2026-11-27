@@ -985,7 +985,7 @@ describe('recovering from a failed write: the site refused it; the person answer
     initDatabase(before)
     expect(before.prepare('SELECT state FROM browser_frame_writes').all()).toEqual([{ state: 'unknown' }])
     expect(before.prepare('SELECT outcome FROM browser_run_writes').all()).toEqual([{ outcome: 'done' }])
-    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes', 'browser_frame_made') ORDER BY type, name").all()
+    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes', 'browser_frame_made', 'browser_write_ledger') ORDER BY type, name").all()
     const fresh = new Database(':memory:')
     initDatabase(fresh)
     expect(shape(before)).toEqual(shape(fresh))

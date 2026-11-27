@@ -4090,7 +4090,9 @@ no word was added to the operator's prompt (owner: the AI is kept by mechanisms,
   buttons are left for what is truly unknown: after the work, the write in doubt (the one with a permit) is read again at
   **its very address** — only when a Skill's `after_read` names it, it was read right before that write, and no other
   write of the run went there — and counts as landed only when **every** field it sent now reads exactly the sent value
-  **and** at least one read otherwise before (a state already so proves nothing). Then the app reports `done` with reason
+  **and** at least one read otherwise before (a state already so proves nothing), compared on the **whole** JSON answers,
+  each field a top-level plain value present on both sides (never the card's shortened rows: Codex review), and only for a
+  write whose body was read whole (`sentBodyWhole`: no repeated or nested field the comparison would miss). Then the app reports `done` with reason
   `read-back` (`BROWSER_REPORT_REASONS`; a sure report: the run's own PC only) and, once the server took it, the card says
   `readBackDone` and the AI hears `read-back` 「…読み直したところ、その書き込みは済んでいました…」. A create whose answer
   was lost has no address to read (`{created}` is unknown), so it is always asked: that is the duplicate this ledger
@@ -4101,7 +4103,10 @@ no word was added to the operator's prompt (owner: the AI is kept by mechanisms,
   today); rolled forward again, its rows are as they were and every doubt in them holds. An older app ignores `doubts`
   (the permit still refuses the target, the write is not sent and the operator sees it as a write with no permit).
 - **Remaining limits** (said): the target is the exact address — a site that names one object by two addresses (a
-  trailing slash, another case, an alias) is two targets to the guard, though the start's question compares patterns;
+  trailing slash, another case, an alias, `05` for `5`) is two targets to the guard, though the start's question compares
+  patterns; the read-back proves the state, not its cause (someone else setting the very same values in between counts);
+  only the frames path keeps the ledger (the old one-write plans and the opened lines have their own target locks and
+  confirms, and neither reads it);
   two members sharing one outside login are two accounts (above); a person who answers wrongly is believed (as for the
   earlier card); the answer stays bound to the earlier run's PC ("Recovering from a failed write"), so a member who moved
   to another PC cannot answer there (the guard then holds that target for them until they answer on that PC — the safe
@@ -4113,8 +4118,10 @@ start names a frame that may meet; the person's answer either way, a late done /
 read-back from another PC ends nothing, another member and another company never mixed in, a member who left, the
 table's triggers and no path kept), `browser-frame-match.test.ts` (`browserWriteTarget`, `browserFramesMayMeet` both ways),
 `client/tests/browser-frame-writes.test.ts` (asked on the card before any operator step and answered on the earlier run,
-「済んでいた」 stops with nothing written, no answer in time / the turn stopped, two doubts in turn, none asked when the start
-names none, the read-back found landed — and not when nothing changed or the value differs —, `readBackLanded`),
+「済んでいた」 stops with nothing written, no answer in time / an answer held elsewhere / the turn stopped, two doubts in turn,
+none asked when the start names none, the read-back found landed — and not when the server did not take it, the body was
+not read whole, nothing changed or the value differs —, `readBackLanded` on whole answers (a cut value, a field absent
+before), `sentBodyWhole`), the writes table's rebuild re-making the ledger's trigger,
 `model/browser-plan/check`, `jobs-schema.test.ts`, `company-scoped-sql.test.ts`. Each guard mutation-checked.
 
 ## A card in its consultation's own window (［任せる］／［やめる］／［済んでいた］ from 「別ウィンドウで開く」)

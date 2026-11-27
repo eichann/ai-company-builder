@@ -554,7 +554,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         // in any run however old, whose result nobody knows → no permit until the person answers or the site's answer
         // comes. Nothing is taken and the run goes on (another target is not held up).
         const target = targetOf(request)
-        if (r.ledgerDoubts(run.host, ledgerAccountOf(run.userId)).some(d => d.target === target)) {
+        if (r.ledgerDoubts(run.host, ledgerAccountOf(run.userId), target).some(d => d.target === target)) {
           return refuse('conflict', W.inDoubt, { code: 'BROWSER_WRITE_IN_DOUBT' })
         }
         const passed = gate(member, run.host, deviceKey, run)

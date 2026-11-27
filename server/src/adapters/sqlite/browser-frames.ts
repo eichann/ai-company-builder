@@ -115,14 +115,14 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
       conn.prepare(`INSERT INTO browser_write_ledger (company_id, run_id, seq, user_id, host, account, target, recorded_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(companyId, row.runId, row.seq, row.userId, row.host, row.account, row.target, recordedAt)
     },
-    ledgerDoubts(host, account) {
+    ledgerDoubts(host, account, target) {
       return (conn.prepare(`SELECT l.run_id, l.seq, l.target, w.state, w.permitted_at, f.method, f.path, f.query, f.fields
         FROM browser_write_ledger l
         JOIN browser_frame_writes w ON w.company_id = l.company_id AND w.run_id = l.run_id AND w.seq = l.seq
         JOIN browser_frames f ON f.company_id = w.company_id AND f.run_id = w.run_id AND f.idx = w.frame_idx
-        WHERE l.company_id = ? AND l.host = ? AND l.account = ? AND w.state IN ('permitted', 'unknown')
+        WHERE l.company_id = ? AND l.host = ? AND l.account = ? AND (? IS NULL OR l.target = ?) AND w.state IN ('permitted', 'unknown')
           AND NOT EXISTS (SELECT 1 FROM browser_frame_write_confirms c WHERE c.company_id = ? AND c.run_id = l.run_id AND c.seq = l.seq)
-        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, companyId) as Array<{
+        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, target ?? null, target ?? null, companyId) as Array<{
         run_id: string; seq: number; target: string; state: 'permitted' | 'unknown'; permitted_at: string
         method: FrameRow['method']; path: string; query: string | null; fields: string
       }>).map(r => ({
