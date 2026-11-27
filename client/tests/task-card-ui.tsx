@@ -103,6 +103,8 @@ const task = OWN ? rec(TASK_ID, 'task', '見積を直す', 'todo', { assignee: M
     assignee: ME, ...(SETWATCH ? {} : { requested_by: 'u-abe', when_done: 'check' }), due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00', tags: '["営業","見積"]',
     prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
     ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
+    // `&purpose=1`: a 目的 already written.
+    ...(params.get('purpose') === '1' ? { purpose: '提案に使う' } : {}),
   }, shared || MANUAL ? {} : { personal: true })
 const entries = (conflict ? [{ version: 4, action: 'set_due', actorId: 'u-abe', actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: null, toState: null, changes: [{ field: 'due', before: '2026-11-07T17:00', after: '2026-11-08T12:00' }] }] : done ? [{ version: 4, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done', changes: [{ field: 'ok_by', before: null, after: 'u-abe' }, { field: 'ok_note', before: null, after: '電話で' }] }] : []) as unknown as LedgerEntry[]
 // `?manual=1`: the AI made it from the meeting, with the line it read there (「会議『…』から AI が作りました」 and ［根拠を見る］).

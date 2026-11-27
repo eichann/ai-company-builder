@@ -2,6 +2,8 @@
 // the rest behind 「…」 with a line on what each does; actions that take the task off the member's
 // list confirm first (what happens, who is told) and can be undone right after.
 import type { TaskCardAction, TaskCardData } from '../../../shared/task-card'
+import { normalizeRecordTitle, RECORD_TITLE_MAX } from '../../../../shared/core/record-types'
+import type { InlineTextProps } from '../../shared/ui/InlineText'
 
 /**
  * Actions of チームの進め方: offered only with it on, and only on a task someone else is in. It is
@@ -208,7 +210,30 @@ export function editSteps(now: { title: string; purpose: string | null }, draft:
   return steps
 }
 
-/** What the card says after 「件名・目的を直す」 saved. */
+/** Said under the field when the member is the assignee of a request still 引き受け待ち (records.md "Acceptance"). */
+export const ACCEPTS_NOTE = '保存すると、このやることを引き受けたことになります。'
+
+export type TaskText = { title: string; purpose: string | null }
+type SendText = (steps: TextEditSteps) => Promise<string | null>
+
+/** Sends one field's draft: null when saved or when nothing changed (nothing is sent), else the words to show. */
+export function saveTaskText(now: TaskText, field: 'title' | 'purpose', draft: string, may: boolean, send: SendText): Promise<string | null> {
+  const steps = editSteps(now, { title: field === 'title' ? draft : now.title, purpose: field === 'purpose' ? draft : now.purpose ?? '' },
+    { title: field === 'title' && may, purpose: field === 'purpose' && may })
+  if (steps.length === 0) return Promise.resolve(null)
+  // The title rule only when the title is sent: 目的 alone saves under a title stored before the rule.
+  const renamed = steps.find(s => s.action === 'retitle')
+  if (renamed && 'error' in normalizeRecordTitle(renamed.args.title)) return Promise.resolve(`件名は1行・${RECORD_TITLE_MAX}文字までで書いてください`)
+  return send(steps)
+}
+
+/** RecordPage's `titleEdit` for the task card: undefined (plain text) when the member may not correct the title. */
+export function taskTitleEdit(now: TaskText, may: boolean, busy: boolean, accepts: boolean, send: SendText): Pick<InlineTextProps, 'onSave' | 'busy' | 'note' | 'maxLength'> | undefined {
+  if (!may) return undefined
+  return { busy, maxLength: RECORD_TITLE_MAX, ...(accepts ? { note: ACCEPTS_NOTE } : {}), onSave: draft => saveTaskText(now, 'title', draft, may, send) }
+}
+
+/** What the card says after the title or 目的 was saved. */
 export function editDoneWords(steps: TextEditSteps): string {
   return `${steps.map(s => (s.action === 'retitle' ? '件名' : '目的')).join('と')}を直しました`
 }

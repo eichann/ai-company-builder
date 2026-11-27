@@ -671,7 +671,7 @@ two actions, one generic piece of definition syntax, no new route.
   turn's cap like the others (`AI_ASKED_REFUSALS.limit` now says 「頼まれて変えられるのは」).
 - **No leaks**: an owner-only, a members-only (not listed) and another company's task answer exactly as a missing one
   (the reader comes first); nothing logs a title.
-- **The app**: the card's 「件名・目的を直す」 (`tasks-ui.md` "The card"); 経緯 「件名を直しました（「前」→「後」）」
+- **The app**: the card's title and 目的, corrected in place (`tasks-ui.md` "The card"); 経緯 「件名を直しました（「前」→「後」）」
   (`historyLines`); the AI's `task__retitle` / `task__set_purpose` (`client/electron/records/tools.ts`, the title as one
   line ≤ 200).
 - Migration: `TASK_VERSION` 16 (the "Task version 9" mechanism). **No server rollback below it** without removing the stored task v16 definition first: an older engine reads `args: { title }` as a field and would store the title in the server fields (as plain text), leaving the record's title unchanged. Tests: `server/tests/integration/task-retitle.test.ts`
