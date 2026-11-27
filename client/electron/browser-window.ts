@@ -36,8 +36,13 @@ import {
   BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WINDOW_TITLE, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
   type BrowserRecordingObservation, type BrowserRecordingObserver, type BrowserRecordSurface,
 } from '../shared/browser-recorder'
-import { readBrowserAim, readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserAim, type BrowserBrowseAction, type BrowserBrowseSurface } from '../shared/browser-browse'
-import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseAimScript, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
+import {
+  browserDialog, readBrowserAim, readBrowserPageSnapshot, readBrowserPressed, readBrowserPressPoint, readBrowserTypedValue, sameDomainPath, typedResult, BROWSER_ACT_LIMITS, BROWSER_BROWSE_LIMITS,
+  type BrowserActDialog, type BrowserActResult, type BrowserAim, type BrowserAimRefusal, type BrowserBrowseAction, type BrowserBrowseSurface,
+} from '../shared/browser-browse'
+import {
+  BROWSE_CLICKED_SCRIPT, BROWSE_TYPED_VALUE_SCRIPT, BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseAimScript, browseFocusScript, browsePointScript, browseSelectScript,
+} from '../shared/browser-browse-script'
 import { drawScreenMarks, screenMarks } from '../shared/browser-screen-marks'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession, type SessionAnswer, type SessionRequest } from './features/browser/read-session'
 import type { BrowserWorkHooks, HeldBody, HeldPageWriteAnswer } from '../shared/browser-frame-writes'
@@ -55,6 +60,10 @@ export interface BrowserAiGate {
    * confirm never says yes.
    */
   dismissDialogs?: boolean
+  /** Told of each dialog dismissed (its kind and text as the page wrote them), so the operator hears of it ("What a press did"). */
+  onDialog?: (kind: unknown, message: unknown) => void
+  /** Told of each write the page makes (held or refused), so a press whose click was not told says whether the page wrote. */
+  onPageWrite?: () => void
   /**
    * A write run (step ⑤b; agent-browser.md "Writes within frames, in the app"): every write the page makes is held — never
    * continued — and handed to `hooks.holdWrite` with `send`, the window's one way to send exactly that request once through
@@ -461,7 +470,9 @@ export function createBrowserWindowShell(options: {
         if (owner.holder() === 'ai' && gate?.dismissDialogs) {
           // Never a yes to the page (alert / confirm / prompt dismissed), except a beforeunload: the page is always let go
           // (a page cannot keep its document — and the timers in it — alive by asking to stay; independent review M).
+          const tell = gate.onDialog
           try { await contents.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: params.type === 'beforeunload' }) } catch { /* gone */ }
+          try { tell?.(params.type, params.message) } catch { /* the listener's own failure changes nothing */ }
           return
         }
       }
@@ -474,6 +485,7 @@ export function createBrowserWindowShell(options: {
       const requestId = params.requestId as string
       const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean }
       // A write run (step ⑤b): the page's write is held, never continued; the run decides, main sends it once or not at all.
+      if (state.mode === 'ai' && !isReadMethod(request.method)) { try { gate?.onPageWrite?.() } catch { /* changes nothing */ } }
       const hold = state.site && state.mode === 'ai' && gate?.hold
       if (hold && !isReadMethod(request.method)) {
         await holdPageWrite(requestId, request, hold)
@@ -899,6 +911,10 @@ export function createBrowserWindowShell(options: {
           signal.removeEventListener('abort', onStop)
         }
       }
+      /** The page's dialogs since the last action's result (each dismissed), told with the next result ("What a press did"). */
+      const dialogsSeen: BrowserActDialog[] = []
+      /** The page's writes so far in this run (held or refused by the gate). */
+      let pageWrites = 0
       /** Whether the operator did anything in this run (then the page is loaded afresh before the member gets it back). */
       let actedOnPage = false
       // While the operator has the window (and while it is given back), a page's beforeunload never keeps its document.
@@ -931,6 +947,8 @@ export function createBrowserWindowShell(options: {
           if (!win.isDestroyed() && !win.isVisible()) win.showInactive()
           await setMode('ai', {
             decide: () => false, stopped, dismissDialogs: true,
+            onDialog: (kind, message) => { const d = browserDialog(kind, message); if (d && dialogsSeen.length < BROWSER_ACT_LIMITS.dialogs) dialogsSeen.push(d) },
+            onPageWrite: () => { pageWrites++ },
             // A write run: the page's writes are held for the run, and a Skill's never-read addresses are refused.
             ...(work ? {
               hold: { hooks: work, send: sendHeld },
@@ -1014,61 +1032,105 @@ export function createBrowserWindowShell(options: {
         // the page's script): a point off the viewport, a frame, a file field or its label, a password field, nothing
         // editable focused, or a page that moved since the snapshot is refused (agent-browser.md "Pressing by position").
         aim: aimNow,
+        // One action and what it did (agent-browser.md "What a press did"): a ref is acted on only while its element is still
+        // what the snapshot showed (its role, its name, its row's words) and — for a press — is itself on top where it is
+        // pressed; otherwise nothing is done and the answer is `refused` (`moved` / `covered`). A press tells the element its
+        // click reached, typing what the field holds afterwards, and every action the page's dialogs (each dismissed).
         async act(action, signal) {
-          if (!browseReady() || signal.aborted) return 'failed'
+          const result = (r: BrowserActResult): BrowserActResult => {
+            const dialogs = dialogsSeen.splice(0)
+            return dialogs.length > 0 ? { ...r, dialogs } : r
+          }
+          const failed = () => result({ outcome: 'failed' })
+          const refused = (why: BrowserAimRefusal) => result({ outcome: 'refused', why })
+          if (!browseReady() || signal.aborted) return failed()
           if (action.do !== 'wait') actedOnPage = true
+          /** A real press of the window's own input (trusted, as a person's), only while the gate holds the window. */
+          const pressAt = (x: number, y: number) => {
+            contents.sendInputEvent({ type: 'mouseMove', x, y })
+            contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+            contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+          }
+          /** The element the click reached: asked a few times (the input reaches the page a moment later), before the page settles. */
+          const reached = async (): Promise<BrowserActResult['pressed']> => {
+            let seen: BrowserActResult['pressed']
+            for (let i = 0; i < 6 && !signal.aborted; i++) {
+              await pause(50, signal)
+              seen = readBrowserPressed(await inWorld(BROWSE_CLICKED_SCRIPT))
+              if (seen !== 'none') return seen
+            }
+            return seen
+          }
+          let pressed: BrowserActResult['pressed']
+          let typed: string | null = null
+          const writesBefore = pageWrites
           switch (action.do) {
             case 'click': {
               if (!('ref' in action)) {
                 // By position: hit-tested again right before the press; the press lands on that very point.
-                if (!(await aimNow(action)).ok || !browseReady()) return 'failed'
-                const x = Math.round(action.x)
-                const y = Math.round(action.y)
-                contents.sendInputEvent({ type: 'mouseMove', x, y })
-                contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
-                contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+                const aimed = await aimNow(action)
+                if (!aimed.ok) return refused(aimed.why)
+                if (!browseReady()) return failed()
+                pressAt(Math.round(action.x), Math.round(action.y))
+                pressed = await reached()
                 break
               }
-              const at = await inWorld(browsePointScript(action.ref))
-              let point: { x: number; y: number } | null = null
-              try { point = typeof at === 'string' ? JSON.parse(at) as { x: number; y: number } : null } catch { point = null }
-              if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return 'failed'
-              // A real press of the window's own input (trusted, as a person's), only while the gate holds the window.
-              const x = Math.round(point.x)
-              const y = Math.round(point.y)
-              if (!browseReady()) return 'failed'
-              contents.sendInputEvent({ type: 'mouseMove', x, y })
-              contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
-              contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+              const at = readBrowserPressPoint(await inWorld(browsePointScript(action.ref)))
+              if (!at) return failed()
+              if (!at.ok) return refused(at.why)
+              if (!browseReady()) return failed()
+              pressAt(Math.round(at.x), Math.round(at.y))
+              pressed = await reached()
               break
             }
-            case 'type':
+            case 'type': {
               // Without a ref: into the element that has the focus, only when it is a text field (never a password or file).
-              if (!('ref' in action)) { if (!(await aimNow(action)).ok) return 'failed' }
-              else if ((await inWorld(browseFocusScript(action.ref))) !== true) return 'failed'
-              if (!(await pageDebugger.command('Input.insertText', { text: action.text }))) return 'failed'
+              if (!('ref' in action)) {
+                const aimed = await aimNow(action)
+                if (!aimed.ok) return refused(aimed.why)
+              } else {
+                const focused = await inWorld(browseFocusScript(action.ref))
+                if (focused === 'moved') return refused('moved')
+                if (focused !== true) return failed()
+              }
+              if (!(await pageDebugger.command('Input.insertText', { text: action.text }))) return failed()
+              typed = action.text
               break
-            case 'select':
-              if ((await inWorld(browseSelectScript(action.ref, action.option))) !== true) return 'failed'
+            }
+            case 'select': {
+              const chosen = await inWorld(browseSelectScript(action.ref, action.option))
+              if (chosen === 'moved') return refused('moved')
+              if (chosen !== true) return failed()
               break
+            }
             case 'go': {
               // Only an address of the operated domain (the window's navigation rule refuses any other as well).
               const host = state.site?.host
               const url = host ? `https://${host}${action.path}` : ''
-              if (!host || sameDomainPath(url, host) === null) return 'failed'
-              if (!(await navigate(() => contents.loadURL(url), signal))) return 'failed'
+              if (!host || sameDomainPath(url, host) === null) return failed()
+              if (!(await navigate(() => contents.loadURL(url), signal))) return failed()
               break
             }
             case 'back':
-              if (!contents.navigationHistory.canGoBack()) return 'failed'
+              if (!contents.navigationHistory.canGoBack()) return failed()
               contents.navigationHistory.goBack()
               break
             case 'wait':
               await pause(Math.min(action.seconds, BROWSER_BROWSE_LIMITS.waitSeconds) * 1000, signal)
-              return browseReady() ? 'ok' : 'failed'
+              return browseReady() ? result({ outcome: 'ok' }) : failed()
           }
           await settle(signal, action.do === 'click' || action.do === 'back')
-          return browseReady() ? 'ok' : 'failed'
+          if (!browseReady()) return failed()
+          const done: BrowserActResult = { outcome: 'ok' }
+          // A click the page took after the first moments (a busy machine) is still told: read once more once it settled
+          // (the capture stays armed until a click comes; Codex review).
+          if (pressed === 'none') pressed = readBrowserPressed(await inWorld(BROWSE_CLICKED_SCRIPT))
+          if (pressed !== undefined) done.pressed = pressed
+          // No click told: whether the page wrote meanwhile (so the operator does not press again blindly).
+          if (pressed === 'none') done.pageWrite = pageWrites > writesBefore
+          // What the field holds once the page settled, against what was typed (a cut, an empty date field, a refusal).
+          if (typed !== null) done.typed = typedResult(typed, readBrowserTypedValue(await inWorld(BROWSE_TYPED_VALUE_SCRIPT)))
+          return result(done)
         },
         // After a write run's held writes were answered (the page goes on with the site's answer): the same settle.
         async settled(signal) {

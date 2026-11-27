@@ -60,7 +60,7 @@ const surfaceOf = (calls: string[]): BrowserBrowseSurface => ({
   async enter() { calls.push('enter'); return true },
   async leave() { calls.push('leave') },
   async snapshot() { return page() },
-  async act(a) { calls.push(`act ${a.do}`); return 'ok' },
+  async act(a) { calls.push(`act ${a.do}`); return { outcome: 'ok' } },
   pageClean: () => true,
   closed: () => false,
 })

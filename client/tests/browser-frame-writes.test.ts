@@ -560,13 +560,13 @@ function workWorld(over: Partial<WorkWorld> = {}) {
           const save = () => { void pageHooks.holdWrite(page).then(() => setTimeout(() => { void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.followUpMs)) }
           if (w.writeDelayMs !== undefined) setTimeout(save, w.writeDelayMs)
           else save()
-          return 'ok'
+          return { outcome: 'ok' }
         }
-        if (w.writeDelayMs !== undefined) { setTimeout(() => { void pageHooks.holdWrite(page) }, w.writeDelayMs); return 'ok' }
+        if (w.writeDelayMs !== undefined) { setTimeout(() => { void pageHooks.holdWrite(page) }, w.writeDelayMs); return { outcome: 'ok' } }
         const holding = hooks.holdWrite(page)
         if (!w.pressDoesNotWait) await holding
       }
-      return 'ok'
+      return { outcome: 'ok' }
     },
     async settled() { w.calls.push('settled') },
     pageClean: () => true,

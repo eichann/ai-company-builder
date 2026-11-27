@@ -14,7 +14,7 @@
 // The page's text, the plan's words, the values read and the site's answers go to the member's card only (kept here in
 // memory, per signed-in member); the consultation AI gets `workWordsForAi`. No Electron.
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
-import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
+import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseHistoryEntry, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
   topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
@@ -334,7 +334,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       const done = await o.win.act(action, o.cut.signal)
       acted = mayWrite
-      history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
+      history.push(browseHistoryEntry(action, done))
     }
     return { kind: 'end', reason: 'rounds', end: stopped('rounds') }
   }

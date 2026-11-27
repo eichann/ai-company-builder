@@ -58,6 +58,7 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   workPress: Record<string, unknown>
+  verify: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
   whenLoaded: boolean
@@ -546,7 +547,7 @@ test('pressing by position: a menu choice with no ref is pressed where the scree
   assert.equal(r.memoValue, 'こんにちは')
   assert.equal((r.pwPress as { acted: string }).acted, 'ok')
   assert.deepEqual(r.pwAim, { ok: false, why: 'password' })
-  assert.equal(r.pwTyped, 'failed')
+  assert.equal(r.pwTyped, 'refused')
   assert.equal(r.pwValue, '')
 })
 
@@ -607,4 +608,61 @@ test('a write run sends each page write once within the plan: the page\'s own co
   assert.equal(r.detachedLocked, true)
   const second = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report2').map(c => c.body.result)
   assert.deepEqual(second, ['unknown'])
+})
+
+test('what a press did (the real-window probe of 2026-11-27): a ref whose row was re-used, a ref under a banner, a button whose words changed and an unlisted line whose words changed are never pressed; a press says what it reached; a confirm and an alert are told, the confirm cancelled; typing says what the field holds', { skip }, () => {
+  const r = result.verify
+  assert.equal(r.error, undefined)
+  assert.equal(r.entered, true)
+  // 1. The list re-sorted after the snapshot: 山田's 保存 now sits in 佐藤's row — refused, nothing pressed (the probe wrote /p/item/33).
+  assert.deepEqual(r.recycle, { outcome: 'refused', why: 'moved' })
+  assert.deepEqual(r.recycleClicks, [])
+  // Read again, the press reaches the row it names and says what took the click.
+  assert.deepEqual(r.recycleAgain, { outcome: 'ok', pressed: { role: 'button', name: '保存', row: 'same' } })
+  assert.deepEqual(r.recycleAgainClicks, ['item-33'])
+  // Rows alike in their first 200 characters are compared whole; two 開く with no words around them cannot be told apart.
+  assert.deepEqual(r.long, { outcome: 'refused', why: 'moved' })
+  assert.deepEqual(r.twin, { outcome: 'refused', why: 'moved' })
+  assert.deepEqual(r.longClicks, [])
+  // The row changed between the check and the click (re-sorted on mousedown): the result says so.
+  assert.deepEqual(r.down, { outcome: 'ok', pressed: { role: 'button', name: '更新', row: 'changed' } })
+  assert.deepEqual(r.downClicks, ['down-丁'])
+  // The page stopped the click before the window's listener: unknown (never "nothing pressed"), and the page wrote.
+  assert.deepEqual(r.stopper, { outcome: 'ok', pressed: 'none', pageWrite: true })
+  // 2. A banner over the button after the snapshot: refused as covered — neither the button nor the banner pressed.
+  assert.deepEqual(r.covered, { outcome: 'refused', why: 'covered' })
+  assert.deepEqual(r.coveredClicks, [])
+  assert.deepEqual(r.saveAgain, { outcome: 'ok', pressed: { role: 'button', name: '保存する', row: 'same' } })
+  // 3. By position: another part of the page moved, the button at the point is the same one — still pressed (not stopped
+  // for every small movement)…
+  assert.deepEqual(r.stillAim, { ok: true, role: 'button', logLabel: '保存' })
+  assert.deepEqual(r.still, { outcome: 'ok', pressed: { role: 'button', name: '保存', row: 'same' } })
+  assert.deepEqual(r.stillClicks, ['save'])
+  // …but 保存 turned 削除 in the same box, and an unlisted line's words changed: refused, never pressed (the probe sent a delete).
+  assert.deepEqual(r.swapAim, { ok: false, why: 'moved' })
+  assert.deepEqual(r.swap, { outcome: 'refused', why: 'moved' })
+  assert.equal(r.plainListed, false, 'the line has no ref')
+  assert.deepEqual(r.plain, { outcome: 'refused', why: 'moved' })
+  assert.deepEqual(r.swapClicks, [])
+  // Another listed button moved under the point (the page moved): it did not hold that point in the snapshot — refused.
+  assert.deepEqual(r.colAim, { ok: false, why: 'moved' })
+  assert.deepEqual(r.col, { outcome: 'refused', why: 'moved' })
+  assert.deepEqual(r.colClicks, [])
+  // 4. A confirm: told with its text, and the page heard 「キャンセル」 (never yes); an alert told with its text.
+  assert.deepEqual(r.confirm, { outcome: 'ok', pressed: { role: 'button', name: '確認して保存', row: 'same' }, dialogs: [{ kind: 'confirm', text: '本当に保存しますか？' }] })
+  assert.deepEqual(r.alert, { outcome: 'ok', pressed: { role: 'button', name: '知らせる', row: 'same' }, dialogs: [{ kind: 'alert', text: '入力に誤りがあります' }] })
+  assert.deepEqual(r.dialogClicks, ['not-confirmed', 'alerted'])
+  // 5. Typing: a maxlength cut, a filter that reformatted, a date field and a refused input left empty, a contenteditable memo.
+  assert.deepEqual(r.code, { outcome: 'ok', typed: { result: 'value-cut', value: 'ABCDE' } })
+  assert.deepEqual(r.tel, { outcome: 'ok', typed: { result: 'value-changed', value: '0312345678' } })
+  assert.deepEqual(r.day, { outcome: 'ok', typed: { result: 'value-empty' } })
+  assert.deepEqual(r.amount, { outcome: 'ok', typed: { result: 'value-empty' } })
+  assert.equal(r.memoListed, 'textbox')
+  assert.deepEqual(r.memo, { outcome: 'ok', typed: { result: 'value-same' } })
+  assert.equal(r.memoShown, 'メモの本文', 'a contenteditable field shows what it holds')
+  assert.equal(r.pwReadBack, null, 'a password field\'s value is never read back')
+  assert.equal(r.codeReadBack, JSON.stringify({ value: 'ABCDE' }))
+  // The read page's own confirm (「消す」) is told too, and typing into its search field holds what was typed.
+  assert.deepEqual((result.browse.confirmResult as { dialogs?: unknown }).dialogs, [{ kind: 'confirm', text: '消しますか？' }])
+  assert.deepEqual((result.browse.typedResult as { typed?: unknown }).typed, { result: 'value-same' })
 })

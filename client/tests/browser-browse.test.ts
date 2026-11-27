@@ -23,8 +23,8 @@ import type { BrowserLinesAnswer, BrowserRunsApi } from '../electron/features/br
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import { browserInspectForTurn, browserBrowseDescription } from '../electron/browser-request/inspect-tool'
 import {
-  BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_WORDS as W, BROWSER_OPERATOR_BROWSE_PROMPT, browseLogStep, pageWithScreen, parseBrowseAnswer, readBrowserAim, readBrowserPageSnapshot,
-  type BrowserAim, type BrowserBrowseAction, type BrowserBrowseSurface, type BrowserPageSnapshot,
+  BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_WORDS as W, BROWSER_OPERATOR_BROWSE_PROMPT, browseLogStep, browserDialog, pageWithScreen, parseBrowseAnswer, readBrowserAim, readBrowserPageSnapshot, readBrowserPressPoint, typedResult,
+  type BrowserActResult, type BrowserAim, type BrowserBrowseAction, type BrowserBrowseSurface, type BrowserPageSnapshot,
 } from '../shared/browser-browse'
 import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from '../shared/browser-frame-writes'
 import { browserRunLogProblem } from '../../shared/core/browser-run-log'
@@ -95,7 +95,7 @@ function world(over: Partial<World> = {}) {
     async snapshot() { return page() },
     // The screen of this moment, with a marker no other channel could carry by chance (memory only, for the operator).
     async screenshot(p) { shots++; return { mediaType: 'image/jpeg', data: new TextEncoder().encode(`${SCREEN_MARKER}-${shots}-${p.elements.length}`) } },
-    async act(action) { w.acted.push(action); return 'ok' },
+    async act(action) { w.acted.push(action); return { outcome: 'ok' } },
     pageClean: () => true,
     closed: () => false,
   }
@@ -289,6 +289,50 @@ test('an operator that stops: the AI hears a fixed reason and its unread heading
   assert.ok(!words.includes(INJECTION))
 })
 
+test('what a press did reaches the operator\'s next step in fixed words (a refusal, the element the click reached and its row changed, a confirm cancelled, a field cut, a click unknown with the page\'s write), the page\'s words as outside text — never the consultation AI\'s words', async () => {
+  const results: BrowserActResult[] = [
+    { outcome: 'refused', why: 'covered' },
+    { outcome: 'ok', pressed: { role: 'button', name: `削除 ${INJECTION}`, row: 'changed' }, dialogs: [{ kind: 'confirm', text: `本当に消しますか ${PAGE_VALUE}` }] },
+    { outcome: 'ok', typed: { result: 'value-cut', value: '山田' } },
+    { outcome: 'ok', pressed: 'none', pageWrite: true },
+  ]
+  const { w, run, materials } = world({
+    answers: ['{"do":"click","ref":1}', '{"do":"click","ref":1}', '{"do":"type","ref":0,"text":"山田花子"}', '{"do":"click","ref":1}', done('まとめ')],
+  })
+  const surface = w.window!
+  w.window = { ...surface, async act(action) { w.acted.push(action); return results[w.acted.length - 1] } }
+  const r = await run()
+  const history = (materials[4] as { history: unknown[] }).history
+  assert.deepEqual(history, [
+    { do: 'click', ref: 1, outcome: 'refused', why: 'covered' },
+    { do: 'click', ref: 1, outcome: 'ok', pressed: { role: 'button', name: { outside: `削除 ${INJECTION}` }, row: 'row-changed' }, dialogs: [{ said: 'confirm-cancelled', text: { outside: `本当に消しますか ${PAGE_VALUE}` } }] },
+    { do: 'type', ref: 0, outcome: 'ok', typed: 'value-cut', value: { outside: '山田' } },
+    { do: 'click', ref: 1, outcome: 'ok', pressed: 'click-unknown', pageWrite: 'page-wrote' },
+  ])
+  const words = r.kind === 'card' ? r.words : ''
+  for (const s of [INJECTION, '本当に消しますか', '山田', 'confirm-cancelled', 'value-cut']) assert.ok(!words.includes(s), s)
+})
+
+test('typing is judged against what the field holds afterwards: only the very text is value-same; a cut, an empty field, a reformatted value and an unreadable one each say so', () => {
+  assert.deepEqual(typedResult('山田花子', '山田花子'), { result: 'value-same' })
+  // A contenteditable's trailing line break and a no-break space are not a difference.
+  assert.deepEqual(typedResult('a b', 'a b\n'), { result: 'value-same' })
+  assert.deepEqual(typedResult('ABCDEFGHIJ', 'ABCDE'), { result: 'value-cut', value: 'ABCDE' })
+  assert.deepEqual(typedResult('2026-12-03', ''), { result: 'value-empty' })
+  assert.deepEqual(typedResult('03-1234-5678', '0312345678'), { result: 'value-changed', value: '0312345678' })
+  assert.deepEqual(typedResult('x', null), { result: 'value-unknown' })
+})
+
+test('the window\'s answers about a press are read strictly: a point only with numbers, an unknown refusal is nothing; a beforeunload is never told as a dialog', () => {
+  assert.deepEqual(readBrowserPressPoint(JSON.stringify({ ok: true, x: 3, y: 4 })), { ok: true, x: 3, y: 4 })
+  assert.equal(readBrowserPressPoint(JSON.stringify({ ok: true, x: 'a', y: 4 })), null)
+  assert.deepEqual(readBrowserPressPoint(JSON.stringify({ ok: false, why: 'anything' })), { ok: false, why: 'nothing' })
+  assert.equal(readBrowserPressPoint('not json'), null)
+  assert.equal(browserDialog('beforeunload', 'x'), null)
+  assert.deepEqual(browserDialog('confirm', 'a\nb'), { kind: 'confirm', text: 'a b' })
+  assert.equal(browserDialog('alert', 'x'.repeat(500))!.text.length, 200)
+})
+
 test('the operator\'s notes carry what it read to its next fresh step, and to nobody else', async () => {
   const NOTE = `第1ページ: ${PAGE_VALUE}`
   const { run, materials } = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: NOTE }), done('まとめ')] })
@@ -365,7 +409,7 @@ test('one run per window at a time', async () => {
   let release!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   const { w, wiring } = world({ answers: ['{"do":"wait","seconds":1}', done('x')] })
-  const slow: BrowserBrowseSurface = { ...w.window!, async act(action) { w.acted.push(action); await held; return 'ok' } }
+  const slow: BrowserBrowseSurface = { ...w.window!, async act(action) { w.acted.push(action); await held; return { outcome: 'ok' } } }
   w.window = slow
   const input = { companyId: COMPANY, conversationId: null, site: HOST, task: 't', items: [], signal: new AbortController().signal }
   const first = wiring.browse(input)

@@ -11,7 +11,7 @@
 // `browseWindow`, the policy store's stop, the session's HTTP client, the context and the operator.
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import {
-  BROWSER_BROWSE_LIMITS as L, BROWSER_BROWSE_WORDS as W, aimedAction, browseCard, browseLogStep, browseMaterial, browseWordsForAi, pageWithScreen, parseBrowseAnswer,
+  BROWSER_BROWSE_LIMITS as L, BROWSER_BROWSE_WORDS as W, aimedAction, browseCard, browseHistoryEntry, browseLogStep, browseMaterial, browseWordsForAi, pageWithScreen, parseBrowseAnswer,
   type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot,
 } from '../../../shared/browser-browse'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
@@ -209,7 +209,7 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         if (steps.length < BROWSER_RUN_LIMITS.steps) steps.push(logStep)
         trail.step(logStep, parsed.reason)
         const done = await win.act(action, cut.signal)
-        history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
+        history.push(browseHistoryEntry(action, done))
       }
       outcome = 'stopped'
       reason = 'rounds'
