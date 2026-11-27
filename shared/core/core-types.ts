@@ -39,6 +39,11 @@
  * member started (`ai_on_request: [requested_by, assignee]` — no member setting: it ends nothing, is recorded and
  * undone with the generic undo; `aiAskedNeedsSetting`). Nobody else, never a run or a plugin step.
  *
+ * Version 17 (owner decision 2026-11-27 「AI の毎日の操作」, additive): `cancel` (アーカイブ) has
+ * `ai_on_request: [requested_by]` and `accept` (引き受ける) `ai_on_request: [assignee]` — the member's own AI, in a
+ * turn they started, on a task they asked for / are asked to do, with their setting on (records.md "The AI at the
+ * member's request"). An accept at their request counts as theirs (`acceptance.ts`).
+ *
  * Version 6 (core interfaces, owner decision 2026-11-01 night): the `customer`
  * link is gone — a task reaches its customer through its `bundle` — and a
  * task with no bundle may name its `counterpart` (相手) instead.
@@ -122,6 +127,8 @@
  * 確認待ち → handled, `who: [system]`: only the inbox, never a member nor their AI) — the mail left the
  * member's own mailbox inbox (archived, trashed, deleted there) and nothing was made from it; the
  * assignee may undo that entry (`UNDO_BY_ASSIGNEE`). inbox.md "Mail archived in the mailbox".
+ * Version 9 (owner decision 2026-11-27, additive): 「済んだ」 (`settle`) has `ai_on_request: [assignee]` — the
+ * member's own AI at their request (records.md "The AI at the member's request"); `settled_by` is still the member.
  *
  * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
  * of a thing that happened outside implements `outside_event` — `occurred_at`
@@ -177,7 +184,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 16
+version: 17
 implements: [request]
 storage: server
 fields:
@@ -222,12 +229,12 @@ actions:
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text, wait_until: date }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
   complete:       { label: 完了にする, from: [todo, in_progress, review, waiting, awaiting_acceptance, declined], to: done, who: [assignee, requested_by, reviewer], who_unless: { assignee: { when_done: check } }, ok_from: [assignee], notify: [requested_by, reviewer, ok_by], attach: [files], note: optional, decision: true, ai_on_request: [assignee] }
-  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
+  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true, ai_on_request: [requested_by] }
   reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, reviewer, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
   finish_prep:    { label: 用意ができた, from: [preparing], to: todo, who: [ai], args: { prep_summary: long_text }, links: [prepared], notify: assignee, hand_to: assignee }
   hand_over:      { label: 先に渡す, from: [preparing], to: todo, who: [ai], links: [prepared], notify: assignee, note: required, hand_to: assignee }
   take_over:      { label: 自分で進める, from: [preparing], to: todo, who: [assignee, requested_by], notify: assignee, note: optional, hand_to: assignee }
-  accept:         { label: 引き受ける, from: [awaiting_acceptance], to: todo, who: [assignee], notify: requested_by, note: optional, hand_to: assignee }
+  accept:         { label: 引き受ける, from: [awaiting_acceptance], to: todo, who: [assignee], notify: requested_by, note: optional, hand_to: assignee, ai_on_request: [assignee] }
   decline:        { label: 受けられない, from: [todo, in_progress, waiting, awaiting_acceptance], to: declined, who: [assignee], notify: requested_by, note: required, hand_to: requested_by }
   set_tags:       { label: タグを付ける, who: [requested_by, assignee, ai], args: { tags: tags } }
   set_wait_until: { label: 見込みの日時を決める, who: [requested_by, assignee, ai], args: { wait_until: date }, note: optional }
@@ -254,7 +261,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 8
+version: 9
 implements: [outside_event, request]
 storage: server
 fields:
@@ -289,7 +296,7 @@ actions:
   confirm:      { label: 自分の担当にする, from: [unsure], to: received, who: [assignee], note: optional, hand_to: assignee }
   drop:         { label: やることにしない（自分で決める）, from: [unsure], to: excluded, who: [assignee], note: optional }
   take_up:      { label: やることにする, from: [excluded], to: received, who: [assignee], note: optional, hand_to: assignee }
-  settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
+  settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional, ai_on_request: [assignee] }
   finish_reply_check: { label: 返事のあとを確かめた, from: [replied], to: handled, who: [ai], note: optional }
   check_myself: { label: 自分で確かめる, from: [replied], to: handled, who: [assignee], note: optional }
   left_inbox:   { label: 受信トレイから外れた（自動）, from: [received, unsure], to: handled, who: [system], note: optional }
@@ -681,13 +688,19 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 16
+export const TASK_VERSION = 17
 
 /**
  * The reply_request version every 返事のお願い is moved to at startup (the `TASK_VERSION` mechanism:
  * adapters/sqlite/records.ts `migrateCompanyCoreTypeVersion`). Version 6 only adds `ai_on_request`.
  */
 export const REPLY_REQUEST_VERSION = 6
+
+/**
+ * The interaction version every 来た連絡 is moved to at startup (the `TASK_VERSION` mechanism). Version 9 only adds
+ * `ai_on_request` to `settle` (records.md "The AI at the member's request").
+ */
+export const INTERACTION_VERSION = 9
 
 /**
  * The decision version every decision is moved to at startup (decision version 6, the

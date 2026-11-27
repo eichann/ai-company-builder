@@ -19,7 +19,7 @@
 /** Every route a record token reaches (the path under /api/records-ai). */
 export const AI_ROUTES = [
   'GET /types', 'GET /my-turn', 'GET /ai-turn', 'POST /query',
-  'GET /item/:recordId', 'GET /item/:recordId/history', 'POST /item', 'POST /item/:recordId/actions/:action',
+  'GET /item/:recordId', 'GET /item/:recordId/history', 'POST /item', 'POST /item/:recordId/actions/:action', 'POST /item/:recordId/undo',
   'POST /item/:recordId/file-links', 'POST /item/:recordId/file-links/remove',
   'POST /decisions',
   'GET /minutes/:recordId/text', 'POST /minutes/:recordId/bundle',

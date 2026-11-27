@@ -96,7 +96,7 @@ describe('the core types the inbox writes', () => {
       expect(change.breaking).toEqual([])
       expect(change.versionProblem).toBeNull()
     }
-    expect(def('interaction').version).toBe(8)
+    expect(def('interaction').version).toBeGreaterThanOrEqual(8)
     // 「受信トレイから外れた」 (owner decision 2026-11-05): the inbox's alone — no person, no AI.
     expect(def('interaction').actions.left_inbox).toMatchObject({ from: ['received', 'unsure'], to: 'handled', who: ['system'] })
     // 「返事のあとを確かめる」 (owner FB #19): the AI's turn after the member's own reply, which the assignee may also end.
@@ -104,6 +104,8 @@ describe('the core types the inbox writes', () => {
     expect(def('interaction').actions.check_myself).toMatchObject({ from: ['replied'], to: 'handled', who: ['assignee'] })
     // 「済んだ」 (owner FB #20): the assignee's alone, from 確認待ち, never the AI's.
     expect(def('interaction').actions.settle).toMatchObject({ from: ['unsure'], to: 'handled', who: ['assignee'] })
+    // Since interaction 9 only the assignee's own AI at their request too (records.md "The AI at the member's request").
+    expect(def('interaction').actions.settle.aiOnRequest).toEqual(['assignee'])
     expect(def('interaction').fields.channel.options).toContain('chat')
     expect(def('task').version).toBeGreaterThanOrEqual(8)
     expect(def('task').links.interaction.target).toBe('interaction')

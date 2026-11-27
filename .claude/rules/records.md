@@ -871,8 +871,9 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 16 since "Task version 16" (15: "The AI at the
-  member's request"); `REPLY_REQUEST_VERSION` 6 the same way for 返事のお願い): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 17 since "The daily operations" (16: "Task version
+  16", 15: "The AI at the member's request"); `REPLY_REQUEST_VERSION` 6 and `INTERACTION_VERSION` 9 the same way for
+  返事のお願い and 来た連絡): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
@@ -1103,7 +1104,7 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
 「頼んだ」 and 「引き受けた」 are told apart. Version 7 adds state `awaiting_acceptance`
 (引き受け待ち), field `accepted_by` (person: who accepted), link `meeting` (もとの会議: the meeting a
 task is homework of) and action `accept` (引き受ける: from `awaiting_acceptance` to `todo`, `who:
-[assignee]` — never the AI, never the requester —, `hand_to` the assignee, `notify` the requester);
+[assignee]` — never the requester; the AI only as the assignee's own at their request since task 17 —, `hand_to` the assignee, `notify` the requester);
 `decline`, `assign` and `cancel` also start from `awaiting_acceptance`. Additive: tasks indexed
 under version 6 keep it and never wait (`since: 7`).
 
@@ -1119,7 +1120,9 @@ under version 6 keep it and never wait (`since: 7`).
   state becomes `awaiting_acceptance` with `next_actor` = the assignee (their 「あなたの番」). The
   asker is the actor when the action changed the assignee (create: the creator — a
   `requested_by` in the body never makes it the assignee's own), else `requested_by`. The AI
-  acting for the assignee (their own AI's `finish_prep`) is **not** accepting. Entering
+  acting for the assignee (their own AI's `finish_prep`) is **not** accepting — except the assignee's own AI asked by
+  them in their turn, for an action that moves the state (引き受ける, 完了: `askedByMember`, `acceptance.ts`; task 17,
+  "The AI at the member's request"); a correction of words at their request does not accept. Entering
   `declined` forgets `accepted_by` (a `reopen` asks again); an `assign` from `declined` asks the
   new assignee like a new request (to `todo` or 引き受け待ち — before version 7 it stayed `declined`).
 - `accepted_by` is the engine's: a create naming it → 400 `BAD_VALUE`; no action has it as an
@@ -2200,7 +2203,33 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **Who** (`aiOnRequestField`, the one evaluation): the member's own AI only, on a record whose listed field holds
   **the member themself** (never a delegate, never someone `who` names otherwise — a task the member only requested is
   not theirs to have closed), and only while that field qualifies in `who` now (`actionWho`: a 「確かめてから」 task's
-  assignee does not complete it, so neither does their AI). Not `decline`, `drop`, `cancel` or any other action.
+  assignee does not complete it, so neither does their AI). Not `decline`, `drop` or any other action not listed.
+- **The daily operations** (task v17, interaction v9, owner decision 2026-11-27 「AI の毎日の操作」: the AI may act directly
+  when it is undoable, in the member's own turn, and recorded with undo; what widens who sees something or cannot be
+  undone stays the person's press): `cancel` (アーカイブ) `ai_on_request: [requested_by]` — only a task the member asked
+  for; `accept` (引き受ける) `[assignee]` — accepted as theirs (`accepted_by` = the member, their turn; "Acceptance");
+  interaction `settle` (「済んだ」) `[assignee]` — `settled_by` is still the member (`ACTOR_ARGS`; the AI's tool does not
+  take it). Each needs the member's setting like 完了 (`aiAskedNeedsSetting`: none is a correction of words; the off
+  sentence now names アーカイブ・済んだ・引き受ける). Never 受けられない, 取り込まない, 差し戻す, やり直す, 戻す, 部署に出す,
+  招待する, 非公開にする. **The 案件 link** needs nothing new: `task__set_bundle` (`who` lists `ai`) takes `links.bundle: null`
+  to take it off (the tool says so); linking keeps `WIDER_THAN_BUNDLE`, and nothing widens.
+- **「取り消して」** (`POST /api/records-ai/item/:recordId/undo { version, expectedVersion, note? }`, `aiActs`, tool
+  `records_undo` offered only in a marked turn): the generic undo (`undo.ts`) with the AI's actor and three more limits —
+  a token of a turn the member started, never a run's (else 403 `NOT_ALLOWED`, `AI_ASKED_REFUSALS.undoNotAsked`); **only
+  an entry whose actor is the member** (themselves or their AI — never an owner's / admin's reach over others, never the
+  inbox's entries the assignee may take back: `undoNotOwn`); at most `AI_UNDO_WINDOW_MS` (24 hours) old (409
+  `UNDO_TOO_OLD`). Every other rule of undo holds (`NOT_UNDOABLE` for a create, an undo or a `place.*` change,
+  `CHANGED_SINCE`, `WIDER_THAN_BUNDLE`). Counted toward the turn's `AI_ASKED_PER_TURN` with the write, the entry marked
+  `askedBy`. No member setting (it ends nothing of its own; it puts back what the member had). **Not on the turn's card**:
+  an undo cannot be undone (`NOT_UNDOABLE`), so its ［取り消す］ would only fail; the member does the change again on screen.
+  After a renewal of the turn's token (`memberTurn` false) the tool answers `ASKED_AFTER_RENEWAL` like the others.
+- Tests (daily operations): `server/tests/integration/ai-asked-close.test.ts` 「the daily operations…」 (アーカイブ only
+  the requester's own and only with the setting / never a plain token; 引き受ける accepted as the member's, never another
+  member's AI; 「取り消して」 own only, no admin reach, 24 hours, a plain token, the cap; 案件 off with null and undone),
+  `server/tests/unit/inbox.test.ts` 「her own AI in her own turn (interaction 9)」, `record-types.test.ts` (which actions
+  carry the key, additive versions), `client/tests/ai-asked.test.ts` (tools only in a marked turn, `settled_by` never
+  asked, the undo route, not on the card), `src/features/tasks/cardActions.test.ts` (経緯 「AI が（本人の頼みで）アーカイブ
+  しました」) — mutation-checked.
 - **The member's own setting** 「AI に完了を頼めるようにする」 (work switch `aiCompletes`, `shared/core/work-switches.ts`):
   **the member's alone** — `MEMBER_ONLY_POLICY` (always allowed, starts off), not in the task settings, so no company or
   admin setting reaches it; `PUT /me/work-switches { switch: 'aiCompletes', on }` (their own only). The app shows it in
@@ -2241,7 +2270,7 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   sent by it.
 - **Outside text in a member's turn** (owner decision asked, safe side recorded): in such a conversation the AI also reads
   outside text (mail, minutes, the web), and the server cannot tell an instruction planted there from the member's
-  request. What limits it: only the member's own records (assignee; for 件名・目的 also the requester), only these actions (three that end, two that correct), at most 20 a turn, each on
+  request. What limits it: only the member's own records (assignee; for 件名・目的 and アーカイブ also the requester), only these actions (those that end or accept, two that correct, the undo of their own recent change), at most 20 a turn, each on
   the card with ［取り消す］ and in 経緯 with `askedBy` and the conversation; a turn the app started (`appSent`) never counts.
 - **The chat**: in a marked turn those tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
   `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
@@ -2368,7 +2397,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
   still be a member; while the company's whole AI is stopped (`agent-stop.md`) every token gets
   403 `ACB_STOPPED`, and while the whole AI is stopped for the token's member a run-bound token
   gets 503 `AI_STOPPED` (`agent-stop.md` "Runs with no person present").
-- No undo for the AI (people undo).
+- The AI undoes only the member's own recent change at their request ("The AI at the member's request"); every other
+  undo is a person's.
 - `memberTurn` ("The AI at the member's request"): a token the app asks for a turn the member started; kept only
   for an `act` token not bound to a run.
 - Tests: `server/tests/integration/record-tokens.test.ts` (a token call is recorded as ai and
@@ -2440,9 +2470,9 @@ complete and idempotent; the immutability trigger — mutation-checked).
   `attachments` yet); the app assigning ids to new record files and repairing duplicates.
 - **What has no AI tool** (gap report 2026-11-27 Bug A #2: asked to do something it has no tool for,
   the AI said 「つながっていません」): `RECORDS_INSTRUCTIONS` lists the screen-only operations with
-  where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, 取り消す, 引き受ける /
-  受けられない, アーカイブ, 終わったら, 差し戻す, つながりを外す, a 案件's なんのため・期限・責任者・終える,
-  来た連絡's 済んだ / 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
+  where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, someone else's or an older change's
+  取り消す, 受けられない, アーカイブから戻す / やり直す, 終わったら, 差し戻す, つながりを外す (other than the 案件), a 案件's
+  なんのため・期限・責任者・終える, 来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
   where to press — never 「つながっていません」 — also for anything else it has no tool for. **A row
   leaves the list in the PR that gives the AI a tool for it.** Test: `records-tools.test.ts` 「an
   operation without an AI tool…」.

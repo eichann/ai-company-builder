@@ -132,7 +132,7 @@ export function writeTitle(records: RecordRepository, recordId: string, title: s
 }
 
 /** The per-turn cap reached inside the write's transaction: thrown to roll the write back (records.md "The AI at the member's request"). */
-class AskedLimitReached extends Error {}
+export class AskedLimitReached extends Error {}
 
 /** An action called from where its type's `via` does not list (records.md "Where an action may be called from"). */
 export const NOT_VIA = { error: 'この操作はここからはできません。本体の画面から行ってください', code: 'NOT_VIA' } as const
@@ -459,6 +459,8 @@ export function acting(ctx: EngineContext) {
           state: nextState, fromState: current.state, fields: nextFields,
           assigneeChanged: typeof args.assignee === 'string' && args.assignee !== (current.fields.assignee ?? null),
           memberId: member.userId, actorKind: actor.kind, onBehalfOf,
+          // The member's own AI at their request moving the state (引き受ける, 完了) acts as them; a correction of words does not accept.
+          askedByMember: askedTurn !== null && action.to !== null,
           originIds: originChange ? originChange.targets : records.linksFrom([row.id]).filter(l => l.name === acceptance.origin && l.targetId !== null).map(l => l.targetId as string),
           records,
         })

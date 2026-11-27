@@ -27,6 +27,11 @@ export interface AcceptanceInput {
   /** The member acting (the person, or the person whose AI it is). */
   memberId: string
   actorKind: 'human' | 'ai'
+  /**
+   * The member's own AI acting at their request (`ai_on_request`, records.md "The AI at the member's request"): it
+   * counts as the member's own act — 「引き受けて」 asked of their AI accepts, as their own press does. Never a delegate.
+   */
+  askedByMember?: boolean
   /** The absentee the member acts for in this action (their delegate), if any. */
   onBehalfOf: string | null
   /** The record ids of the record's origin link after the change (the meeting it is homework of). */
@@ -52,7 +57,7 @@ export function applyAcceptance(deps: Pick<RecordEngineDeps, 'autoAccepts'>, a: 
   const assignee = str(f[t.assignee])
   // 完了 straight from 引き受け待ち by the assignee (or their delegate): 「引き受けた」 is recorded with it.
   if (a.fromState === t.state && t.finishes.includes(state)) {
-    if (assignee !== null && a.actorKind === 'human' && (a.memberId === assignee || a.onBehalfOf === assignee)) f[t.acceptedBy] = assignee
+    if (assignee !== null && ((a.actorKind === 'human' && (a.memberId === assignee || a.onBehalfOf === assignee)) || (a.askedByMember === true && a.memberId === assignee))) f[t.acceptedBy] = assignee
     return state
   }
   if (state !== t.state && !t.working.includes(state)) return state
@@ -65,8 +70,10 @@ export function applyAcceptance(deps: Pick<RecordEngineDeps, 'autoAccepts'>, a: 
   // Owner-only: only its owner is ever in it — accepted, whatever the settings.
   if (a.personal || str(f[t.acceptedBy]) === assignee) return accepted()
   // A person acting as the assignee (themselves, or their delegate during the absence) accepts by
-  // doing so — 「引き受ける」 itself. Never the AI: it cannot accept for a person.
+  // doing so — 「引き受ける」 itself. Never the AI on its own: it cannot accept for a person — only the member's own AI
+  // asked by them in their turn (`askedByMember`), as their own act.
   if (a.actorKind === 'human' && (a.memberId === assignee || a.onBehalfOf === assignee)) return accepted()
+  if (a.askedByMember === true && a.memberId === assignee) return accepted()
   const asker = a.assigneeChanged ? a.memberId : (str(f[t.requester]) ?? a.memberId)
   if (asker === assignee) return accepted()
   const attended = () => {

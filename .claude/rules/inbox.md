@@ -429,6 +429,10 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   the server refuses it (403 `NOT_ALLOWED` 「この操作をする権限がありません」), nothing changes. Its entry and `archived_there` are undoable by the
   record's assignee (`UNDO_BY_ASSIGNEE`). Tests: `intake-core.test.ts` (8 additive over 7:
   `INTERACTION_V7_TEXT`), `inbox-archive.test.ts`.
+- `interaction` v9 (additive over 8; owner decision 2026-11-27 「AI の毎日の操作」): 「済んだ」 (`settle`) has
+  `ai_on_request: [assignee]` — the member's own AI in their turn, with their setting on, `settled_by` still the member
+  (`records.md` "The AI at the member's request"); never `drop`. `INTERACTION_VERSION` moves the records at startup.
+  Tests: `intake-core.test.ts`, `record-types.test.ts`, `inbox.test.ts` 「her own AI in her own turn (interaction 9)」.
 - `reply_request` v1 (返事のお願い): implements `request`, `prepared`, `outside_event`; states
   preparing → open → waiting_reply ↔ checking → closed / dropped. v2 (B4, additive): the
   assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here

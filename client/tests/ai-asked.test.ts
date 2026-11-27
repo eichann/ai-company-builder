@@ -25,7 +25,7 @@ import { latestMemberText } from '../shared/agents/second-opinion'
 
 const TOKEN = 'acb_rec_co.' + 'b'.repeat(64)
 const TASK = 'task-0123456789abcdef'
-const types = coreTypeDefinitions().filter(d => d.name === 'task' || d.name === 'reply_request')
+const types = coreTypeDefinitions().filter(d => d.name === 'task' || d.name === 'reply_request' || d.name === 'interaction')
 
 async function turn(opts: { memberTurn?: boolean; serverMarks?: boolean; bound?: boolean; askedBy?: string | null } = {}) {
   const seen: Array<{ url: string; body: unknown }> = []
@@ -84,11 +84,29 @@ test('the asked-only description and instructions only for a marked token; other
   assert.doesNotMatch(spec(marked.tools, 'task__decline').description, /はっきり頼んだ/)
   assert.ok(!spec(marked.tools, 'reply_request__drop').askedCard)
   assert.match(marked.tools.instructions, /メンバーに頼まれたときだけ使える操作/)
+  // Task 17 / interaction 9 (owner decision 2026-11-27): アーカイブ, 引き受ける, 済んだ and 「取り消して」 in a marked turn only.
+  for (const name of ['task__cancel', 'task__accept', 'interaction__settle']) assert.ok(spec(marked.tools, name).askedCard, name)
+  assert.match(spec(marked.tools, 'task__cancel').description, /「アーカイブ」と呼ぶ/)
+  assert.ok(spec(marked.tools, 'records_undo'))
+  // 済んだ's settled_by is the server's (the person acting): never asked of the AI.
+  assert.equal(spec(marked.tools, 'interaction__settle').schema.safeParse({ id: TASK, expectedVersion: 1 }).success, true)
+  assert.equal(spec(marked.tools, 'interaction__settle').schema.safeParse({ id: TASK, expectedVersion: 1, settled_by: 'u-x' }).success, false)
+  assert.ok(!spec(marked.tools, 'task__decline').askedCard)
   for (const t of [await turn(), await turn({ memberTurn: true, bound: true })]) {
     assert.match(spec(t.tools, 'task__complete').description, /AI からはできない/)
     assert.ok(!spec(t.tools, 'task__complete').askedCard)
+    assert.ok(!spec(t.tools, 'task__cancel').askedCard)
+    assert.ok(!t.tools.specs.some(s => s.name === 'records_undo'), 'no undo outside a member\'s turn')
     assert.doesNotMatch(t.tools.instructions, /メンバーに頼まれたときだけ/)
   }
+})
+
+test('「取り消して」 calls the AI\'s undo route with the entry\'s version; it never joins the card (an undo is itself the taking back)', async () => {
+  const t = await turn({ memberTurn: true })
+  await t.tools.execute('records_undo', { id: TASK, version: 2, expectedVersion: 3 })
+  const sent = t.seen.find(s => s.url.endsWith(`/item/${TASK}/undo`))
+  assert.deepEqual(sent?.body, { version: 2, expectedVersion: 3 })
+  assert.equal(t.cards.length, 0)
 })
 
 test('what was done becomes one card per turn with every item, only when the server says it was at the member\'s request', async () => {

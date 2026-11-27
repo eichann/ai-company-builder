@@ -482,6 +482,29 @@ describe('「済んだ」 on a 確認待ち message (interaction 6, the assignee
     expect(fieldsOf(id).settled_by).toBe('u-alice')
   })
 
+  it('her own AI in her own turn (interaction 9): 「済んだ」 only with her setting on, marked as hers and as asked by her; never a run\'s, never for bob; her ［取り消す］ brings it back', async () => {
+    const { id } = await unsure()
+    const turnToken = (u: string, tok: string, run = false) => {
+      handle().records.insertAiToken({ id: tok, userId: u, tokenHash: `h-${tok}`, scope: 'act', agent: 'claude-code', conversationId: 'conv-ask', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true, ...(run ? { runId: 'run-1', runGeneration: 1 } : {}) })
+      return { id: u, kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', ...(run ? { runId: 'run-1' } : {}), askedTurn: { tokenId: tok } }
+    }
+    const asked = turnToken('u-alice', 'tok-settle')
+    expect(await engine.act(m('u-alice'), asked, id, 'settle', { expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'AI_ASK_OFF' } })
+    askedOn.add('u-alice')
+    expect(await engine.act(m('u-alice'), turnToken('u-alice', 'tok-settle-run', true), id, 'settle', { expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    askedOn.add('u-bob')
+    expect((await engine.act(m('u-bob'), turnToken('u-bob', 'tok-settle-bob'), id, 'settle', { expectedVersion: 2 })).ok).toBe(false)
+    // Never 「取り込まない」 (drop): only 「済んだ」 is open to her AI.
+    expect(await engine.act(m('u-alice'), asked, id, 'drop', { expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(stateOf(id)).toMatchObject({ state: 'unsure', version: 2 })
+    ok(await engine.act(m('u-alice'), asked, id, 'settle', { expectedVersion: 2 }))
+    expect(stateOf(id).state).toBe('handled')
+    expect(fieldsOf(id).settled_by).toBe('u-alice')
+    expect(handle().records.ledger(id).at(-1)).toMatchObject({ action: 'settle', actorId: 'u-alice', actorKind: 'ai', askedBy: 'u-alice' })
+    ok(await engine.undo(m('u-alice'), person('u-alice'), id, { version: 3, expectedVersion: 3 }))
+    expect(stateOf(id).state).toBe('unsure')
+  })
+
   it('取り消す right after brings it back to 確認待ち; the thread going on takes the mark away (the AI judges again)', async () => {
     const { first, id } = await unsure()
     ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2 }))

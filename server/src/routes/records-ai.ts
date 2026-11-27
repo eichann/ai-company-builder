@@ -46,7 +46,9 @@
  * it needs an `Idempotency-Key` header (keyedWrite): the same key never repeats
  * the effect, and an answer that was lost leaves the run waiting for a person.
  *
- * No undo, no 「もう一度作る」 and nothing it can approve, send back or withdraw for
+ * Undo only of the member's own recent change in a turn they started (records.md "The AI at the member's request"):
+ *   POST /item/:recordId/undo             (act) { version, expectedVersion, note? }
+ * No 「もう一度作る」 and nothing it can approve, send back or withdraw for
  * the AI: a person does those (their app's screens; routes/approvals.ts, session
  * only). A create is never re-sent.
  */
@@ -141,6 +143,12 @@ recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
 recordsAiRoute.post('/item/:recordId/actions/:action', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), c.var.body))
+})
+
+// The member's own recent change taken back at their request (the engine decides: a member's turn, their own entry, recent).
+recordsAiRoute.post('/item/:recordId/undo', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, recordEngine.undo(h.member, aiActor(h), c.req.param('recordId'), c.var.body))
 })
 
 recordsAiRoute.post('/item/:recordId/file-links', aiActs, serviceBody, async (c) => {

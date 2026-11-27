@@ -11,6 +11,10 @@
  *   to an execution run (「AI の番」, a plugin step's, a job's — the server drops the mark) are refused;
  * - at most `AI_ASKED_PER_TURN` a token, counted with the write; the next turn's token starts again;
  * - the ledger keeps who asked and the conversation; ［取り消す］ (the member's generic undo) works.
+ * - 「AI の毎日の操作」 (task 17, owner decision 2026-11-27): アーカイブ only of a task the member asked for, 引き受ける only
+ *   of one asked of them — accepted as theirs —, each with their setting on; 「取り消して」 only of the member's own change
+ *   (themselves or their AI), at most 24 hours old, in their own turn, counted, never an admin's reach over others; the
+ *   案件 link taken off with set_bundle, never wider.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest'
 
@@ -115,7 +119,7 @@ describe('asked in the member\'s own turn', () => {
     expect(await record(id)).toMatchObject({ state: 'todo', version: 3 })
   })
 
-  it('never another member\'s record, nor one the member only requested, nor a 「確かめてから」 task; never decline or cancel', async () => {
+  it('never another member\'s record, nor one the member only requested, nor a 「確かめてから」 task; never decline', async () => {
     const { token: t } = await token('u-bob')
     const carols = await task('u-carol', 'キャロルの仕事', { assignee: 'u-carol' })
     expect(await complete(t, carols, 1)).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
@@ -127,7 +131,6 @@ describe('asked in the member\'s own turn', () => {
     expect(await complete(t, check, 1)).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
     const own = await task('u-bob', '自分の', { assignee: 'u-bob' })
     expect((await ai(t, 'POST', `/item/${own}/actions/decline`, { expectedVersion: 1, note: 'できない' })).status).toBe(403)
-    expect((await ai(t, 'POST', `/item/${own}/actions/cancel`, { expectedVersion: 1, note: 'やめる' })).status).toBe(403)
     for (const id of [carols, check, own]) expect((await record(id)).state).toBe('todo')
   })
 })
@@ -174,5 +177,91 @@ describe('the per-turn cap', () => {
     const { token: t } = await token('u-bob')
     await setOwn('u-bob', false)
     expect(await complete(t, id, 1)).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
+  })
+})
+
+describe('the daily operations at the member\'s request (task 17, owner decision 2026-11-27)', () => {
+  it('アーカイブ: only a task the member asked for, only with their setting on; marked as asked by them, undone by them', async () => {
+    await setOwn('u-bob', false)
+    const own = await task('u-bob', '自分で頼んだ', { assignee: 'u-bob' })
+    const { token: t } = await token('u-bob')
+    expect(await ai(t, 'POST', `/item/${own}/actions/cancel`, { expectedVersion: 1, note: 'もう要らない' })).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
+    await setOwn('u-bob', true)
+    // Carol asked it of bob: archiving is hers (the one who asked), never bob's AI.
+    const asked = await task('u-carol', 'キャロルが頼んだ', { assignee: 'u-bob' })
+    const v = (await record(asked)).version
+    expect(await ai(t, 'POST', `/item/${asked}/actions/cancel`, { expectedVersion: v, note: 'やめる' })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    // A plain token (no member's turn) never.
+    const plain = await token('u-bob', {})
+    expect(await ai(plain.token, 'POST', `/item/${own}/actions/cancel`, { expectedVersion: 1, note: 'やめる' })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    expect((await ai(t, 'POST', `/item/${own}/actions/cancel`, { expectedVersion: 1, note: 'もう要らない' })).status).toBe(200)
+    expect((await record(own)).state).toBe('cancelled')
+    expect((await history('u-bob', own)).at(-1)).toMatchObject({ action: 'cancel', actorKind: 'ai', askedBy: 'u-bob' })
+    expect((await session('u-bob', 'POST', `/records/item/${own}/undo`, { version: 2, expectedVersion: 2 })).status).toBe(200)
+    expect((await record(own)).state).toBe('todo')
+  })
+
+  it('引き受ける: only a request asked of the member, accepted as theirs (引き受けた人 = the member, their turn); never someone else\'s', async () => {
+    await setOwn('u-bob', true)
+    const asked = await task('u-carol', 'ボブにお願い', { assignee: 'u-bob' })
+    expect((await record(asked)).state).toBe('awaiting_acceptance')
+    const { token: t } = await token('u-bob')
+    // A correction of words at his request never accepts on his behalf (only an action that moves the state does).
+    expect((await ai(t, 'POST', `/item/${asked}/actions/retitle`, { expectedVersion: (await record(asked)).version, args: { title: 'ボブへのお願い' } })).status).toBe(200)
+    expect((await record(asked)).state).toBe('awaiting_acceptance')
+    const v = (await record(asked)).version
+    // Carol's AI cannot accept what is asked of bob.
+    await setOwn('u-carol', true)
+    const carols = await token('u-carol')
+    expect(await ai(carols.token, 'POST', `/item/${asked}/actions/accept`, { expectedVersion: v })).toMatchObject({ status: 403 })
+    expect((await ai(t, 'POST', `/item/${asked}/actions/accept`, { expectedVersion: v })).status).toBe(200)
+    const after = (await session('u-bob', 'GET', `/records/item/${asked}`)).body.data.record
+    expect(after.state).toBe('todo')
+    expect(after.fields).toMatchObject({ accepted_by: 'u-bob', next_actor: 'u-bob' })
+    expect((await history('u-bob', asked)).at(-1)).toMatchObject({ action: 'accept', actorKind: 'ai', askedBy: 'u-bob' })
+  })
+
+  it('「取り消して」: the member\'s own recent change (themselves or their AI), in their own turn, counted and marked; never another\'s, never older than 24 hours, never a run\'s or a plain token', async () => {
+    const id = await task('u-bob', '期限を変えた', { assignee: 'u-bob', due: '2026-12-01' })
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/set_due`, { expectedVersion: 1, args: { due: '2026-12-05' } })).status).toBe(200)
+    const { token: t } = await token('u-bob')
+    const plain = await token('u-bob', {})
+    expect(await ai(plain.token, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    // Carol's change on bob's task: never bob's AI (an owner's AI neither: no admin reach through the AI).
+    expect((await session('u-carol', 'POST', `/records/item/${id}/actions/set_tags`, { expectedVersion: 2, args: { tags: ['急ぎ'] } })).status).toBe(403)
+    const owners = await token('u-owner')
+    expect(await ai(owners.token, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    const done = await ai(t, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })
+    expect(done.status).toBe(200)
+    expect((await session('u-bob', 'GET', `/records/item/${id}`)).body.data.record.fields.due).toBe('2026-12-01')
+    expect((await history('u-bob', id)).at(-1)).toMatchObject({ action: 'undo', actorKind: 'ai', askedBy: 'u-bob', reversesVersion: 2 })
+    // Older than 24 hours: refused, nothing written.
+    const old = await task('u-bob', '前の日の変更', { assignee: 'u-bob' })
+    expect((await session('u-bob', 'POST', `/records/item/${old}/actions/set_due`, { expectedVersion: 1, args: { due: '2026-12-09' } })).status).toBe(200)
+    db.prepare("UPDATE record_ledger SET at = '2020-01-01T00:00:00.000Z' WHERE company_id = ? AND record_id = ? AND version = 2").run(CO, old)
+    expect(await ai(t, 'POST', `/item/${old}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 409, body: { code: 'UNDO_TOO_OLD' } })
+    expect((await record(old)).version).toBe(2)
+  })
+
+  it('「取り消して」 counts toward the turn\'s cap: past it, refused and nothing written', async () => {
+    const { token: t, tokenId } = await token('u-bob')
+    db.prepare('UPDATE record_ai_tokens SET asked_closes = ? WHERE company_id = ? AND id = ?').run(AI_ASKED_PER_TURN, CO, tokenId)
+    const id = await task('u-bob', '上限', { assignee: 'u-bob' })
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/set_due`, { expectedVersion: 1, args: { due: '2026-12-09' } })).status).toBe(200)
+    expect(await ai(t, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 409, body: { code: 'AI_ASK_LIMIT' } })
+    expect((await record(id)).version).toBe(2)
+  })
+
+  it('案件 taken off with set_bundle (links.bundle null), undone by the member; linking never makes it wider', async () => {
+    const project = await session('u-bob', 'POST', '/records/item', { type: 'project', title: 'ボブの案件', fields: { owner: 'u-bob' }, place: 'company' })
+    expect(project.status).toBe(201)
+    const pid = project.body.data.record.id
+    const id = await task('u-bob', '案件のやること', { assignee: 'u-bob' })
+    const { token: t } = await token('u-bob')
+    expect((await ai(t, 'POST', `/item/${id}/actions/set_bundle`, { expectedVersion: 1, links: { bundle: pid } })).status).toBe(200)
+    expect((await ai(t, 'POST', `/item/${id}/actions/set_bundle`, { expectedVersion: 2, links: { bundle: null } })).status).toBe(200)
+    const links = (await session('u-bob', 'GET', `/records/item/${id}`)).body.data.links as Json[]
+    expect(links.some(l => l.name === 'bundle')).toBe(false)
+    expect((await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 3, expectedVersion: 3 })).status).toBe(200)
   })
 })

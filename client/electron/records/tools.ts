@@ -23,7 +23,7 @@
  * with 「変更前の値を書き戻す」 for the person.
  */
 import { z, type ZodTypeAny } from 'zod'
-import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
+import { argDefaultOf, isActorArg, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { DEFAULT_FEATURES, featuresFrom, toolAllowed, typeIsViewOnly, type CompanyFeatures } from '../../../shared/core/features'
 import { DATE_VALUE_RE, isSystemOnly, RECORD_TITLE_ARG, RECORD_TITLE_MAX, setsRecordTitle, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import { CALL_CURSOR_RE } from '../../../shared/core/plugin-call-answer'
@@ -113,6 +113,8 @@ export interface RecordToolSpec extends RecordToolDescriptor {
   bundleChoice?: boolean
   /** An action the AI runs at the member's request (`ai_on_request`): what it did joins the turn's card with ［取り消す］. */
   askedCard?: { label: string }
+  /** Only in a turn the member started (`records_undo`): after a renewal of the turn's token, the fixed words instead. */
+  askedTurnOnly?: true
 }
 
 const id = z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/)
@@ -517,6 +519,26 @@ export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types
 }
 
 /**
+ * 「さっきの変更を取り消して」: the member's own recent change (themselves or their AI, at most a day old), in a turn they
+ * started; the server decides each (records.md "The AI at the member's request"). Not on the turn's card: an undo is
+ * itself the taking back (the member can do the change again from the screen).
+ */
+const UNDO_TOOL: RecordToolSpec = {
+  name: 'records_undo', readOnly: false, askedTurnOnly: true,
+  schema: z.object({
+    id,
+    version: z.number().int().min(1).describe('取り消す変更の version（records_history の各行の version） / the version of the entry to take back (from records_history)'),
+    expectedVersion: z.number().int().min(0).describe('records_get で見たいまの version / the record\'s version now'),
+    note: z.string().max(2000).optional(),
+  }).strict(),
+  display: recordToolDisplay('records_undo'),
+  description: 'メンバー本人の最近の変更（本人か、本人の AI がしたもの。24時間以内）を1つ取り消す。メンバーがこの会話ではっきり「取り消して」と頼んだときだけ使う（自分の判断では使わない）。' +
+    '先に records_history で、どの変更か（version）を確かめ、迷うときはメンバーに見せて確かめる。ほかの人の変更・古い変更・作ったこと・見せる範囲の変更は取り消せない（断られたら error の文をそのまま伝える）。\n' +
+    'Take back one recent change of the member\'s own (by them or their AI, within 24 hours), only when they explicitly asked in this conversation. Find the entry\'s version with records_history first; relay a refusal\'s error exactly.',
+  request: input => ({ method: 'POST', path: `/item/${enc(String(input.id))}/undo`, body: { version: input.version, expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}) } }),
+}
+
+/**
  * The state-changing tools for these types (one per action, and creating server-only records).
  * `features` (the company's 「使う機能」, records.md "Features on and off"; default: all on): a type
  * whose feature is off is 「見るだけ」 — nothing of it is created and none of its actions is offered
@@ -576,6 +598,8 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         note: a.note === 'required' ? z.string().min(1).max(2000) : z.string().max(2000).optional(),
       }
       for (const [arg, kind] of Object.entries(a.args)) {
+        // The person acting (ACTOR_ARGS, interaction 6's settled_by): the server fills it with the member — never asked of the AI.
+        if (isActorArg(t.name, name, arg)) continue
         // A core default (task version 12: 返事待ち's 見込み): the AI should say it; left out, the server fills it.
         const byDefault = argDefaultOf(t.name, name, arg)
         shape[arg] = byDefault
@@ -597,6 +621,12 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       // `ai_on_request` in a turn the member started (records.md "The AI at the member's request"): only when they asked.
       const asked = place.askedTurn === true && (a.aiOnRequest?.length ?? 0) > 0 && !a.who.includes('ai')
       const askedWhose = (a.aiOnRequest ?? []).map(f => t.fields[f]?.label ?? f).join('か')
+      // What the app calls it (task: 中止 is 「アーカイブ」 on every screen, tasks-ui.md "The 「…」"); 案件 taken off with null.
+      const appWords = t.name === 'task' && name === 'cancel'
+        ? '画面では「アーカイブ」と呼ぶ（一覧から外すだけで、消さない。［戻す］で元に戻せる）。メンバーにも「アーカイブ」と言う。'
+        : (a.links ?? []).some(l => t.links[l]?.cardinality === 'one')
+          ? `つながりを外すときは links の${(a.links ?? []).filter(l => t.links[l]?.cardinality === 'one').map(l => `「${l}」`).join('')}に null を渡す（相手の記録は消えない。台帳に残り、本人が取り消せる）。`
+          : ''
       const aiNote = a.who.includes('ai') ? '' : asked
         ? ` メンバー本人が${askedWhose}の記録で、メンバーがこの会話ではっきり頼んだときだけ使える（自分の判断では使わない）。断られたら error の文をそのまま伝える。` +
           ' Only on the member\'s own record and only when they explicitly asked in this conversation; relay a refusal\'s error sentence exactly.'
@@ -613,12 +643,13 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       specs.push({
         name: tool, readOnly: false, schema: z.object(shape).strict(),
         ...(ALWAYS_LOADED_ACTION_TYPES.includes(t.name) ? {} : { onDemand: true }),
-        ...(asked ? { askedCard: { label: a.label } } : {}),
+        // The card's words: a task's 中止 is 「アーカイブ」 in the app.
+        ...(asked ? { askedCard: { label: t.name === 'task' && name === 'cancel' ? 'アーカイブする' : a.label } } : {}),
         display: actionToolDisplay(a.label),
-        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ? shownState(a.to) : '状態はそのまま'}${t.stateLabels ? '。メンバーには状態を表示名で言う / say a state by its label to the member' : ''}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
+        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ? shownState(a.to) : '状態はそのまま'}${t.stateLabels ? '。メンバーには状態を表示名で言う / say a state by its label to the member' : ''}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${appWords}${aiNote}\n` +
           `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}${defaulted.length > 0 ? ` Give ${defaulted.join(', ')} too (when it passes, the task returns to its assignee for a follow-up).` : ''}`,
         request: input => {
-          const args = Object.fromEntries(Object.keys(a.args).filter(k => input[k] !== undefined).map(k => [k, input[k]]))
+          const args = Object.fromEntries(Object.keys(a.args).filter(k => input[k] !== undefined && !isActorArg(t.name, name, k)).map(k => [k, input[k]]))
           return {
             method: 'POST', path: `/item/${enc(String(input.id))}/actions/${enc(name)}`,
             body: { expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}), args, ...(input.links !== undefined ? { links: input.links } : {}) },
@@ -627,6 +658,8 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       })
     }
   }
+  // 「取り消して」 (records.md "The AI at the member's request"): only in a turn the member started.
+  if (place.askedTurn === true) specs.push(UNDO_TOOL)
   // Linking files later: types with a `file` link whose definition lets the AI act (the server checks again).
   const linkable = live.filter(t => !SERVICE_STATE_TYPES.includes(t.name) && Object.values(t.links).some(l => l.target === 'file')
     && Object.values(t.actions).some(a => a.who.includes('ai')))
@@ -859,14 +892,14 @@ const FILE_MOVES_INSTRUCTIONS = `つながったファイルを動かすとき�
  */
 export const SCREEN_ONLY_OPERATIONS: ReadonlyArray<{ what: string; where: string }> = [
   { what: '見られる人を広げる（部署に出す・〇〇の人に見せる）', where: 'やることのカードの［部署に出す］／［〇〇の人に見せる］' },
-  { what: '操作を取り消す', where: '操作のすぐあとにカードに出る［取り消す］' },
-  { what: 'やることを引き受ける・受けられないと返す', where: 'やることのカードの［引き受ける］、「…」の［受けられない］' },
-  { what: 'やることをアーカイブする（中止）・アーカイブから戻す・やり直す', where: 'やることのカードの「…」の［アーカイブ］、アーカイブ済みのものは［戻す］' },
+  { what: 'ほかの人の変更や、24時間より前の変更を取り消す', where: '操作のすぐあとにカードに出る［取り消す］（自分の変更か管理者だけ）' },
+  { what: 'やることを受けられないと返す', where: 'やることのカードの「…」の［受けられない］' },
+  { what: 'アーカイブから戻す・やり直す', where: 'アーカイブ済みのやることのカードの［戻す］、完了したものは「…」の［やり直す］' },
   { what: '確かめる人・終わったら（知らせるだけ／確かめてもらう）を決める', where: 'やることのカードの「…」の［終わったら］（頼んだ人と管理者）' },
   { what: '差し戻す', where: 'やることのカードの「…」の［差し戻す］（確かめる人だけ）' },
-  { what: '案件・プロジェクトから外す、記録どうしのつながりを外す', where: 'やることのカードの案件の欄の［外す］、記録のカードの「つながっているもの」の「…」の［つながりを外す］' },
+  { what: '記録どうしのつながり（案件以外）を外す', where: '記録のカードの「つながっているもの」の「…」の［つながりを外す］' },
   { what: '案件・プロジェクトのなんのため・期限・責任者を変える、終える・やめる', where: '案件・プロジェクトのカードの［終える］と「…」（責任者と管理者・部署の管理役）' },
-  { what: '来た連絡を「済んだ」「取り込まない」にする', where: '来た連絡のカードの［済んだ］と「…」の［取り込まない］' },
+  { what: '来た連絡を「取り込まない」にする', where: '来た連絡のカードの「…」の［取り込まない］' },
   { what: '決めたことの案を確かめる（そうです・違う）', where: '「議事録を確認する」のカードの［そうです］［違う］（決める立場の人だけ）' },
   { what: '承認のお願いに答える', where: '承認のカード（承認する人が押します）' },
   { what: '部署・メンバー・見られる人・非公開フォルダなど会社の設定', where: '管理画面（管理者が行います）' },
@@ -881,7 +914,7 @@ const RECORDS_INSTRUCTIONS_BASE = `\n\n【会社の記録】${'`'}mcp__${RECORDS
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。提案書などの PDF を付けるときは mail_draft_create / mail_draft_update の attachments に会社フォルダの中のパスを渡します（PDF だけ。付けても送られず、メンバーがカードでファイルを開いて確かめてから送ります）。` +
-  `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「引き受ける」「受けられない」は本人だけができます（AI はできません）。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
+  `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。「受けられない」は本人だけができます（AI はできません）。完了・引き受ける・アーカイブを AI がするのは、本人がこの会話ではっきり頼み、その道具があるときだけです。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
   FILE_MOVES_INSTRUCTIONS + screenOnlyInstructions() +
   ''
 
@@ -1095,7 +1128,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
       if (spec.approvalCard) return showApproval(req)
       // The turn's token was issued again (past its life): the member's-turn mark is gone, say so in fixed words.
-      if (spec.askedCard && access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
+      if ((spec.askedCard || spec.askedTurnOnly) && access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
       if (spec.jobProposalCard) return makeJobCandidate(req)
       try {
         const minutesId = spec.name === MINUTES_READ_NAME ? String(parsed.data.id) : null
