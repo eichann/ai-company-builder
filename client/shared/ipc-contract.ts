@@ -522,7 +522,7 @@ export interface IpcInvokeChannels {
    * The HTML viewer (doc-frame.md): a view of its own showing the document, on the document session,
    * with a grant for the document's folder; the renderer gets only the view's id. Main window only.
    */
-  'docView:open': { args: [filePath: string]; result: DocViewOpenResult }
+  'docView:open': { args: [filePath: string, companyId?: string]; result: DocViewOpenResult }
   /**
    * The view closes; its grant is revoked. `keepPlace` (the member left it for 中身): main keeps where
    * its document was scrolled and puts it back on its next open in this window (never sent here).
@@ -546,6 +546,10 @@ export interface IpcInvokeChannels {
    * main opens Drive's own page for the id it read from the document; nothing is loaded into the view.
    */
   'docView:openDriveVideo': { args: [viewId: number, index: number]; result: void }
+  /** ACB's own player over the document plays its index-th Drive video (doc-frame.md "ACB's player over Drive embeds (plan 4)"). */
+  'docView:playDriveVideo': { args: [viewId: number, index: number]; result: void }
+  /** ACB's own player over the document plays the Drive link the member pressed (`videoLink` of the link event). */
+  'docView:playLinkedVideo': { args: [viewId: number, videoLink: number]; result: void }
   /**
    * The user manual (files-and-editor.md "The user manual"): its page (and heading) in a document view
    * of its own, from this computer's copy of the server's manual (refreshed first when the server
@@ -1096,6 +1100,8 @@ export interface ElectronAPI {
   setDocViewReview: Invoke<'docView:review'>
   findDocViewQuote: Invoke<'docView:findQuote'>
   openDocViewDriveVideo: Invoke<'docView:openDriveVideo'>
+  playDocViewDriveVideo: Invoke<'docView:playDriveVideo'>
+  playDocViewLinkedVideo: Invoke<'docView:playLinkedVideo'>
   onDocViewEvent: Subscribe<'docView:event'>
   openManual: Invoke<'manual:open'>
   exportManual: Invoke<'manual:export'>

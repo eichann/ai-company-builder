@@ -29,9 +29,12 @@ export interface DocViewSource {
   showsChange?(path: string): boolean
 }
 
-/** A document of the company folder: opened by its path; its own folder's changes reload it. */
-export function fileDocument(filePath: string, views: Pick<DocViewControls, 'openDocView'>, keepsPlace?: () => boolean): DocViewSource {
-  return { open: () => views.openDocView(filePath), showsChange: path => changeShowsIn(filePath, path), keepsPlace }
+/**
+ * A document of the company folder: opened by its path, for its company (whose session plays its Drive
+ * videos in ACB's player); its own folder's changes reload it.
+ */
+export function fileDocument(filePath: string, views: Pick<DocViewControls, 'openDocView'>, keepsPlace?: () => boolean, companyId?: string | null): DocViewSource {
+  return { open: () => (companyId ? views.openDocView(filePath, companyId) : views.openDocView(filePath)), showsChange: path => changeShowsIn(filePath, path), keepsPlace }
 }
 
 export type DocViewStatus =
@@ -50,8 +53,10 @@ export interface DocViewSnapshot {
   fullScreen: boolean
   /** The document was loaded again after its files changed (shown for a moment). */
   refreshed: boolean
-  /** A web link the member pressed inside it, waiting for 「ブラウザで開く」 / 「やめる」. */
+  /** A web link the member pressed inside it, waiting for 「ブラウザで開く」 / 「やめる」 (or 「ACB で再生」). */
   link: string | null
+  /** The link is a Google Drive file that may play in ACB's player: main's number for it (never the id). */
+  linkVideo: number | null
   /** What the shown page wanted from the internet and did not get (hosts and a count), for the band. */
   blocked: DocBlockedParts | null
   /** The Google Drive videos its document embeds (counts only), for the band's 「ブラウザで開く」 rows. */
@@ -74,7 +79,7 @@ const EARLY_VIEWS_MAX = 8
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
-  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false }
+  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, linkVideo: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false }
   /** What the view does for the review (reports selections, draws marks): sent again to every new view. */
   private review: DocViewReview | null = null
   private selectionSeq = 0
@@ -185,7 +190,7 @@ export class DocViewSession {
     const generation = ++this.generation
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
-    this.set({ status: { kind: 'opening' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false })
+    this.set({ status: { kind: 'opening' }, link: null, linkVideo: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false })
     this.early.clear()
     const result = await this.source.open().catch(() => null)
     const early = result?.ok ? this.early.get(result.viewId) ?? [] : []
@@ -291,9 +296,9 @@ export class DocViewSession {
     if (event.kind === 'gone') {
       this.viewId = null
       this.placed = null
-      this.set({ status: { kind: 'gone' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
+      this.set({ status: { kind: 'gone' }, link: null, linkVideo: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
     } else if (this.snapshot.link === null) {
-      this.set({ link: event.url })
+      this.set({ link: event.url, linkVideo: typeof event.videoLink === 'number' ? event.videoLink : null })
     }
   }
 
@@ -347,12 +352,17 @@ export class DocViewSession {
     if (this.viewId !== null) void this.views.openDocViewDriveVideo(this.viewId, index).catch(() => {})
   }
 
+  /** The band's ［ACB で再生］ on its `index`-th Drive video: main's player over the document plays it. */
+  playDriveVideo(index: number) {
+    if (this.viewId !== null) void this.views.playDocViewDriveVideo(this.viewId, index).catch(() => {})
+  }
+
   /** ［止める］: the document's view closes (its scripts stop); ［もう一度表示する］ opens it again. */
   stop() {
     this.generation++
     this.closeView()
     if (this.snapshot.fullScreen) this.setFullScreen(false)
-    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
+    this.set({ status: { kind: 'stopped' }, link: null, linkVideo: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
   }
 
   restart() {
@@ -377,10 +387,15 @@ export class DocViewSession {
     this.schedule()
   }
 
-  /** The member's answer about the link: only 「ブラウザで開く」 hands it to the browser. */
-  answerLink(open: boolean) {
+  /**
+   * The member's answer about the link: only 「ブラウザで開く」 hands it to the browser; 「ACB で再生」 (a Drive
+   * file link) asks main to play it in ACB's player over the document, by main's number for it.
+   */
+  answerLink(answer: boolean | 'play') {
     const url = this.snapshot.link
-    this.set({ link: null })
-    if (open && url) void this.links.openExternal(url).catch(() => {})
+    const video = this.snapshot.linkVideo
+    this.set({ link: null, linkVideo: null })
+    if (answer === true && url) void this.links.openExternal(url).catch(() => {})
+    if (answer === 'play' && video !== null && this.viewId !== null) void this.views.playDocViewLinkedVideo(this.viewId, video).catch(() => {})
   }
 }

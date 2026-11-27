@@ -2,7 +2,7 @@
 // document's own view covers, and its review ("Review in the document view"). The document is never
 // drawn by this page; `DocViewSession` owns it.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ArrowsIn, ArrowsOut, ChatCircleDots, Eye, LockSimple, Minus, Plus, Stop, ArrowClockwise, X } from '@phosphor-icons/react'
+import { ArrowsIn, ArrowsOut, ChatCircleDots, Eye, LockSimple, Minus, Play, Plus, Stop, ArrowClockwise, X } from '@phosphor-icons/react'
 import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
 import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
 import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
@@ -13,6 +13,7 @@ import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/
 import type { EditorReview } from '../hooks/useEditorReview'
 import { anchorHtmlQuote, htmlReadableText, htmlReviewMarks } from '../htmlReview'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { Button } from '../../../shared/ui/primitives'
 import { docViewPorts } from '../api'
 import { DocViewSession, fileDocument } from '../docViewSession'
 import { rebuildRequestOf } from '../htmlViewer'
@@ -56,12 +57,15 @@ const NOT_SHOWN: Readonly<Record<'hidden' | 'missing', string>> = {
 }
 
 export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom, review, content = '' }: HtmlDocumentPaneProps) {
+  // The company the document is shown for: its session plays the document's Drive videos (the pane is
+  // keyed by company and file, so another company is another view).
+  const companyId = useAppStore(s => s.currentCompany?.id ?? null)
   // One session per file (the pane is keyed by file): it owns the document's view.
   const [session] = useState(() => {
     const ports = docViewPorts()
-    return new DocViewSession(fileDocument(filePath, ports.views, leavingForSource), ports.views, ports.links, tabZoom, onZoom)
+    return new DocViewSession(fileDocument(filePath, ports.views, leavingForSource, companyId), ports.views, ports.links, tabZoom, onZoom)
   })
-  const { status, zoom, fullScreen, refreshed, link, blocked, driveVideos, bandShown, selection, elsewhere } = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const { status, zoom, fullScreen, refreshed, link, linkVideo, blocked, driveVideos, bandShown, selection, elsewhere } = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const canAskAi = useCommandAvailable('chat.insertText')
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const running = status.kind === 'shown' || status.kind === 'opening'
@@ -136,6 +140,8 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
           parts={blocked}
           driveVideos={driveVideos}
           onOpenDriveVideo={index => session.openDriveVideo(index)}
+          // Main plays a document's videos only for a company (its session): no button without one.
+          onPlayDriveVideo={companyId ? index => session.playDriveVideo(index) : undefined}
           onDismiss={() => session.dismissBand()}
           onAskAi={canAskAi ? () => void runCommand('chat.insertText', { text: rebuildRequestOf(filePath, rootPath) }) : undefined}
         />
@@ -203,6 +209,12 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
             <p className="text-heading text-text break-all" data-testid="link-host">{hostOf(link)}</p>
             <p className="mt-1 text-caption text-text-subtle break-all">{link}</p>
             <p className="mt-3 text-small text-text-muted">この資料は AI やほかの人が作ったものです。知らないサイトなら開かないでください。</p>
+            {linkVideo !== null && (
+              <div className="mt-3 flex items-center gap-2 text-small text-text-muted">
+                <span className="flex-1">Google Drive の動画なら、アプリの中の ACB のプレイヤーでも見られます。</span>
+                <Button size="sm" onClick={() => session.answerLink('play')}><Play size={12} aria-hidden />ACB で再生</Button>
+              </div>
+            )}
           </div>
         )}
         confirmText="ブラウザで開く"

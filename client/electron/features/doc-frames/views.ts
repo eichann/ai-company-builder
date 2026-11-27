@@ -22,6 +22,7 @@ import { driveVideoIdsOf, driveVideoViewUrl } from '../../../shared/doc-drive-vi
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
 import type { DocFrames, OpenableDocument } from './protocol'
+import type { DrivePlayers, EmbedBox } from './players'
 
 export interface DocViewHandle {
   /** The view's own id (its page's webContents id): the grant's owner. */
@@ -55,6 +56,14 @@ export interface DocViewHandle {
   inReviewWorld(code: string): Promise<unknown>
   /** The keyboard back to the app's page if the document has it (the comment box wants it). */
   releaseKeyboard(): void
+  /** Where the view is on screen now (window DIP, after the app page's zoom and the window's edges), or null while hidden. */
+  placedArea?(): DocViewBounds | null
+  /**
+   * Where the document lays out its first element embedding each of `ids` (the view's own DIP), found by
+   * the id without running anything in the page or reading its attributes (`doc-view.ts`: the view's
+   * DevTools protocol). Untrusted positions: the page's scripts own its DOM; only main's own ids play.
+   */
+  readEmbeds?(ids: readonly string[]): Promise<EmbedBox[]>
 }
 
 /** What the shell tells the registry about one view. */
@@ -124,6 +133,8 @@ export interface DocViewsDeps {
   now?: () => number
   /** Run `fn` after `ms` (default setTimeout); returns how to cancel it. */
   later?: (fn: () => void, ms: number) => () => void
+  /** ACB's players over the views' Drive videos (`players.ts`); absent: none. */
+  players?: Pick<DrivePlayers, 'opened' | 'offered' | 'placed' | 'reloaded' | 'closeView' | 'playIndex' | 'linkPressed' | 'playLink'>
 }
 
 /** After the member's input, the selection is read this much later (the page settles it first). */
@@ -218,6 +229,7 @@ export function createDocViews(deps: DocViewsDeps) {
     const view = views.get(viewId)
     const offered = onOwnPage(viewId)
     const counts = { count: offered ? list.ids.length : 0, total: offered ? list.total : 0, seen: list.seen.size }
+    if (view) deps.players?.offered(viewId, list.ids, offered)
     if (!view || (counts.count === list.told.count && counts.total === list.told.total && counts.seen === list.told.seen)) return
     list.told = counts
     deps.notify?.(view.windowId, { viewId, kind: 'driveVideos', ...counts })
@@ -235,6 +247,7 @@ export function createDocViews(deps: DocViewsDeps) {
     reading.delete(viewId)
     pages.delete(viewId)
     videos.delete(viewId)
+    deps.players?.closeView(viewId)
     blocked.get(viewId)?.cancel?.()
     blocked.delete(viewId)
     deps.frames.revoke(viewId)
@@ -269,7 +282,9 @@ export function createDocViews(deps: DocViewsDeps) {
       const last = lastLink.get(viewId)
       if (last !== undefined && at - last < LINK_INTERVAL_MS) return
       lastLink.set(viewId, at)
-      deps.notify?.(view.windowId, { viewId, kind: 'link', url: link })
+      // A Drive file link may also play in ACB's player: the window gets a number for it, never the id.
+      const videoLink = deps.players?.linkPressed(viewId, link) ?? null
+      deps.notify?.(view.windowId, { viewId, kind: 'link', url: link, ...(videoLink !== null ? { videoLink } : {}) })
     },
     onShortcut(viewId, key) {
       const view = views.get(viewId)
@@ -305,6 +320,8 @@ export function createDocViews(deps: DocViewsDeps) {
       // Another page of the folder: the document's videos are not offered over it; back on the document they are.
       const list = videos.get(viewId)
       if (list) tellVideos(viewId, list)
+      // Its page loaded again (a reload, auto refresh): where the embeds are is read afresh.
+      if (view && onOwnPage(viewId)) deps.players?.reloaded(viewId)
       const tally = blocked.get(viewId)
       if (!tally || !views.has(viewId)) return
       // A new page: its own tally. The window hears `count: 0` only if it was told something before.
@@ -409,7 +426,7 @@ export function createDocViews(deps: DocViewsDeps) {
      * A view of a checked document for the page `ticket` names, with a grant of its own; its id, or
      * null. `fragment` (`#…`, main's own: the manual's heading) is added to the address it loads.
      */
-    async open(doc: OpenableDocument, ticket: DocViewTicket, fragment = ''): Promise<number | null> {
+    async open(doc: OpenableDocument, ticket: DocViewTicket, fragment = '', companyId: string | null = null): Promise<number | null> {
       if (stale(ticket)) return null
       // Left for 中身 earlier in this window: opened where the member was reading (taken once).
       const place = placeKey(doc)
@@ -422,6 +439,7 @@ export function createDocViews(deps: DocViewsDeps) {
         return null
       }
       views.set(handle.id, { windowId: ticket.windowId, handle, place })
+      deps.players?.opened(handle.id, ticket.windowId, companyId)
       const ofWindow = [...views].filter(([, v]) => v.windowId === ticket.windowId)
       for (const [viewId] of ofWindow.slice(0, Math.max(0, ofWindow.length - MAX_VIEWS_PER_WINDOW))) {
         close(viewId)
@@ -458,7 +476,11 @@ export function createDocViews(deps: DocViewsDeps) {
      * four sane numbers); only its own window may (anything else is ignored).
      */
     place(viewId: unknown, windowId: number, bounds: unknown): void {
-      own(viewId, windowId)?.handle.place(bounds === null ? null : docViewBounds(bounds))
+      const view = own(viewId, windowId)
+      if (!view) return
+      view.handle.place(bounds === null ? null : docViewBounds(bounds))
+      // Its players follow it (hidden with it: an overlay of the app, another tab).
+      deps.players?.placed(viewId as number, view.handle.placedArea?.() ?? null, view.handle.readEmbeds && (ids => view.handle.readEmbeds!(ids)))
     },
 
     /** The document's zoom, within the steps' range; only its own window may. */
@@ -500,6 +522,20 @@ export function createDocViews(deps: DocViewsDeps) {
       if (!own(viewId, windowId) || typeof index !== 'number' || !Number.isInteger(index) || !onOwnPage(viewId as number)) return null
       const id = videos.get(viewId as number)?.ids[index]
       return id === undefined ? null : driveVideoViewUrl(id)
+    },
+
+    /**
+     * ACB's player over the view's area plays its `index`-th Drive video (the band's ［ACB で再生］): only its
+     * own window, only while its main frame shows the document, an index of the list main read.
+     */
+    playDriveVideo(viewId: unknown, windowId: number, index: unknown): void {
+      if (!own(viewId, windowId) || !onOwnPage(viewId as number)) return
+      deps.players?.playIndex(viewId as number, index)
+    },
+
+    /** ACB's player over the view's area plays the Drive link main numbered for its window (the link question's ［ACB で再生］). */
+    playLinkedVideo(viewId: unknown, windowId: number, linkId: unknown): void {
+      if (own(viewId, windowId)) deps.players?.playLink(viewId as number, linkId)
     },
 
     /**

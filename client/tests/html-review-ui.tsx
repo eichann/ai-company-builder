@@ -56,6 +56,8 @@ if (!real) {
       setDocViewReview: async (viewId: number, review: unknown) => { docCalls.push(['review', viewId, review]) },
       findDocViewQuote: async (viewId: number, index: number) => { docCalls.push(['find', viewId, index]); return 'hidden' },
       openDocViewDriveVideo: async () => {},
+      playDocViewDriveVideo: async () => {},
+      playDocViewLinkedVideo: async () => {},
       onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     },
   })

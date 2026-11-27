@@ -200,7 +200,8 @@ position and zoom; data files and other folders do not.
   real location** (`AllowedRoots.validate`: a link out of the company folder is refused), opened once with
   `O_NOFOLLOW | O_NONBLOCK` (a link as the file itself, even one pointing inside, is 404), `fstat` a regular file,
   streamed from that handle: 200 whole, 206 one range, 416 past the end, `Cache-Control: no-store` (`videoFileResponse`,
-  `byteRange`). A not-downloaded folder has no file to serve; a private folder's video is on disk only for its
+  `byteRange`). (A Drive video a document embeds plays in ACB's player on its own scheme and session,
+  `acb-drive-video`, `standard` + `secure` only: `doc-frame.md` "ACB's player over Drive embeds (plan 4)".) A not-downloaded folder has no file to serve; a private folder's video is on disk only for its
   readers. The app page's CSP has `media-src 'self' acb-media:` (`index.html`); a plugin frame's and a document's
   CSP have no media source.
 - **Codecs** (Electron 45 on a Mac, measured): H.264, HEVC (`hvc1`, through macOS), VP9 and AV1 play, in `.mp4`

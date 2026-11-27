@@ -1,5 +1,5 @@
 // The HTML viewer's document views (doc-frame.md):
-//   docView:open   (filePath) → the id of a view showing the document, or why not (plain Japanese)
+//   docView:open   (filePath, companyId?) → the id of a view showing the document, or why not (plain Japanese)
 //   docView:close  (viewId, keepPlace?) → the view closes and its grant is revoked; `true` (left for
 //                  中身): main keeps where its document was scrolled for its next open in this window
 //   docView:setBounds (viewId, bounds | null) → placed over the tab and shown, or hidden (and muted)
@@ -8,6 +8,9 @@
 //   docView:findQuote (viewId, index) → scroll to a mark: 'shown' | 'hidden' | 'missing'
 //   docView:openDriveVideo (viewId, index) → the view's index-th Google Drive video opens in the member's
 //                  browser, at the Drive page main builds from the id it read (never an address the page wrote)
+//   docView:playDriveVideo (viewId, index) / docView:playLinkedVideo (viewId, videoLink) → ACB's own player
+//                  over the document's area plays the view's index-th Drive video / the Drive link main
+//                  numbered for this window (doc-frame.md "ACB's player over Drive embeds (plan 4)")
 // (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went, an
 // app shortcut pressed in it, the internet parts its page wanted — hosts and a count only —, the text
 // the member selected while reviewing, how many Google Drive videos its document embeds — counts only.)
@@ -21,7 +24,7 @@ import type { DocViews } from './views'
 
 export interface DocViewsIpcDeps<E> {
   frames: Pick<DocFrames, 'check'>
-  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload' | 'review' | 'findQuote' | 'driveVideoUrl'>
+  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload' | 'review' | 'findQuote' | 'driveVideoUrl' | 'playDriveVideo' | 'playLinkedVideo'>
   /** The member's browser (the shell's `openExternal`). */
   openExternal: (url: string) => Promise<void>
   /** The event came from the main window's main frame. */
@@ -30,14 +33,16 @@ export interface DocViewsIpcDeps<E> {
 
 export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>, deps: DocViewsIpcDeps<E>): void {
   const { frames, views, fromMainWindow, openExternal } = deps
-  ipc.handle('docView:open', async (event, filePath): Promise<DocViewOpenResult> => {
+  ipc.handle('docView:open', async (event, filePath, companyId): Promise<DocViewOpenResult> => {
     if (!fromMainWindow(event)) return refuseDoc('not_allowed')
     // The page as it is now: if it reloads or crashes while the file is checked or the view made,
     // nothing is registered for it.
     const ticket = views.begin(event.sender.id)
     const checked = await frames.check(filePath)
     if (!checked.ok) return checked
-    const viewId = await views.open(checked.doc, ticket)
+    // The company whose session plays the document's Drive videos (the server decides what the member may).
+    const company = typeof companyId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(companyId) ? companyId : null
+    const viewId = await views.open(checked.doc, ticket, '', company)
     return viewId === null ? refuseDoc('unavailable') : { ok: true, viewId }
   })
   ipc.handle('docView:close', (event, viewId, keepPlace) => {
@@ -63,5 +68,11 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
     if (!fromMainWindow(event)) return
     const url = views.driveVideoUrl(viewId, event.sender.id, index)
     if (url) await openExternal(url)
+  })
+  ipc.handle('docView:playDriveVideo', (event, viewId, index) => {
+    if (fromMainWindow(event)) views.playDriveVideo(viewId, event.sender.id, index)
+  })
+  ipc.handle('docView:playLinkedVideo', (event, viewId, videoLink) => {
+    if (fromMainWindow(event)) views.playLinkedVideo(viewId, event.sender.id, videoLink)
   })
 }

@@ -113,8 +113,8 @@ Object.assign(window, {
     },
     deleteItem: async (p: string) => { delete files[p]; return { success: true } },
     onFileChanges: (cb: (changes: { type: string; path: string }[]) => void) => { emitChanges = cb; return () => { emitChanges = null } },
-    openDocView: async (filePath: string) => {
-      docCalls.push(['open', filePath])
+    openDocView: async (filePath: string, companyId?: string) => {
+      docCalls.push(companyId === undefined ? ['open', filePath] : ['open', filePath, companyId])
       // A slow open (a spec sets it): the member may leave before the view is made.
       const delay = (window as unknown as { __acbDocDelay?: number }).__acbDocDelay
       if (delay) await new Promise(resolve => setTimeout(resolve, delay))
@@ -135,6 +135,8 @@ Object.assign(window, {
       return (window as unknown as { __acbFound?: string }).__acbFound ?? 'shown'
     },
     openDocViewDriveVideo: async (viewId: number, index: number) => { docCalls.push(['driveVideo', viewId, index]) },
+    playDocViewDriveVideo: async (viewId: number, index: number) => { docCalls.push(['playVideo', viewId, index]) },
+    playDocViewLinkedVideo: async (viewId: number, videoLink: number) => { docCalls.push(['playLink', viewId, videoLink]) },
     onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     openExternal: async (url: string) => { opened.push(url); return { success: true } },
     // 「ほかのアプリで開く」 for a video the player cannot read.

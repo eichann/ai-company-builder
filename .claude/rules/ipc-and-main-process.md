@@ -83,11 +83,14 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
-  changed with the session; `tasks-ui.md`). `doc-frames` (docView:open / close / setBounds / setZoom / reload / review / findQuote / openDriveVideo and the event
+  changed with the session; `tasks-ui.md`). `doc-frames` (docView:open / close / setBounds / setZoom / reload / review / findQuote / openDriveVideo / playDriveVideo / playLinkedVideo and the event
   `docView:event` (a link the member pressed, a view that went by itself, an app shortcut pressed in
   it, the internet parts its page wanted — hosts and counts only —, the text the member selected while reviewing,
   how many Google Drive videos its document embeds — counts only; openDriveVideo opens one by index, main building
-  Drive's address from the id it holds): the HTML
+  Drive's address from the id it holds; playDriveVideo / playLinkedVideo play one — by index, or by main's number for a
+  Drive link the member pressed — in ACB's own player over the document, `players.ts` with the shell's
+  `createDrivePlayerShell`, `doc-frame.md` "ACB's player over Drive embeds (plan 4)"; `docView:open`'s optional
+  second argument is the current company, whose session plays them): the HTML
   viewer's document in a view of its own with a grant for its folder; only the view's id goes
   back; main window's main frame only, decided before any file is read; `protocol.ts` serves the
   scheme, `views.ts` ties grants to views; the views and their session are the shell's
@@ -168,7 +171,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`, `browser-window.ts`
   (「ブラウザ操作」's window: one security surface of its own, kept apart so its real-Electron test loads
   exactly it; `agent-browser.md`), `doc-view.ts` (the HTML viewer's document views and their
-  session, likewise; `doc-frame.md`): the only files
+  session, likewise — and ACB's players over a document's Drive videos with their own `acb-player`
+  session, the same surface; `doc-frame.md`): the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the

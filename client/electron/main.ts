@@ -26,9 +26,10 @@ import { killAgentProcess, spawnAgentProcess } from './agents/process'
 import { createClaudeCli } from './services/claude-cli'
 import { createClaudeSignIn } from './services/claude-sign-in'
 import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
-import { createDocViewShell } from './doc-view'
+import { createDocViewShell, createDrivePlayerShell } from './doc-view'
 import { createDocFrames } from './features/doc-frames/protocol'
 import { createDocViews } from './features/doc-frames/views'
+import { createDrivePlayers } from './features/doc-frames/players'
 import { registerDocViewsIpc } from './features/doc-frames/ipc'
 import { createManualSite } from './features/manual/site'
 import { registerManualIpc } from './features/manual/ipc'
@@ -409,6 +410,23 @@ const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: se
 // Google Drive (google-drive.md): the person picks in Google Picker in their own browser (a one-time pick
 // ticket; Google needs a signed-in browser); the session stays here and waits for the result.
 const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, openBrowser: url => desktopShell.openExternal(url), google: googleApi })
+// ACB's own players over a document's Google Drive videos (doc-frame.md "ACB's player over Drive embeds
+// (plan 4)"): their own session; the bytes relayed from the server's stream route with the member's
+// session (Range forwarded), the one video picked in the member's browser first when the server says so.
+const drivePlayers = createDrivePlayers({
+  shell: server => createDrivePlayerShell(server),
+  stream: (companyId, fileId, range, signal) => fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/me/google/drive/view/${encodeURIComponent(fileId)}`, {
+    redirect: 'error', signal, headers: { Cookie: session.cookies().join('; '), ...(range ? { Range: range } : {}) },
+  }),
+  pick: async (companyId, fileId, signal) => {
+    const r = await drivePicking.pick(companyId, 'files', signal, { fileIds: [fileId], purpose: 'view' })
+    if (!r.ok) return { ok: false, reason: r.reason === 'cancelled' || r.reason === 'timed-out' ? r.reason : 'other', message: r.message }
+    return r.picks.some(p => p.id === fileId) ? { ok: true, kept: true } : { ok: true, kept: false, notKept: drivePickRefusedText(r.refused, r.refusedWhy) ?? undefined }
+  },
+  openExternal: url => desktopShell.openExternal(url),
+  notify: (_windowId, event) => appWindow.send('docView:event', event),
+})
+lifecycle.beforeQuit(() => drivePlayers.closeAll())
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
 // Asked once when the task list and 「確かめること」 ask at the same moment.
 const calendarToday = createCalendarTodayReads({ reads: inFlightReads, read: createCalendarApi({ baseUrl: getServerApiUrl, cookies: session.cookies }).today })
@@ -799,6 +817,8 @@ registerAuthIpc(ipc, {
     browserWrites.clear()
     browserDevice.clear()
     browserRecordings.clear()
+    // …nor play this one's Drive videos (ACB's players over documents; their streams are aborted).
+    drivePlayers.closeAll()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()
@@ -873,6 +893,7 @@ const docViews = createDocViews({
   frames: docFrames,
   shell: createDocViewShell({ serve: request => docFrames.serve(request) }),
   notify: (_windowId, event) => appWindow.send('docView:event', event),
+  players: drivePlayers,
 })
 registerDocViewsIpc(ipc, {
   frames: docFrames,
