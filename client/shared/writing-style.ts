@@ -20,7 +20,7 @@ export const WRITING_STYLE_SYSTEM_PROMPT = `あなたは、ある人の文章の
 </writing_style>`
 
 /** For agents with tools of their own (Codex): do only this. */
-export const WRITING_STYLE_DEVELOPER_INSTRUCTIONS = '書き方のまとめだけを行い、ツール・スキルを使用しないでください。'
+export const WRITING_STYLE_DEVELOPER_INSTRUCTIONS = '書き方のまとめだけを行い、ツールや Skill を使用しないでください。'
 
 /** The JSON the summarizing AI receives: the messages of one audience as one outside-text block. */
 export function writingStyleInput(samples: readonly WritingSample[]): { messages: string; note: string } {
