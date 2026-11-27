@@ -23,7 +23,7 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseHistoryEntry, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserOperatorImage, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  readBackLanded, topFields, workBusinessOf, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext,
+  readBackLanded, readBackUnchanged, topFields, workBusinessOf, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext,
   workWordsForAi, workWriteLine,
   type AfterReadResult, type WorkAnswer, type WorkApprovedPlan, type WorkEnd, type WorkFrame, type WorkPerson, type WorkPlanValue, type WorkStopReason, type WorkWriteSeen,
 } from '../../../shared/browser-frame-writes'
@@ -453,7 +453,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
    * none on its way → the operator looks at the page as it is.
    */
   async function settleWrites(writer: FrameWriter, win: BrowserBrowseSurface, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
-    let limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS)
+    let limitFrom = performance.now()
+    let limit = limitFrom + (deps.idleMaxMs ?? IDLE_MAX_MS)
     const left = () => limit - performance.now()
     const moment = deps.writeStartMs ?? L.writeStartMs
     let watch = afterAction
@@ -468,7 +469,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (!(await idleWithin(writer, left(), signal))) {
           // A write waiting for the person's answer on the card is not on its way: its wait is the card's (it ends by the
           // person, the card's time or the run's stop), so the limit starts again once it is answered.
-          if (writer.asking() > 0 && !signal.aborted) { limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS); continue }
+          // A question answered during this wait: the send after it gets its own whole limit from the answer (Codex review).
+          if (!signal.aborted && (writer.asking() > 0 || writer.askEnded() > limitFrom)) {
+            limitFrom = writer.asking() > 0 ? performance.now() : writer.askEnded()
+            limit = limitFrom + (deps.idleMaxMs ?? IDLE_MAX_MS)
+            continue
+          }
           ranOut = true
           break
         }
@@ -507,11 +513,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     // A stopped card this request continues: the member answered it here, for this site and Skill, not used yet, in time.
     // Its question goes back only to the next operator, never to the consultation AI (agent-browser.md "The stopped card's answer").
     let decided: { question: string; answer: 'proceed' } | null = null
+    let decision: Decidable | null = null
     if (input.decision !== undefined && input.decision !== null) {
       const d = decidables.get(key(userId, companyId, input.decision))
       if (!d || d.used || d.choice !== 'proceed' || d.host !== host || d.skill !== input.skill || now() - d.at > DECISION_MS
         || (d.conversationId !== null && d.conversationId !== input.conversationId)) return said(W.badDecision)
-      d.used = true
+      // Used once the run really starts (below): a refusal before that (no window, busy, the Skill) keeps the answer.
+      decision = d
       decided = { question: d.question, answer: 'proceed' }
     }
     const operator = deps.operator()
@@ -626,6 +634,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const earlier = await askEarlier(frameRun, input.task)
         if (earlier) return stoppedBefore(earlier)
       }
+      if (decision) decision.used = true
       const person: WorkPerson = { said: input.said ?? [], values: input.values ?? [], ...(decided ? { decided: [decided] } : {}) }
       // The consultation AI's request is withheld only when the Skill's steps are what the operator works from: a Skill with
       // no steps here (none in it, or a company without the company folder) keeps the request, as before (Codex review).
@@ -701,6 +710,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         frames: workFrames(run.frames), person: person.values, preview: plan ? plan.values : null, decisions: decided ? ['proceed'] : [], digest,
       })
       let promised: BrowserRunPromiseInput | null = null
+      /** When the work's operator run stops operating (its deadline, set once it started). */
+      const workUntil = { at: Number.POSITIVE_INFINITY }
       const added: BrowserRunPromiseAddition[] = []
       if (deps.api.framePromise) {
         const made = await deps.api.framePromise(companyId, run.runId, built.promise).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
@@ -714,10 +725,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         }
       }
       /** The card's question about a write outside the promise: true once the person said 「書いてよい」 and the server took it. */
-      const askPerson = async (q: PromiseAsk): Promise<boolean> => {
-        if (!promised || !deps.api.framePromiseAdd) return false
+      const askPerson = async (q: PromiseAsk): Promise<'allowed' | 'denied' | 'failed'> => {
+        if (!promised || !deps.api.framePromiseAdd) return 'failed'
         const allowed = await new Promise<boolean>((resolve) => {
-          const until = Math.min(now() + ASK_MS, Date.parse(run.expiresAt) || now() + ASK_MS)
+          // Never past the work's own operating time: an answer after it could no longer be sent (independent review).
+          const until = Math.min(now() + ASK_MS, Date.parse(run.expiresAt) || now() + ASK_MS, workUntil.at)
           let timer: ReturnType<typeof setTimeout> | undefined
           let onCut = () => {}
           const done = (a: boolean) => { clearTimeout(timer); cut.signal.removeEventListener('abort', onCut); e.ask = null; e.answerAsk = null; resolve(a) }
@@ -728,11 +740,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           e.answerAsk = done
           if (cut.signal.aborted) done(false)
         })
-        if (!allowed) return false
+        if (!allowed) return 'denied'
         const a = await deps.api.framePromiseAdd(companyId, run.runId, q.addition).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
-        if (a.kind !== 'ok') return false
+        if (a.kind !== 'ok') return 'failed'
         added.push(q.addition)
-        return true
+        return 'allowed'
       }
       const writerPromise: WriterPromise | null = promised
         ? { state: () => browserPromiseState(promised as BrowserRunPromiseInput, added), digest, ask: askPerson }
@@ -775,6 +787,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const readTop = async (address: string) => (await readBoth(address)).top
       /** Each address read before a write, by the address itself, as its whole answer text (the read-back's "before"). */
       const beforeAt = new Map<string, string | null>()
+      /**
+       * Each held write's own address as it read right before that very write (a later write's too, not only the run's first
+       * look: Codex review) — what a refused write is compared with ("Sent is not done").
+       */
+      const lastBefore = new Map<string, string | null>()
       const readBefore = async (p: string, a: string) => {
         const both = await readBoth(a)
         befores.set(p, both.top)
@@ -792,18 +809,21 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         going: current, stepsSoFar: () => workLog.length, actionsSoFar: () => actions.n, now, ...(deps.monoMs ? { monoMs: deps.monoMs } : {}),
         // A pattern after-read address the held write fits is read right before it (its "before").
         readBefore: async (heldPath) => {
+          lastBefore.delete(heldPath)
           for (const p of afterReads) {
-            if (befores.has(p)) continue
             const a = beforeReadAddress(p, heldPath)
-            if (a !== null) await readBefore(p, a)
+            if (a === null) continue
+            if (!befores.has(p)) {
+              await readBefore(p, a)
+              if (a === heldPath) lastBefore.set(a, beforeAt.get(a) ?? null)
+            } else if (a === heldPath && !lastBefore.has(a)) lastBefore.set(a, (await readBoth(a)).text)
           }
         },
         // A refused write's own address read again: "not saved" only when it reads exactly as it did right before the write.
-        readAgain: async (heldPath) => {
-          const was = beforeAt.get(heldPath)
+        readAgain: async (heldPath, sent) => {
+          const was = lastBefore.get(heldPath)
           if (was === undefined || was === null) return null
-          const nowText = (await readBoth(heldPath)).text
-          return nowText !== null && nowText === was ? 'unchanged' : null
+          return readBackUnchanged(sent, was, (await readBoth(heldPath)).text) ? 'unchanged' : null
         },
         promise: () => writerPromise,
       })
@@ -812,7 +832,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const worked = await runOperator({
         phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: approvedPlan, items: input.items, steps,
         adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
-        neverReadFits, writer, log: workLog, trail: workTrail, actions,
+        neverReadFits, writer, log: workLog, trail: workTrail, actions, onDeadline: (at: number) => { workUntil.at = at },
       })
       const held = writer.records()
       /**
@@ -921,6 +941,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     adhoc: boolean
     frames: WorkFrame[] | null | (() => WorkFrame[])
     frameRunId: string | null
+    /** Told when the app stops operating this run (its deadline), once it started. */
+    onDeadline?: (at: number) => void
     cut: AbortController
     current: () => boolean
     whyNot: () => WorkStopReason
@@ -950,6 +972,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const budget = browserRunBudget(answered?.budget)
     const told = typeof answered?.operateMs === 'number' && Number.isFinite(answered.operateMs) ? Math.max(0, answered.operateMs) : budget.operateMs
     const deadline = now() + Math.min(budget.operateMs, told)
+    o.onDeadline?.(deadline)
     const log = o.log ?? []
     const writer = o.writer
     let outcome: BrowserRunOutcome = 'failed'
@@ -1088,7 +1111,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
    */
   function openRefusals(records: readonly FrameWriteRecord[]): FrameWriteRecord[] {
     return records.filter((r, i) => r.outcome === 'site-refused' && r.refusal !== 'unchanged'
-      && !records.slice(i + 1).some(o => o.outcome === 'done' && o.path !== null && o.path === r.path))
+      && !records.slice(i + 1).some(o => o.outcome === 'done' && o.path !== null && o.path === r.path && o.line === r.line))
   }
 
   /** This member's card (the main window's IPC asks it; the renderer never gets the approval value). */

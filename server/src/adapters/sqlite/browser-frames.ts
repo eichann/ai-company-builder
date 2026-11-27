@@ -141,19 +141,21 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
     },
     ledgerDoubts(host, account, target, exceptRun) {
       // A refused write is in doubt too (the site's error proves nothing was saved only once the app read it again and found
-      // it unchanged: agent-browser.md "Sent is not done") — not for its own run (its corrected try goes on), and not once a
-      // later write of that run to the same target was done.
+      // it unchanged: agent-browser.md "Sent is not done") — only of a run whose app keeps the promise (an older app never
+      // reads a refusal again, and rows from before stay as they were), not for its own run (its corrected try goes on),
+      // and not once a later write of that run to the same target was done.
       return (conn.prepare(`SELECT l.run_id, l.seq, l.target, w.state, w.permitted_at, f.method, f.path, f.query, f.fields
         FROM browser_write_ledger l
         JOIN browser_frame_writes w ON w.company_id = l.company_id AND w.run_id = l.run_id AND w.seq = l.seq
         JOIN browser_frames f ON f.company_id = w.company_id AND f.run_id = w.run_id AND f.idx = w.frame_idx
         WHERE l.company_id = ? AND l.host = ? AND l.account = ? AND (? IS NULL OR l.target = ?)
           AND (w.state IN ('permitted', 'unknown') OR (w.state = 'refused' AND (? IS NULL OR l.run_id <> ?)
+            AND EXISTS (SELECT 1 FROM browser_frame_promises p WHERE p.company_id = ? AND p.run_id = l.run_id)
             AND NOT EXISTS (SELECT 1 FROM browser_frame_refusal_checks k WHERE k.company_id = ? AND k.run_id = l.run_id AND k.seq = l.seq)
             AND NOT EXISTS (SELECT 1 FROM browser_write_ledger l2 JOIN browser_frame_writes w2 ON w2.company_id = l2.company_id AND w2.run_id = l2.run_id AND w2.seq = l2.seq
               WHERE l2.company_id = ? AND l2.run_id = l.run_id AND l2.target = l.target AND l2.seq > l.seq AND w2.state IN ('done', 'verified'))))
           AND NOT EXISTS (SELECT 1 FROM browser_frame_write_confirms c WHERE c.company_id = ? AND c.run_id = l.run_id AND c.seq = l.seq)
-        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, target ?? null, target ?? null, exceptRun ?? null, exceptRun ?? null, companyId, companyId, companyId) as Array<{
+        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, target ?? null, target ?? null, exceptRun ?? null, exceptRun ?? null, companyId, companyId, companyId, companyId) as Array<{
         run_id: string; seq: number; target: string; state: 'permitted' | 'unknown' | 'refused'; permitted_at: string
         method: FrameRow['method']; path: string; query: string | null; fields: string
       }>).map(r => ({

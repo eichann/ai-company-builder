@@ -410,9 +410,14 @@ function writeOf(v: unknown): { id: string | null; write: BrowserSkillWrite } | 
   }
 }
 
-/** A body field the promise may name: a plain field name, never `_method` or a login / CSRF / session field. */
+/**
+ * A body field `body` may name: a plain field name, never `_method`. A name that only looks like a login field (`author`,
+ * `session_title`) may be listed: `body` holds names, never a value (independent review of #907: they were left unchecked).
+ */
 export const browserPromiseFieldName = (k: unknown): k is string =>
-  typeof k === 'string' && k.length <= BROWSER_SKILL_LIMITS.fieldName && FIELD_NAME_RE.test(k) && k !== '_method' && !isSensitiveFieldName(k)
+  typeof k === 'string' && k.length <= BROWSER_SKILL_LIMITS.fieldName && FIELD_NAME_RE.test(k) && k !== '_method'
+/** A field `bind` may name: as `body`, and never a login / CSRF / session one (a bound field holds the person's value). */
+const bindFieldName = (k: unknown): k is string => browserPromiseFieldName(k) && !isSensitiveFieldName(k)
 /** What a label may not hold: control, bidirectional and zero-width characters. */
 // eslint-disable-next-line no-control-regex
 const LABEL_BAD_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
@@ -437,7 +442,7 @@ function bindOf(v: unknown, fixed: Readonly<Record<string, string>>, body: reado
   if (keys.length === 0 || keys.length > BROWSER_SKILL_LIMITS.bind) return false
   const out: Record<string, string> = {}
   for (const k of keys) {
-    if (!browserPromiseFieldName(k) || Object.prototype.hasOwnProperty.call(fixed, k) || (body !== undefined && !body.includes(k))) return false
+    if (!bindFieldName(k) || Object.prototype.hasOwnProperty.call(fixed, k) || (body !== undefined && !body.includes(k))) return false
     const label = v[k]
     if (typeof label !== 'string' || label.length === 0 || label.length > BROWSER_SKILL_LIMITS.bindLabel || label.trim() !== label
       || label.normalize('NFC') !== label || LABEL_BAD_RE.test(label)) return false

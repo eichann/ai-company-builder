@@ -18,7 +18,7 @@ import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
 import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, type BrowserFrameMismatch, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
 import { browserSkillDeclarationFrom, browserSkillQueryWords, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { isSensitiveFieldName } from '../../shared/core/browser-recording'
-import { BROWSER_PROMISE_LIMITS, browserOpenSegments, browserPathSegments, type BrowserPermitCheck } from '../../shared/core/browser-run-promise'
+import { BROWSER_PROMISE_LIMITS, browserOpenSegments, browserPathSegments, browserPromiseImplicitField, type BrowserPermitCheck } from '../../shared/core/browser-run-promise'
 import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOutcome, type BrowserRunWriteStep } from '../../shared/core/browser-run-log'
 import { BROWSER_CARD_CHECKED_BY_WORDS, type BrowserCard, type BrowserCardCheck, type BrowserCardRow, type BrowserCardSection, type BrowserCardValue } from '../../shared/core/browser-card'
 import type { BrowserFrameView } from '../../shared/types/browser-frames'
@@ -230,7 +230,9 @@ export const workFrameOf = (f: BrowserFrameView): WorkFrame => ({
 export function promiseCheckOf(frame: Pick<WorkFrame, 'path'>, shape: HeldWriteShape, digest: (value: string) => string): BrowserPermitCheck | null {
   const fields: Record<string, string> = {}
   for (const [k, values] of shape.fields) {
-    if (k === '_method' || isSensitiveFieldName(k)) continue
+    // Only `_method` and the frameworks' anti-forgery tokens stay out; a name that merely looks like a login field is checked
+    // (its value only as a keyed digest, like every other).
+    if (browserPromiseImplicitField(k)) continue
     // eslint-disable-next-line no-control-regex
     if (k.length === 0 || k.length > BROWSER_PROMISE_LIMITS.checkFieldName || /[\u0000-\u001f\u007f]/.test(k)) return null
     fields[k] = digest(values.length === 1 ? values[0] : JSON.stringify(values))
@@ -387,6 +389,21 @@ export function readBackLanded(sent: Readonly<Record<string, string>> | null, be
     return typeof x === 'string' ? x : typeof x === 'number' || typeof x === 'boolean' ? String(x) : null
   }
   return fields.every(([k, v]) => plain(now, k) === v) && fields.some(([k, v]) => { const b = plain(was, k); return b !== null && b !== v })
+}
+/**
+ * "Sent is not done": a refused write is known **not saved** only when its own address, read right before it and again
+ * now, is one JSON object holding **every** field the write sent as a top-level plain value, and the whole answer reads
+ * exactly as before (independent review of #907: a list page whose text did not move proves nothing about a create).
+ * Anything less — nothing sent, a field the read does not show, a changed text, not JSON — is not proof.
+ */
+export function readBackUnchanged(sent: Readonly<Record<string, string>> | null, before: string | null, after: string | null): boolean {
+  const was = jsonObject(before)
+  const now = jsonObject(after)
+  if (!sent || !was || !now || before !== after) return false
+  const fields = Object.keys(sent)
+  if (fields.length === 0) return false
+  const plain = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(o, k) && ['string', 'number', 'boolean'].includes(typeof o[k])
+  return fields.every(k => plain(was, k) && plain(now, k))
 }
 const jsonObject = (text: string | null): Record<string, unknown> | null => {
   if (text === null) return null

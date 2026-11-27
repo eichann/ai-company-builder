@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
-  BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
+  BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer, readBackUnchanged,
   WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readBackLanded, readHeldWrite, sentBodyWhole, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
@@ -1701,7 +1701,7 @@ test('targets: an open segment this run made, or one the person allowed, goes wi
     frames: [frame({ frame: 1, path: '/plans', max: 1, left: 1 }), frame({ frame: 2, path: '/plans/{n}/items', max: 4, left: 4 })],
     promise: () => ({
       state: () => browserPromiseState({ values: [], binds: [], decisions: [] }, added), digest,
-      ask: async (q) => { asked.push(q.items); if (allow) added.push(q.addition); return allow },
+      ask: async (q) => { asked.push(q.items); if (allow) added.push(q.addition); return allow ? 'allowed' : 'denied' },
     }),
   })
   await writer.hold(held(site, 'POST', '/plans', JSON_TYPE, '{}'))
@@ -1720,6 +1720,17 @@ test('targets: an open segment this run made, or one the person allowed, goes wi
   assert.equal(permits.length, 4)
 })
 
+test('readBackUnchanged: "not saved" only when the read shows every sent field and reads exactly as before (independent review: a list page proves nothing)', () => {
+  const sent = { title: 'x' }
+  assert.equal(readBackUnchanged(sent, '{"title":"a","n":1}', '{"title":"a","n":1}'), true)
+  // The write's fields are not on the page read (a list, another shape): no proof.
+  assert.equal(readBackUnchanged(sent, '{"items":[]}', '{"items":[]}'), false)
+  assert.equal(readBackUnchanged(sent, '{"title":"a"}', '{"title":"b"}'), false)
+  assert.equal(readBackUnchanged({}, '{"title":"a"}', '{"title":"a"}'), false)
+  assert.equal(readBackUnchanged(null, '{"title":"a"}', '{"title":"a"}'), false)
+  assert.equal(readBackUnchanged(sent, '<html>', '<html>'), false)
+})
+
 test('sent is not done: a refused write is "not saved" only when its address, read right before, reads the same now; else not known', async () => {
   for (const [readAgain, checked, refusal] of [['unchanged', 'unchanged', 'unchanged'], [null, undefined, 'unconfirmed']] as const) {
     const reports: Array<{ result: string; checked?: string }> = []
@@ -1728,7 +1739,7 @@ test('sent is not done: a refused write is "not saved" only when its address, re
       companyId: COMPANY, runId: FRAME_RUN, host: HOST, going: () => true, stepsSoFar: () => 0, frames: [frame({ max: 2, left: 2 })],
       api: { async framePermit(_c, _r, body) { return { kind: 'ok', value: { write: 1, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } } }, async frameReport(_c, _r, body) { reports.push(body); return { kind: 'ok', value: {} } } },
       readAgain: async () => readAgain,
-      promise: () => ({ state: () => browserPromiseState({ values: [], binds: [], decisions: [] }, []), digest: v => `hmac:${createHash('sha256').update(v).digest('hex')}`, ask: async () => false }),
+      promise: () => ({ state: () => browserPromiseState({ values: [], binds: [], decisions: [] }, []), digest: v => `hmac:${createHash('sha256').update(v).digest('hex')}`, ask: async () => 'denied' }),
     })
     await writer.hold(held(site, 'POST', '/coupons', JSON_TYPE, '{}'))
     assert.deepEqual(reports.map(r => [r.result, r.checked]), [['refused', checked]])
@@ -1767,6 +1778,20 @@ test('sent is not done: "済みました" only when reading back matches what wa
 const STOP_ASKS = JSON.stringify({ do: 'stop', why: 'need-person', unread: [], question: '同名のタグ【全員に送る】がある。既存のタグを使ってよいか？' })
 const PREVIEW_CARD = `bo_${'a'.repeat(32)}`
 
+test('the stopped card\'s answer is not used up by a request refused before its run starts (independent review)', async () => {
+  const world = workWorld({ promise: true, answers: [STOP_ASKS], frameStart: () => ({ kind: 'refused', code: 'BROWSER_RUN_BUSY' }) })
+  // The first request's preview needs a frames run: refuse none for it, then the busy refusal for the continuation.
+  let starts = 0
+  world.w.frameStart = body => (++starts === 1 ? { kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) } : { kind: 'refused', code: 'BROWSER_RUN_BUSY' })
+  await world.tool.execute({ site: HOST, task: 'タグを作って', skill: 'coupons' })
+  world.wiring.decide(COMPANY, PREVIEW_CARD, 'proceed')
+  const again = () => world.wiring.work({ companyId: COMPANY, conversationId: 'conv-1', companyRoot: null, site: HOST, task: 'タグを作って', skill: 'coupons', items: [], decision: PREVIEW_CARD, signal: new AbortController().signal, onCard: () => {} })
+  assert.notEqual((await again()).words, W.badDecision)
+  // Still usable: the refusal came before the run started.
+  world.w.frameStart = () => ({ kind: 'refused', code: 'BROWSER_RUN_BUSY' })
+  assert.notEqual((await again()).words, W.badDecision)
+})
+
 test('the stopped card\'s answer: only a ［そのまま進める］ the member pressed continues it, once, for that site and Skill; the question goes to the next operator, never to the consultation AI', async () => {
   const world = workWorld({ promise: true, answers: [STOP_ASKS, SKILL_PLAN, CLICK_SAVE, DONE_PLAIN] })
   const first = await world.tool.execute({ site: HOST, task: 'タグを作って', skill: 'coupons' })
@@ -1793,4 +1818,37 @@ test('the stopped card\'s answer: only a ［そのまま進める］ the member 
   assert.deepEqual((world.w.promises.at(-1) as { decisions: string[] }).decisions, ['proceed'])
   // Used once.
   assert.equal((await again(PREVIEW_CARD)).words, W.badDecision)
+})
+
+test('sent is not done: a refused write is compared with its address as it read right before that very write, not the run\'s first look (Codex review)', async () => {
+  // The first save changes the record A → B; the second answers 422 but put A back: never "found unchanged".
+  const reads: Record<string, string> = { '/coupons': '{"title":"A"}' }
+  // (The page's save sends a title: the read shows it, so an unchanged read is proof.)
+  const twice = { ...started({ needsApproval: false }), afterRead: ['/coupons'], frames: [{ frame: 1, method: 'POST', path: '/coupons', fields: {}, max: 2, used: 0, left: 2 }] }
+  const world = workWorld({
+    promise: true, reads, answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+    site: { requests: [], answer: n => { reads['/coupons'] = n === 1 ? '{"title":"B"}' : '{"title":"A"}'; return n === 1 ? ok201() : { status: 422, body: '{}' } } },
+  })
+  await world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.deepEqual(world.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done', 'frameReport refused'])
+  // A refusal whose address reads as it did right before it is "not saved".
+  const same: Record<string, string> = { '/coupons': '{"title":"A"}' }
+  const kept = workWorld({
+    promise: true, reads: same, answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+    site: { requests: [], answer: n => { if (n === 1) same['/coupons'] = '{"title":"B"}'; return n === 1 ? ok201() : { status: 422, body: '{}' } } },
+  })
+  await kept.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.deepEqual(kept.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done', 'frameReport refused checked=unchanged'])
+})
+
+test('a question answered just before the send limit: the send after it gets its own whole limit, never given up as unknown (Codex review)', async () => {
+  const frames = () => ({ kind: 'ok' as const, value: BOUND({ body: ['title'] }) })
+  const world = workWorld({ promise: true, idleMaxMs: 200, siteDelayMs: 150, pressDoesNotWait: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: frames, saveBody: '{"title":"冬のクーポン","memo":"x"}' })
+  const words = world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.ok((await untilPromiseAsk(world.wiring))?.ask)
+  await new Promise(resolve => setTimeout(resolve, 150))
+  world.wiring.allow(COMPANY, FRAME_RUN, true)
+  await words
+  assert.deepEqual(world.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done'])
+  assert.equal(world.w.site.requests.length, 1)
 })

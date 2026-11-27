@@ -34,7 +34,7 @@
  */
 import { browserRecordingProblem, type BrowserRecordedSend, type BrowserRecordingContent } from './browser-recording'
 import { browserMadeSegmentPlace, browserPromiseFieldName, browserSkillQueryHasPlaceholder, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
-import { isSensitiveFieldName } from './browser-recording'
+import { browserPromiseImplicitField } from './browser-run-promise'
 
 export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
   /** Recordings one draft is made from (the person's own, of one domain). */
@@ -214,7 +214,7 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
       if (g.bodyNames !== null) {
         if (s.fields === null) g.bodyNames = null
         else for (const f of s.fields) {
-          if (f.name === '_method' || isSensitiveFieldName(f.name)) continue
+          if (browserPromiseImplicitField(f.name)) continue
           if (!browserPromiseFieldName(f.name)) { g.bodyNames = null; break }
           g.bodyNames.add(f.name)
         }

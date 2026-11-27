@@ -37,6 +37,11 @@ describe('the run\'s promise: the verdict', () => {
     expect(verdict(1, '/api/items', { title: '冬の回 ', day: '2026-12-03' }, [null, null]).kind).toBe('broken')
   })
 
+  it('ask: a name that only looks like a login field is checked like any; only `_method` and anti-forgery tokens are exempt', () => {
+    expect(verdict(1, '/api/items', { title: '冬の回', day: '2026-12-03', author: 'x', session_title: 'y', _token: 't', csrf_token: 't' }, [null, null]))
+      .toEqual({ kind: 'ask', fields: ['author', 'session_title'], targets: [], values: [] })
+  })
+
   it('ask: a field outside the declared body; a frame without `body` asks nothing of its fields', () => {
     expect(verdict(1, '/api/items', { title: '冬の回', day: '2026-12-03', owner: 'x', admin: '1' }, [null, null])).toEqual({ kind: 'ask', fields: ['admin', 'owner'], targets: [], values: [] })
     expect(verdict(2, '/api/items/7/notes/a', { anything: 'x' }, [null, null, D('7'), null, D('a')], ['7', 'a'])).toEqual({ kind: 'kept' })
@@ -49,6 +54,8 @@ describe('the run\'s promise: the verdict', () => {
     // A promised value fits as a target (the person said it); an added target too.
     expect(verdict(2, '/api/items/7/notes/冬の回', {}, [null, null, D('7'), null, D('冬の回')], ['7']).kind).toBe('kept')
     expect(verdict(2, '/api/items/7/notes/a', {}, [null, null, D('7'), null, D('a')], ['7'], [{ frame: 2, fields: [], targets: [D('a')], binds: [] }]).kind).toBe('kept')
+    // A target the person allowed on another frame opens nothing here (independent review of #907).
+    expect(verdict(2, '/api/items/7/notes/a', {}, [null, null, D('7'), null, D('a')], ['7'], [{ frame: 1, fields: [], targets: [D('a')], binds: [] }]).kind).toBe('ask')
     // A segment the check left without a digest is never promised.
     expect(verdict(2, '/api/items/7/notes/冬の回', {}, [null, null, D('7'), null, null], ['7']).kind).toBe('ask')
   })
@@ -97,12 +104,11 @@ describe('the run\'s promise: the app builds it, the server reads it strictly', 
     ]) expect(readBrowserRunPromise(bad, FRAMES), JSON.stringify(bad)).toBeNull()
   })
 
-  it('an addition: something in it, plain field names (never `_method` or a login field), digests for targets, binds only of its frame', () => {
+  it('an addition: something in it, field names (never `_method`), digests for targets, binds only of its frame', () => {
     expect(readBrowserRunPromiseAddition({ frame: 1, fields: ['owner'], targets: [D('7')], binds: [{ field: 'title', digest: D('x') }] }, FRAMES)).not.toBeNull()
     for (const bad of [
       { frame: 1, fields: [], targets: [], binds: [] },
       { frame: 1, fields: ['_method'], targets: [], binds: [] },
-      { frame: 1, fields: ['session_id'], targets: [], binds: [] },
       { frame: 1, fields: ['a', 'a'], targets: [], binds: [] },
       { frame: 1, fields: [], targets: ['7'], binds: [] },
       { frame: 2, fields: [], targets: [], binds: [{ field: 'title', digest: D('x') }] },
@@ -129,10 +135,11 @@ describe('a Skill\'s `body` and `bind` (browser.yaml)', () => {
     expect(plain.ok && plain.declaration.writes[0]).toEqual({ method: 'POST', path: '/api/items', query: null, max: 1, fields: {} })
   })
 
-  it('refused: a login or `_method` field, a fixed field, a bound field outside `body`, a bad label, too many', () => {
+  it('refused: `_method`, a fixed field, a login field bound, a bound field outside `body`, a bad label, too many; a login-looking name may be listed in `body`', () => {
+    const listed = parseBrowserSkillDeclaration(y('{ method: POST, path: /a, max: 1, body: [author, csrf_token] }'))
+    expect(listed.ok).toBe(true)
     for (const [w, problem] of [
       ['{ method: POST, path: /a, max: 1, body: [] }', 'bad-body'],
-      ['{ method: POST, path: /a, max: 1, body: [csrf_token] }', 'bad-body'],
       ['{ method: POST, path: /a, max: 1, body: [_method] }', 'bad-body'],
       ['{ method: POST, path: /a, max: 1, body: [a, a] }', 'bad-body'],
       ['{ method: POST, path: /a, max: 1, fields: { kind: note }, body: [kind] }', 'bad-body'],

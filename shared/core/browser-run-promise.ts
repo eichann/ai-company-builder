@@ -21,7 +21,13 @@
  * card, and their 「書いてよい」 adds exactly those to the promise (`BrowserRunPromiseAddition`); the same thing is never asked
  * twice. A run with no promise (an older app) is not checked.
  */
-import { browserPromiseFieldName } from './browser-skill'
+/**
+ * The body fields every write may carry without being in a promise: the frameworks' own anti-forgery tokens (a page puts
+ * them in; they hold no business value). Narrow on purpose — anything else that only looks like a login field is checked
+ * against `body` like any field (independent review of #907).
+ */
+const IMPLICIT_FIELD_RE = /^(?:_?token|authenticity_token|__requestverificationtoken|_?csrf(?:[_-]?token)?|_?xsrf(?:[_-]?token)?|csrfmiddlewaretoken|_wpnonce)$/i
+export const browserPromiseImplicitField = (name: string): boolean => name === '_method' || IMPLICIT_FIELD_RE.test(name)
 
 export type BrowserPromiseSource = 'person' | 'preview' | 'asked'
 export const BROWSER_PROMISE_SOURCES: readonly BrowserPromiseSource[] = ['person', 'preview', 'asked']
@@ -90,8 +96,8 @@ export interface BrowserPromiseState {
   binds: ReadonlyMap<string, string>
   /** Fields the person allowed per frame (beside the frame's own `body`). */
   fields: ReadonlyMap<number, ReadonlySet<string>>
-  /** Targets the person allowed (digests of path segments). */
-  targets: ReadonlySet<string>
+  /** Targets the person allowed, per frame (digests of path segments): an answer for one frame never opens another. */
+  targets: ReadonlyMap<number, ReadonlySet<string>>
   decisions: readonly BrowserPromiseDecision[]
 }
 
@@ -131,7 +137,8 @@ export function readBrowserRunPromiseAddition(v: unknown, frames: readonly Brows
   if (!frame || !Array.isArray(v.fields) || !Array.isArray(v.targets) || !Array.isArray(v.binds)) return null
   if (v.fields.length > L.addFields || v.targets.length > L.addTargets || v.binds.length > L.addBinds) return null
   if (v.fields.length + v.targets.length + v.binds.length === 0) return null
-  if (!v.fields.every(browserPromiseFieldName) || new Set(v.fields).size !== v.fields.length) return null
+  // A field the card showed: any name a permit's check may carry (a JSON body's data-like key too).
+  if (!v.fields.every(checkFieldName) || new Set(v.fields).size !== v.fields.length) return null
   if (!v.targets.every(isDigest) || new Set(v.targets).size !== v.targets.length) return null
   const binds: BrowserRunPromiseAddition['binds'] = []
   for (const x of v.binds) {
@@ -142,6 +149,9 @@ export function readBrowserRunPromiseAddition(v: unknown, frames: readonly Brows
   return { frame: v.frame as number, fields: [...v.fields] as string[], targets: [...v.targets] as string[], binds }
 }
 
+// eslint-disable-next-line no-control-regex
+const checkFieldName = (k: unknown): k is string => typeof k === 'string' && k.length > 0 && k.length <= L.checkFieldName && !/[\u0000-\u001f\u007f]/.test(k) && k !== '_method'
+
 /** A permit's check read strictly (its field names any clean string, its segments as many as the path's), or null. */
 export function readBrowserPermitCheck(v: unknown, segments: number): BrowserPermitCheck | null {
   if (!isMap(v) || !only(v, ['fields', 'segments']) || !isMap(v.fields) || !Array.isArray(v.segments)) return null
@@ -149,8 +159,7 @@ export function readBrowserPermitCheck(v: unknown, segments: number): BrowserPer
   if (names.length > L.checkFields || v.segments.length !== segments || segments > L.segments) return null
   const fields: Record<string, string> = {}
   for (const k of names) {
-    // eslint-disable-next-line no-control-regex
-    if (k.length === 0 || k.length > L.checkFieldName || /[\u0000-\u001f\u007f]/.test(k) || !isDigest(v.fields[k])) return null
+    if (!checkFieldName(k) || !isDigest(v.fields[k])) return null
     fields[k] = v.fields[k] as string
   }
   if (!v.segments.every(s => s === null || isDigest(s))) return null
@@ -162,10 +171,10 @@ export function browserPromiseState(first: BrowserRunPromiseInput, additions: re
   const values = new Set(first.values.map(v => v.digest))
   const binds = new Map(first.binds.map(b => [bindKey(b.frame, b.field), b.digest]))
   const fields = new Map<number, Set<string>>()
-  const targets = new Set<string>()
+  const targets = new Map<number, Set<string>>()
   for (const a of additions) {
     for (const f of a.fields) fields.set(a.frame, (fields.get(a.frame) ?? new Set()).add(f))
-    for (const t of a.targets) targets.add(t)
+    for (const t of a.targets) targets.set(a.frame, (targets.get(a.frame) ?? new Set()).add(t))
     // A field already bound keeps its value: an addition never changes a promised value (it only fills an empty one).
     for (const b of a.binds) if (!binds.has(bindKey(a.frame, b.field))) { binds.set(bindKey(a.frame, b.field), b.digest); values.add(b.digest) }
   }
@@ -211,14 +220,14 @@ export function browserPromiseVerdict(input: {
   const outside: string[] = []
   if (frame.body) {
     const allowed = new Set([...frame.body, ...Object.keys(frame.fields), ...Object.keys(frame.bind ?? {}), ...(promise.fields.get(frameIdx) ?? [])])
-    for (const name of Object.keys(check.fields)) if (!allowed.has(name)) outside.push(name)
+    for (const name of Object.keys(check.fields)) if (!allowed.has(name) && !browserPromiseImplicitField(name)) outside.push(name)
   }
   const segments = browserPathSegments(input.path)
   const targets: number[] = []
   for (const i of browserOpenSegments(frame.path)) {
     if (input.made.has(segments[i] ?? '')) continue
     const d = check.segments[i]
-    if (d !== null && d !== undefined && (promise.values.has(d) || promise.targets.has(d))) continue
+    if (d !== null && d !== undefined && (promise.values.has(d) || promise.targets.get(frameIdx)?.has(d) === true)) continue
     targets.push(i)
   }
   if (unbound.length + outside.length + targets.length === 0) return { kind: 'kept' }

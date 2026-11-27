@@ -54,7 +54,8 @@ export interface PromiseAsk { frame: number; line: string; items: string[]; addi
 export interface WriterPromise {
   state(): BrowserPromiseState
   digest(value: string): string
-  ask(q: PromiseAsk): Promise<boolean>
+  /** `allowed` once the server took the person's 「書いてよい」; `denied` (書かない, the card's time, the run's stop); `failed` (the server did not take it). */
+  ask(q: PromiseAsk): Promise<'allowed' | 'denied' | 'failed'>
 }
 
 /** One held write as the card and the operator learn of it (main's memory only). */
@@ -103,7 +104,7 @@ export interface FrameWriterDeps {
    * A refused write's own address read again (agent-browser.md "Sent is not done"): `unchanged` only when it was read right
    * before the write and reads exactly so now; null otherwise (not read before, unreadable, changed).
    */
-  readAgain?(heldPath: string): Promise<'unchanged' | null>
+  readAgain?(heldPath: string, sent: Readonly<Record<string, string>> | null): Promise<'unchanged' | null>
   /** The run's promise (absent or null: none — an older server; nothing is checked and only the old reports are sent). */
   promise?: () => WriterPromise | null
   now?: () => number
@@ -150,6 +151,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   const madeAll = new Set<string>()
   /** Held writes waiting for the person's answer on the card (no permit asked yet). */
   let asking = 0
+  /** When the last question on the card was answered (`performance.now()`; 0: none yet): the send after it starts its own wait. */
+  let askEnded = 0
 
   /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
   /** `write` / `permittedAt`: its permit once given, so a write given up as unknown can still be answered about on the card. */
@@ -236,8 +239,10 @@ export function createFrameWriter(deps: FrameWriterDeps) {
         }
         h.asking = true
         asking++
-        const allowed = await promise.ask({ frame: frame.frame, line, items, addition }).catch(() => false)
+        const answer = await promise.ask({ frame: frame.frame, line, items, addition }).catch(() => 'failed' as const)
+        const allowed = answer === 'allowed'
         asking--
+        askEnded = performance.now()
         h.asking = false
         if (closed || locked || over || !deps.going()) {
           keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null, why: 'run-over' }, 'not-sent')
@@ -245,7 +250,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
         }
         verdict = allowed ? verdictNow() : verdict
         if (!allowed || verdict.kind !== 'kept') {
-          keep({ line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why: 'not-allowed' }, 'refused')
+          // The person's 「書かない」 is said so; a 「書いてよい」 the server did not take is no permit (never "the person said no").
+          keep({ line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why: answer === 'failed' ? 'no-permit' : 'not-allowed' }, 'refused')
           return fail
         }
       }
@@ -318,7 +324,9 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     const named = kind === 'done' && (makers.has(frame.frame) || promise) ? createdIdOf(answer.body) : null
     const createdNow = named !== null && !sentCarries(shape, named) ? named : undefined
     // The site's error proves nothing was saved only when the write's own address, read right before it, reads the same now.
-    const refusal = kind === 'refused' ? ((await deps.readAgain?.(shape.path).catch(() => null)) === 'unchanged' ? 'unchanged' as const : 'unconfirmed' as const) : undefined
+    const refusal = kind === 'refused'
+      ? ((await deps.readAgain?.(shape.path, sentBodyWhole(shape) ? sentFields(shape) : null).catch(() => null)) === 'unchanged' ? 'unchanged' as const : 'unconfirmed' as const)
+      : undefined
     const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined, createdNow, refusal === 'unchanged' && promise ? 'unchanged' : undefined)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
@@ -388,6 +396,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     sending: () => pending.size,
     /** Held writes waiting for the person's answer on the card (the wait for them is the card's, not the 45 s of a send). */
     asking: () => asking,
+    /** When the last question on the card was answered (0: none): what comes after it is not counted from before it. */
+    askEnded: () => askEnded,
     /** How many writes were held in this run so far (activity, also of one already decided). */
     heldCount: () => heldSoFar,
     /**

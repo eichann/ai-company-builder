@@ -4882,8 +4882,11 @@ can do, how it is asked and whether it finishes are not made worse.
 - **The one rule** (`shared/core/browser-run-promise.ts`, pure, knows no site): `browserPromiseVerdict` — asked by the
   server at every permit of a run with a promise and by the app's writer before it asks (the same answer both sides):
   a bound field holding another value than promised, or missing → `broken` (never permitted, never asked); a bound field
-  with no promised value, a body field outside the frame's declared `body` (when declared), or an open path segment
-  (`{n}` / `{x}`) that is neither an id this run's own done write returned nor a promised value → `ask`; else `kept`.
+  with no promised value, a body field outside the frame's declared `body` (when declared; only `_method` and the
+  frameworks' anti-forgery token names are exempt, `browserPromiseImplicitField` — a name that merely looks like a login
+  field, `author`, `session_title`, is checked like any: independent review), or an open path segment (`{n}` / `{x}`) that is
+  neither an id this run's own done write returned, a promised value, nor a target the person allowed **on that very frame**
+  (an answer for one frame never opens another: independent review) → `ask`; else `kept`.
   `{made:<n>}` frames keep their own rule ("Writes only to what this run made").
 - **What a promise holds** — **digests only**: `hmac:` + HMAC-SHA256 of the value (NFC) under a 32-byte key the work wiring
   makes per run and keeps in main's memory (`work.ts`), never sent. `values` (`person`: the tool's `values`, the person's own;
@@ -4894,8 +4897,8 @@ can do, how it is asked and whether it finishes are not made worse.
   `member:<id>`), the targets the frames, the fields free to change the frame's `body`: the server's own, never the app's.
   Not checked: a Skill's `account_marker` (no reader of it on this path yet: said).
 - **`browser.yaml`'s two optional keys** (`shared/core/browser-skill.ts`, additive: a Skill without them runs as before):
-  `body: [name, …]` (1–32 body field names its writes may carry besides fixed / bound fields, `_method` and login / CSRF /
-  session fields; never one of those, never a fixed field) and `bind: { field: 呼び名 }` (1–8; a field never fixed or
+  `body: [name, …]` (1–32 body field names its writes may carry besides fixed / bound fields and `_method`; never `_method`
+  or a fixed field; a login-looking name may be listed — it is a name, never a value) and `bind: { field: 呼び名 }` (1–8; a field never fixed or
   sensitive, in `body` when that is declared; a label one clean line ≤ 40 in NFC) — `bad-body` / `bad-bind`. The card's line
   says both (`browserSkillWriteLine`). **The draft from recordings writes `body` itself** (`browser-skill-draft.ts`: every name
   every recorded send carried; none when a body was not read or a name is not a plain field name); `bind` is the FDE's.
@@ -4921,9 +4924,10 @@ can do, how it is asked and whether it finishes are not made worse.
   (`BrowserWriteView.ask`: the line and what is outside the promise in plain words — field names, the target segment, a
   bound field's value; the person's card only) with ［書いてよい］／［書かない］ (`browserLines:allowWrite`, a window showing
   the consultation; the AI's tools never reach it). 「書いてよい」 → `promise-add` with exactly that → the permit; 「書かない」,
-  the card's 10 minutes or the run's stop → the write is refused (`not-allowed`), never sent. While it waits, the 45 s
-  give-up does not run (`writer.asking()`), and a write given up while asked is `not-sent`, never `unknown` (it asked for no
-  permit). The same thing is never asked twice in a run. The done write of any frame reports its `created` (only with a
+  the card's 10 minutes (never past the work's own operating time) or the run's stop → the write is refused (`not-allowed`),
+  never sent; a 「書いてよい」 the server did not take is `no-permit`, never "the person said no". While it waits, the 45 s
+  give-up does not run (`writer.asking()`), and the send after an answer gets its own whole 45 s from the answer
+  (`writer.askEnded()`; Codex review); a write given up while asked is `not-sent`, never `unknown` (it asked for no permit). The same thing is never asked twice in a run. The done write of any frame reports its `created` (only with a
   promise: an older server refuses the key). Words to the operator: `outside-promise`, `not-allowed` (`WORK_WRITE_WHY_WORDS`).
 - **Completion** (owner's condition): the fictional copy-and-register flow (`browser-window-electron.test.ts` 「the completion
   regression」) runs with bound fields and a listed body and asks nothing (the copy's id is made by the run, the values are
@@ -4947,13 +4951,16 @@ saved". A 202 only accepts, a 200 can carry a business error, and a site may sav
   `doneDiffers` / `doneUnconfirmed` otherwise; the card's headline likewise (`CW.done` / `doneDiffers` / `doneUnconfirmed`) and
   its `state` is `all_ok` only for `matched` (a card with nothing read back and nothing compared is never ✓ — point 8), `ng`
   for `differs` (a promised value read otherwise is its own check line `promisedDiffers`), else `not_read`.
-- **A refused write** is read again at its own address before it is reported (`readAgain`): exactly the answer read right
-  before it → "not saved" (`refusal: 'unchanged'`, reported `refused` with `checked: 'unchanged'`); anything else →
-  `unconfirmed`. The card says 「サイトが「422」を返しました。保存されたかどうかは確かめられていません」 or, checked,
+- **A refused write** is read again at its own address before it is reported (`readAgain`) and compared with that address
+  as it read **right before this very write** (not the run's first look: Codex review) — "not saved" (`refusal:
+  'unchanged'`, reported `refused` with `checked: 'unchanged'`) only when both reads are one JSON object showing **every
+  field the write sent** and the text did not move (`readBackUnchanged`; a list page that did not move proves nothing about
+  a create: independent review); anything else → `unconfirmed`. The card says 「サイトが「422」を返しました。保存されたかどうかは確かめられていません」 or, checked,
   「…読み直して変わっていないことを確かめました（保存されていません）」; the operator hears 「サイトがエラーを返しました（保存された
   かは確かめていません）…もう一度押せます」. The run goes on as before (a corrected try is a new write).
 - **Server**: `browser_frame_refusal_checks` (append-only, only beside a `refused` write, trigger): a refused write without
-  one is **in doubt for every later run** (the write ledger's `ledgerDoubts`) — not for its own run (its corrected try goes
+  one, **of a run that has a promise** (an app that reads refusals again; an older app's refusals and rows from before stay
+  as they were), is **in doubt for every later run** (the write ledger's `ledgerDoubts`) — not for its own run (its corrected try goes
   on: `exceptRun`) and not once a later write of its own run to the same target was `done`; it may be answered about
   (`confirm`, like `unknown`, past its window), and the view says `checked` and its `confirmableAt`. A late refusal after
   `unknown` ends the doubt only with `checked`. The app's card lists an unconfirmed refusal under 「分からない」 (not under
@@ -4976,7 +4983,8 @@ consultation AI, which has far wider tools: a way around the blindfold through t
   else); main continues only a card the member answered ［そのまま進める］, for the same site, Skill and consultation, within
   30 minutes, **once** — else `BROWSER_WORK_WORDS.badDecision`, nothing done. That run's operator gets `person.decided:
   [{ question (outside text), answer: 'はい（そのまま進める）' }]` and its promise `decisions: ['proceed']`. The consultation AI
-  never sees the question (`askedFooter` tells it to pass the card's id).
+  never sees the question (`askedFooter` tells it to pass the card's id). The answer is used up only once the new run
+  really starts (a request refused before that — no window, busy, the Skill — keeps it).
 
 Tests: `server/tests/unit/browser-run-promise.test.ts` (the verdict as a table — kept, broken by value / missing, asked for
 fields / targets / values; an addition fills, never changes; the label rule; the readers' refusals; `body` / `bind` in

@@ -1416,11 +1416,15 @@ describe('the write ledger across requests (agent-browser.md "The write ledger a
     const first = await lostAnswer()
     value(frames.report(alice, first, { write: 1, result: 'done', reason: 'read-back' }, PC))
     expect(conn.prepare('SELECT state, reason FROM browser_frame_writes WHERE company_id = ? AND run_id = ?').get(CO, first)).toEqual({ state: 'done', reason: 'read-back' })
-    const next = await openAdhoc()
-    expect(code(await permit(next.runId, 1))).toBe('ok')
+    // A run of an app that keeps the run's promise (its refusals are read again before they count as "not saved").
+    const waiting = value(await frames.start(alice, { plan: adhoc }, PC))
+    value(frames.promise(alice, waiting.runId, { values: [], binds: [], decisions: [] }, PC))
+    const next = value(await approve(alice, waiting))
+    expect(code(await frames.permit(alice, next.runId, { frame: 1, request: FITS[1], check: { fields: {}, segments: [null, null, null] } }, PC))).toBe('ok')
     value(report(next.runId, 1, 'unknown'))
     value(frames.end(alice, next.runId))
-    // The site's late error alone proves nothing was saved? No ("Sent is not done"): still in doubt.
+    // The site's late error alone proves nothing was saved? No ("Sent is not done"): still in doubt (an unknown write is,
+    // whichever app made it).
     value(report(next.runId, 1, 'refused'))
     const third = await openAdhoc()
     expect(code(await permit(third.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
@@ -1569,7 +1573,6 @@ describe('the run\'s promise (agent-browser.md "The run\'s promise")', () => {
     for (const bad of [
       { frame: 1, fields: [], targets: [], binds: [] },
       { frame: 1, fields: ['_method'], targets: [], binds: [] },
-      { frame: 1, fields: ['csrf_token'], targets: [], binds: [] },
       { frame: 2, fields: [], targets: [], binds: [{ field: 'title', digest: D('冬の回') }] },
       { frame: 1, fields: [], targets: ['42'], binds: [] },
       { frame: 9, fields: ['memo'], targets: [], binds: [] },
@@ -1640,6 +1643,23 @@ describe('the run\'s promise (agent-browser.md "The run\'s promise")', () => {
 describe('sent is not done (agent-browser.md "Sent is not done")', () => {
   const confirm = (runId: string, write: number, answer: string) => frames.confirm(alice, runId, { write, answer }, PC)
   const DAY = 24 * 60 * 60 * 1000
+  /** The register write with its promise check (accepted and unused for a run without a promise). */
+  const permit = (runId: string, frame: number) => frames.permit(alice, runId, { frame, request: FITS[frame], check: { fields: {}, segments: [null, null, null] } }, PC)
+  /** A run of an app that keeps the run's promise (an empty one is enough). */
+  async function openAdhoc(): Promise<BrowserFrameRunView> {
+    const run = value(await frames.start(alice, { plan: adhoc }, PC))
+    value(frames.promise(alice, run.runId, { values: [], binds: [], decisions: [] }, PC))
+    return value(await approve(alice, run))
+  }
+
+  it('a refusal of a run without a promise (an older app, a row from before) is no doubt, as before', async () => {
+    const run = value(await approve(alice, value(await frames.start(alice, { plan: adhoc }, PC))))
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'refused'))
+    value(frames.end(alice, run.runId))
+    const next = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(next.doubts).toEqual([])
+  })
 
   it('the site\'s error alone is no proof: its own run goes on, every later run is held until it is read again unchanged or answered', async () => {
     const run = await openAdhoc()
