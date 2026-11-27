@@ -499,6 +499,11 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   const memo = await cssBox('memo')
   await page.executeJavaScript(`document.getElementById('fields').insertAdjacentHTML('beforebegin', '<div style="height: 50px">お知らせ</div>')`, true)
   out.movedAim = beforeShift ? await win.browse.aim!({ do: 'click', x: memo.x + 5, y: memo.y + 5 }) : null
+  // An element that became a floating layer since the snapshot (its z-index raised, its box the same): refused as moved.
+  const beforeLayer = await shown()
+  await page.executeJavaScript(`document.getElementById('note').style.zIndex = '40'`, true)
+  const note = await cssBox('note')
+  out.layerAim = beforeLayer ? await win.browse.aim!({ do: 'click', x: note.x + 5, y: note.y + 5 }) : null
   // Typing into the field that has the focus (pressed by position first); a password field is never typed into.
   out.memoPress = await pressAt('memo')
   const typeAnswer = parseBrowseAnswer(JSON.stringify({ do: 'type', text: 'こんにちは' }), { snapshot: await shown(), items: 0 })

@@ -68,6 +68,7 @@ const MENU_PAGE = `<!doctype html><meta charset="utf-8"><title>routes</title>
 #side a { display: block; font-size: 6px; line-height: 9px } #list { margin-left: 170px } .row { height: 30px; display: flex; gap: 8px; align-items: center }
 .more { width: 40px } #pop { position: absolute; z-index: 20; background: #fff; border: 1px solid #888; width: 200px } #pop div { cursor: pointer; padding: 6px }</style>
 <div id="side">${Array.from({ length: 60 }, (_, i) => `<a href="/side/${i}">メニュー${i}</a>`).join('')}</div>
+<div id="note" style="position: fixed; right: 0; bottom: 0; width: 120px; height: 40px; z-index: 0; background: #ffd">お知らせ</div>
 <div id="fields"><label id="uplabel" for="up">ファイルを添付</label><input id="up" type="file"> <input id="memo" aria-label="メモ"> <input id="pw" type="password" aria-label="合言葉"></div>
 <div id="list">${Array.from({ length: 400 }, (_, i) => `<div class="row"><a href="/route/${i}">経路${i}</a><button class="more" type="button" aria-label="その他${i}" data-i="${i}">…</button></div>`).join('')}</div>
 <script>

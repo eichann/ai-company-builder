@@ -315,6 +315,10 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   const aimAt = (x, y) => {
     if (!(x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight)) return no('outside')
     if (moved()) return no('moved')
+    // The page now, not the snapshot's cached ancestry: an element that became a floating layer since must be seen as one
+    // (Codex review).
+    layerCache.clear()
+    overlayCache.clear()
     const top = document.elementFromPoint(x, y)
     if (!top || top === document.documentElement || top === document.body) return no('nothing')
     // A floating layer the screen image did not show (appeared since): the point may be on something else now.

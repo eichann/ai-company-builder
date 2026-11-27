@@ -534,6 +534,8 @@ test('pressing by position: a menu choice with no ref is pressed where the scree
   assert.deepEqual(r.offAim, { ok: false, why: 'outside' })
   // The page moved after its snapshot and screen: the press is refused (the operator sees the page again).
   assert.deepEqual(r.movedAim, { ok: false, why: 'moved' })
+  // An element that became a floating layer after the snapshot (same box): the image did not show it on top — refused.
+  assert.deepEqual(r.layerAim, { ok: false, why: 'moved' })
   // Typing into the focused field: the text field takes it, logged by its label; a password field never.
   assert.equal((r.memoPress as { acted: string }).acted, 'ok')
   assert.deepEqual(r.typeAim, { ok: true, role: 'textbox', logLabel: 'メモ' })
