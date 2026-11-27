@@ -138,10 +138,15 @@ async function uncut(i: number) {
   })
   await win.browse.enter(() => false, { holdWrite: held => writer.hold(held), neverRead: () => false, detached: () => writer.abandon('detached') })
   const answer = await page.executeJavaScript(`save('w${i}')`, true)
-  const mine = hits.filter(h => h.name === `w${i}`)
+  // A form's navigation: the page lands on the address it posted to with the site's answer (the parked address never shows).
+  const landed = new Promise<void>(resolve => page.once('did-stop-loading', () => resolve()))
+  await page.executeJavaScript(`form('f${i}')`, true)
+  await Promise.race([landed, wait(5000)])
+  const formLanded = { url: page.getURL(), text: await page.executeJavaScript('document.body.innerText', true).catch(() => null) }
+  const mine = hits.filter(h => h.name === `w${i}` || h.name === `f${i}`)
   await win.browse.leave()
   win.close()
-  return { answer, copies: mine.filter(h => !h.original).length, originals: mine.filter(h => h.original).length, records: writer.records().map(r => r.outcome) }
+  return { answer, formLanded, copies: mine.filter(h => !h.original).length, originals: mine.filter(h => h.original).length, records: writer.records().map(r => r.outcome) }
 }
 
 app.on('window-all-closed', () => {})

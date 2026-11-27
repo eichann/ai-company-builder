@@ -3917,7 +3917,8 @@ kept on purpose (time only): the end not waiting twice after a give-up, the mome
 write cut before the permit, while the copy is on its way and after its answer, by `debugger.detach()`, closing the window
 and a reload — the site gets the permitted copy once or nothing, never the page's original; cut before the permit the
 write is `not-sent` and reported `not_sent`; a write that reached the site never says not sent; uncut, the page still gets
-the site's answer — mutation-checked: holding without parking sends the original in 8 of the 9 cases), the work's
+the site's answer, and a form lands on the address it posted to with that answer (the parked address never shows) —
+mutation-checked: holding without parking sends the original in 8 of the 9 cases), the work's
 `detached` wiring in `browser-frame-writes.test.ts` (parked → not sent, not parked yet → unknown; each branch
 mutation-checked; kept on purpose: the `parking` set itself, whose race no test can make),
 `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no

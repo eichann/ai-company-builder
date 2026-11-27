@@ -32,7 +32,7 @@ interface Case {
   records: string[]
   page: unknown
 }
-interface Result { error?: string; cases: Case[]; uncut: { answer: unknown; copies: number; originals: number; records: string[] } }
+interface Result { error?: string; cases: Case[]; uncut: { answer: unknown; formLanded: { url: string; text: string | null }; copies: number; originals: number; records: string[] } }
 let result: Result
 
 function freePort(): Promise<number> {
@@ -103,9 +103,12 @@ test('a write never says "not sent" when it reached the site, and a copy cut on 
   assert.deepEqual(sending.reports, ['done'])
 })
 
-test('uncut, the page still gets the site\'s answer through its held write (its flow goes on)', { skip }, () => {
-  assert.deepEqual(result.uncut.answer, { status: 201, body: { id: 7, name: `w${result.cases.length}` } })
-  assert.equal(result.uncut.copies, 1)
+test('uncut, the page still gets the site\'s answer through its held write (its flow goes on): a fetch\'s answer, a form\'s page at the address it posted to', { skip }, () => {
+  const n = result.cases.length
+  assert.deepEqual(result.uncut.answer, { status: 201, body: { id: 7, name: `w${n}` } })
+  assert.equal(result.uncut.formLanded.url, 'https://op.test/w/save')
+  assert.deepEqual(JSON.parse(result.uncut.formLanded.text ?? 'null'), { id: 7, name: `f${n}` })
+  assert.equal(result.uncut.copies, 2)
   assert.equal(result.uncut.originals, 0)
-  assert.deepEqual(result.uncut.records, ['done'])
+  assert.deepEqual(result.uncut.records, ['done', 'done'])
 })
