@@ -312,6 +312,14 @@ test('a run reopens the window of a login kept on this PC (also one an earlier r
   w.browser.policyAnswered('c1', policy('enforce', [SITE, OTHER]))
   assert.deepEqual(await w.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: false }, 'that reason is not said again once the member opened it')
 
+  // A memory login made while the sandbox was 記録だけ still counts once keeping is allowed (it then opens kept).
+  const upgraded = world()
+  upgraded.browser.policyAnswered('c1', policy('observe'))
+  upgraded.browser.open('c1', SITE.host)
+  upgraded.opened[0].close()
+  upgraded.browser.policyAnswered('c1', policy('enforce'))
+  assert.deepEqual(await upgraded.browser.windowForRun('c1', SITE.host, signal), { kind: 'opened' })
+
   const changed = world()
   changed.browser.policyAnswered('c1', policy('enforce'))
   changed.browser.open('c1', SITE.host)

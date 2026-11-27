@@ -273,13 +273,15 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     if (deps.stopped(companyId)) return said(W.stopped)
     const operator = deps.operator()
     if (!operator) return said(W.noOperator)
+    // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
+    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     const found = await deps.openWindow?.(companyId, host, input.signal)
+    if (found && deps.stopped(companyId)) return said(W.stopped)
     const win = deps.window(companyId, host)
     const reader = deps.reader(companyId, host)
     if (!win || win.closed() || !reader) return said(noWindowWords(W.noWindow, found))
     const windowKey = `${companyId}\0${host}`
     if (busyWindows.has(windowKey)) return said(W.busy)
-    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     if (!stillCurrent()) return said(W.stoppedBy[input.signal.aborted ? 'stop-button' : 'context-changed'])
     busyWindows.add(windowKey)
 

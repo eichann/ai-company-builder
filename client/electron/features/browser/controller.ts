@@ -321,9 +321,9 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       let win = find()
       let kind: 'open' | 'opened' = 'open'
       if (!win) {
-        const held = keepsNow(user, companyId, host)
-          ? !!deps.kept?.held(user, companyId, host)
-          : partitions.has(browserPartition(user, companyId, host))
+        // A memory login made before keeping was allowed counts too (the window then opens kept: one login there).
+        const held = partitions.has(browserPartition(user, companyId, host))
+          || (keepsNow(user, companyId, host) && !!deps.kept?.held(user, companyId, host))
         if (!held) return { kind: 'none', loginRemoved: loginRemoved.has(siteKey(user, companyId, host)) }
         if (!openWindow(companyId, host, { focus: false })) return { kind: 'none', loginRemoved: false }
         log.warn(`[browser] ${host}: the window a run needs was opened again (its login is still held)`)

@@ -101,12 +101,14 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     if (deps.stopped(companyId)) return refused(W.stopped)
     const operator = deps.operator()
     if (!operator) return refused(W.noOperator)
+    // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
+    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     const found = await deps.openWindow?.(companyId, host, input.signal)
+    if (found && deps.stopped(companyId)) return refused(W.stopped)
     const win = deps.window(companyId, host)
     if (!win || win.closed()) return refused(noWindowWords(W.noWindow, found))
     const windowKey = `${companyId}\0${host}`
     if (busyWindows.has(windowKey)) return refused(W.busy)
-    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     if (!stillCurrent()) return refused(W.interrupted)
 
     // The server decides first: nothing is read or started unless it gives the run (and its lock). The window is taken

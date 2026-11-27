@@ -153,6 +153,19 @@ test('a window closed meanwhile opens again for the run (the controller decides)
   }
 })
 
+test('a sign-in as another member while the window opens stops the run before the server is asked', async () => {
+  const { w, run } = world({ window: null, openWindow: (wd, surface) => { wd.window = surface; wd.user = 'u-2'; return { kind: 'opened' } } })
+  assert.deepEqual(await run(), { kind: 'refused', words: W.interrupted })
+  assert.deepEqual(w.calls, [])
+  assert.equal(w.entered, 0)
+})
+
+test('the AI stopped while the window opened: nothing is asked of the server', async () => {
+  const { w, run } = world({ window: null, openWindow: (wd, surface) => { wd.window = surface; wd.stopped = true; return { kind: 'opened' } } })
+  assert.deepEqual(await run(), { kind: 'refused', words: W.stopped })
+  assert.deepEqual(w.calls, [])
+})
+
 test('no window and nothing to open: the words say so, and why when the app removed the kept login for safety', async () => {
   const none = world({ window: null, openWindow: () => ({ kind: 'none', loginRemoved: false }) })
   assert.deepEqual(await none.run(), { kind: 'refused', words: W.noWindow })

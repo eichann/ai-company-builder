@@ -675,10 +675,17 @@ export function createBrowserWindowShell(options: {
       if (loaded) { resolve(true); return }
       if (contents.isDestroyed() || signal.aborted) { resolve(false); return }
       let timer: ReturnType<typeof setTimeout> | undefined
-      function done(ok: boolean) { clearTimeout(timer); signal.removeEventListener('abort', onAbort); resolve(ok) }
+      function done(ok: boolean) {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        if (!contents.isDestroyed()) contents.removeListener('destroyed', onAbort)
+        resolve(ok)
+      }
       function onAbort() { done(false) }
       timer = setTimeout(onAbort, ms)
       signal.addEventListener('abort', onAbort, { once: true })
+      // A window closed before its first page answers at once (no wait to the end).
+      contents.once('destroyed', onAbort)
       firstLoad.push(() => done(true))
     })
     return { setMode, record, command, firstLoaded, windowClosed: () => endRecording('closed') }

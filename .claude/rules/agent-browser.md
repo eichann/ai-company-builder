@@ -454,7 +454,9 @@ the login is memory-only, which stays the rule ("Keeping a login on disk").
   kept folder loaded this run or on disk (`kept.held`) — one opened through `open`'s own path (`openWindow`: the
   listed site, the partition rule; not brought to the front if already open), logged by host (`opened`); else
   `none`. It waits for the page's first load (`whenLoaded`, the shell's, ≤ 20 s and never past the turn's signal);
-  after that the run's own checks decide. Nothing is opened before a valid answer, for a site the policy no longer
+  after that the run's own checks decide — the context is captured **before** the wait (a sign-in or setting change
+  during it stops the run: Codex review) and the AI stop is asked again after it. A login made in memory before keeping
+  was allowed counts as held (the window then opens kept, and the member logs in there once). Nothing is opened before a valid answer, for a site the policy no longer
   lists (its memory login was cleared with it), after 「ログインを消す」, for another account or a site never opened
   in this app run (the first time stays the member's ［開いてログイン］).
 - **A login form in the window** is the operator's `need-login` stop; its words (browse and work):
@@ -464,6 +466,11 @@ the login is memory-only, which stays the rule ("Keeping a login on disk").
   safety (the sandbox or the level changed, an AI turn without the sandbox ran: `loginRemoved`, cleared when the member
   opens or clears the site), a run that finds no window says `BROWSER_WORDS.loginRemoved` before its `noWindow`. A
   refusal or a site taken away answers `notAllowed` as before.
+- **Said, not closed** (independent review): the window opens before the server's gate of the run (`runStart`, the
+  inspection's plan), so a run the server then refuses (this PC, the person's level) has still opened the member's own
+  window of a listed site with their own login — the AI reads nothing of it; a 「ログインを消す」 racing a run for a login
+  only on disk (an earlier app run's) may open it for a moment before the removal clears it (the removal still ends with
+  nothing on disk, as for 「開いてログイン」).
 - **A window the member closes** is destroyed as before (decision, the simplest that keeps the guards: a hidden window
   would keep its page, timers and connections running unseen); the next run opens it again with the same memory login.
 
