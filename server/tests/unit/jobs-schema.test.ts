@@ -85,6 +85,8 @@ const LATER_TABLES = [
   // agent-browser.md "Recovering from a failed write": the person's answer about a write in doubt.
   'browser_frame_write_confirms',
   'browser_frame_made',
+  // agent-browser.md "The write ledger across requests": each permitted write's target, kept across runs.
+  'browser_write_ledger',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

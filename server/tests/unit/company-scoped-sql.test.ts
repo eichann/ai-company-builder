@@ -219,6 +219,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_frame_runs: ['adapters/sqlite/browser-frames.ts'],
   browser_frames: ['adapters/sqlite/browser-frames.ts'],
   browser_frame_writes: ['adapters/sqlite/browser-frames.ts'],
+  // The write ledger across requests (agent-browser.md "The write ledger across requests").
+  browser_write_ledger: ['adapters/sqlite/browser-frames.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */

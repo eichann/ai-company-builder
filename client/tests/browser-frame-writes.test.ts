@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
+  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readBackLanded, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -579,9 +579,10 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
     async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
-    async frameGet() { w.calls.push('frameGet'); return w.frameGet() },
-    async frameConfirm(_c: string, _r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}`); return w.frameConfirm() },
-    async frameReport(_c: string, _r: string, body: { result: string }) { w.calls.push(`frameReport ${body.result}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
+    // Another run than this task's (the write ledger: an earlier request's write) is named in the call.
+    async frameGet(_c: string, r: string) { w.calls.push(`frameGet${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameGet() },
+    async frameConfirm(_c: string, r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameConfirm() },
+    async frameReport(_c: string, _r: string, body: { result: string; reason?: string }) { w.calls.push(`frameReport ${body.result}${body.reason === 'read-back' ? ' read-back' : ''}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
   }
   let steps = 0
@@ -1382,4 +1383,123 @@ test('a write task whose window was closed opens it again first (the controller 
   const said = await none.tool.execute({ site: HOST, task: 'クーポンを作る', skill: 'coupons' })
   assert.match(JSON.stringify(said), /サイトの窓が開いていません/)
   assert.deepEqual(none.w.calls, ['openWindow'], 'nothing asked of the server or the window')
+})
+
+// ── The write ledger across requests (agent-browser.md "The write ledger across requests") ──────────────────────────────
+
+const EARLIER_RUN = `bf_${'e'.repeat(32)}`
+const EARLIER = { runId: EARLIER_RUN, write: 3, frame: { method: 'POST', path: '/coupons', fields: {} }, permittedAt: '2026-11-24T10:00:00.000Z', confirmableAt: '2026-11-24T10:00:35.000Z' }
+/** A pre-approved Skill run whose start names an earlier write in doubt (or none). */
+const withDoubts = (doubts: unknown[], over: Partial<WorkWorld> = {}) => workWorld({
+  answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: { ...started({ needsApproval: false }), doubts } }), ...over,
+})
+const viewOf = (wiring: ReturnType<typeof workWorld>['wiring']) => (wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView } | null)?.view
+async function untilAsked(world: ReturnType<typeof workWorld>): Promise<BrowserWriteView> {
+  for (let i = 0; i < 200; i++) {
+    const v = viewOf(world.wiring)
+    if (v?.result?.confirm?.canNow) return v
+    await new Promise(r => setTimeout(r, 5))
+  }
+  throw new Error('the card never asked')
+}
+
+test('an earlier write in doubt is asked on the card before the operator works; 「されていなかった」 lets the work go on, answered on that earlier run', async () => {
+  const world = withDoubts([EARLIER])
+  const words = world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  const asked = await untilAsked(world)
+  assert.equal(asked.result?.headline, CW.earlierDoubt)
+  assert.deepEqual(asked.result?.unknown, ['POST /coupons'])
+  assert.deepEqual(world.cards, [FRAME_RUN])
+  // Nothing of the work yet: no operator, no window in ai mode, no permit, nothing sent.
+  assert.equal(world.w.calls.some(c => c.startsWith('step ') || c === 'enter' || c === 'framePermit'), false)
+  const answered = await world.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
+  assert.equal(answered?.ok, true)
+  assert.ok(world.w.calls.includes(`frameConfirm 3 not_done @${EARLIER_RUN}`))
+  assert.equal((await words).startsWith(W.done), true)
+  assert.equal(world.w.site.requests.length, 1)
+  assert.deepEqual(world.cards, [FRAME_RUN], 'one card for the run')
+})
+
+test('「済んでいた」 stops the request before anything is written (it may be that same write again): fixed words, the run ended', async () => {
+  const world = withDoubts([EARLIER])
+  const words = world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  await untilAsked(world)
+  await world.wiring.confirm(COMPANY, FRAME_RUN, 'done')
+  assert.equal(await words, workWordsForAi({ kind: 'stopped', why: 'earlier-done' }, [], []))
+  assert.equal(world.w.calls.some(c => c.startsWith('step ') || c === 'framePermit'), false)
+  assert.equal(world.w.site.requests.length, 0)
+  assert.equal(viewOf(world.wiring)?.phase, 'failed')
+  for (let i = 0; i < 50 && !world.w.calls.includes('frameEnd'); i++) await new Promise(r => setTimeout(r, 5))
+  assert.ok(world.w.calls.includes('frameEnd'))
+})
+
+test('no answer within the card\'s time, or the turn stopped: nothing written; each doubt is asked in turn', async () => {
+  let t = Date.parse('2026-11-25T10:00:00.000Z')
+  const late = withDoubts([EARLIER], { now: () => t })
+  const words = late.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  await untilAsked(late)
+  t += BROWSER_FRAME_RUN_TIMES.approveSkill
+  assert.equal(await words, workWordsForAi({ kind: 'stopped', why: 'earlier-unknown' }, [], []))
+  assert.equal(late.w.site.requests.length, 0)
+
+  const cut = withDoubts([EARLIER], { abortAfterMs: 60 })
+  assert.equal(await cut.tool.execute({ site: HOST, task: 'x', skill: 'coupons' }), workWordsForAi({ kind: 'stopped', why: 'stop-button' }, [], []))
+  assert.equal(cut.w.calls.some(c => c.startsWith('step ')), false)
+
+  const two = withDoubts([EARLIER, { ...EARLIER, write: 4 }])
+  const both = two.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  await untilAsked(two)
+  await two.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
+  await untilAsked(two)
+  assert.equal(two.w.calls.some(c => c.startsWith('step ')), false, 'the second doubt is asked before the work')
+  await two.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
+  assert.equal((await both).startsWith(W.done), true)
+  assert.ok(two.w.calls.includes(`frameConfirm 4 not_done @${EARLIER_RUN}`))
+})
+
+test('a run whose start names no doubt is not asked anything (the work as before)', async () => {
+  const world = withDoubts([])
+  assert.equal((await world.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })).startsWith(W.done), true)
+  assert.equal(world.w.calls.some(c => c.startsWith('frameConfirm') || c.startsWith('frameGet')), false)
+})
+
+test('the read-back: a write whose answer was lost is found done when its own address reads every sent value after a change', async () => {
+  const landed = withDoubts([], {
+    site: { requests: [], answer: () => null },
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false, afterRead: ['/coupons'] }) }),
+    reads: { '/coupons': '{"title":"秋のクーポン"}' },
+  })
+  landed.w.onStep = () => { landed.w.reads['/coupons'] = '{"title":"冬のクーポン"}' }
+  const said = await landed.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  assert.ok(landed.w.calls.includes('frameReport done read-back'))
+  const view = viewOf(landed.wiring)
+  assert.equal(view?.result?.confirm, null, 'the person is not asked')
+  assert.deepEqual(view?.result?.unknown, [])
+  assert.match(view?.result?.headline ?? '', /読み直したところ/)
+  assert.equal(said, workWordsForAi({ kind: 'stopped', why: 'read-back' }, [], []))
+  assert.equal(landed.w.site.requests.length, 1, 'never sent again')
+
+  // Nothing changed (the value was already so), or the read differs: no proof → the person is asked as before.
+  for (const [before, after] of [['冬のクーポン', '冬のクーポン'], ['秋のクーポン', '秋のクーポン']]) {
+    const not = withDoubts([], {
+      site: { requests: [], answer: () => null },
+      frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false, afterRead: ['/coupons'] }) }),
+      reads: { '/coupons': `{"title":"${before}"}` },
+    })
+    not.w.onStep = () => { not.w.reads['/coupons'] = `{"title":"${after}"}` }
+    const words = await not.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+    assert.equal(not.w.calls.includes('frameReport done read-back'), false, `${before} → ${after}`)
+    assert.equal(words, workWordsForAi({ kind: 'unknown' }, [], []))
+  }
+})
+
+test('readBackLanded: every sent value and a change, nothing less', () => {
+  const sent = { title: '冬', price: '100' }
+  assert.equal(readBackLanded(sent, [['title', '秋'], ['price', '100']], [['title', '冬'], ['price', '100']]), true)
+  assert.equal(readBackLanded(sent, [['title', '冬'], ['price', '100']], [['title', '冬'], ['price', '100']]), false)
+  assert.equal(readBackLanded(sent, [['title', '秋']], [['title', '冬']]), false)
+  assert.equal(readBackLanded(sent, [['title', '秋'], ['price', '1']], [['title', '冬'], ['price', '99']]), false)
+  assert.equal(readBackLanded({}, [['a', '1']], [['a', '2']]), false)
+  assert.equal(readBackLanded(sent, null, [['title', '冬'], ['price', '100']]), false)
+  assert.equal(readBackLanded(null, [], []), false)
 })

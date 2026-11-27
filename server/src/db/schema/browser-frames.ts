@@ -33,6 +33,12 @@ import { rebuildTableFor } from './table-rebuild'
  *   frame a later frame's `{made:<n>}` refers to — **the only value of a site's page the server keeps**, so a later permit
  *   can fit only that id. Once per write, only beside a `done` write of that same frame (trigger), never changed or
  *   removed while its run exists; a plain token of at most 64 characters (CHECK).
+ * - `browser_write_ledger` (agent-browser.md "The write ledger across requests"): one row per permitted write, keyed
+ *   company × registered domain × outside account × **target** (the sha256 of the write's method, `_method` and path —
+ *   never the path as text), with its run and write. Written only in the permit's transaction, beside its `permitted`
+ *   write and with its run's member and domain (trigger); never changed, never removed while its run exists. What became
+ *   of each write is its row in `browser_frame_writes` and `browser_frame_write_confirms`: a target with a write still
+ *   `permitted` / `unknown` and no answer is **in doubt** for every later run, with no time limit.
  */
 
 /** The writes table, its in-flight index and its moves: one text for a new database and the rebuild. */
@@ -70,6 +76,17 @@ const BROWSER_FRAME_MADE_DONE = `CREATE TRIGGER IF NOT EXISTS browser_frame_made
         AND frame_idx = NEW.frame_idx AND state = 'done')
     BEGIN
       SELECT RAISE(ABORT, 'what a run made is kept only beside its done write');
+    END`
+/**
+ * A ledger row only beside its write while that write is `permitted` (the permit's own transaction), with its run's member
+ * and domain. Names `browser_frame_writes`, so the writes table's rebuild drops it first and makes it again (as above).
+ */
+const BROWSER_WRITE_LEDGER_BESIDE_WRITE = `CREATE TRIGGER IF NOT EXISTS browser_write_ledger_beside_write BEFORE INSERT ON browser_write_ledger
+      WHEN NOT EXISTS (SELECT 1 FROM browser_frame_writes WHERE company_id = NEW.company_id AND run_id = NEW.run_id AND seq = NEW.seq
+        AND state = 'permitted')
+        OR NOT EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = NEW.company_id AND id = NEW.run_id AND user_id = NEW.user_id AND host = NEW.host)
+    BEGIN
+      SELECT RAISE(ABORT, 'a ledger row is written only beside its permitted write, with its run''s member and domain');
     END`
 export const browserFrameSchema = `
     CREATE TABLE IF NOT EXISTS browser_frame_runs (
@@ -178,6 +195,30 @@ export const browserFrameSchema = `
     BEGIN
       SELECT RAISE(ABORT, 'what a run made is kept as reported');
     END;
+
+    CREATE TABLE IF NOT EXISTS browser_write_ledger (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      host TEXT NOT NULL,
+      account TEXT NOT NULL,
+      target TEXT NOT NULL CHECK (target GLOB 'sha256:*'),
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_runs(company_id, id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_write_ledger_target ON browser_write_ledger(company_id, host, account, target);
+    ${BROWSER_WRITE_LEDGER_BESIDE_WRITE};
+    CREATE TRIGGER IF NOT EXISTS browser_write_ledger_no_update BEFORE UPDATE ON browser_write_ledger
+    BEGIN
+      SELECT RAISE(ABORT, 'the write ledger is kept as written');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_write_ledger_no_delete BEFORE DELETE ON browser_write_ledger
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'the write ledger is kept as written');
+    END;
 `
 
 /**
@@ -208,8 +249,9 @@ export function migrateBrowserFrameWriteRefused(conn: Database.Database): boolea
     table: 'browser_frame_writes',
     marker: "'refused'",
     create: BROWSER_FRAME_WRITES_TABLE,
-    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES, BROWSER_FRAME_MADE_DONE],
-    drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight', 'DROP TRIGGER IF EXISTS browser_frame_made_done'],
+    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES, BROWSER_FRAME_MADE_DONE, BROWSER_WRITE_LEDGER_BESIDE_WRITE],
+    drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight', 'DROP TRIGGER IF EXISTS browser_frame_made_done',
+      'DROP TRIGGER IF EXISTS browser_write_ledger_beside_write'],
     columns: ['company_id', 'run_id', 'seq', 'frame_idx', 'state', 'reason', 'permitted_at', 'permitted_mono_ms', 'permitted_boot', 'settled_at'],
   })
 }

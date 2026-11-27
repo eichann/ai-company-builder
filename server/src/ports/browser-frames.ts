@@ -69,6 +69,29 @@ export interface FrameMadeRow {
   made: string
 }
 
+/** One row of the write ledger (agent-browser.md "The write ledger across requests"): a permitted write's target. */
+export interface WriteLedgerRow {
+  runId: string
+  seq: number
+  userId: string
+  host: string
+  /** The outside account the write went to as this server knows it (today: the member's own login, `member:<user id>`). */
+  account: string
+  /** `sha256:` of the target (method, `_method`, path with its raw query): never the path as text. */
+  target: string
+}
+
+/** A write in doubt on a domain × account: still `permitted` / `unknown` and nobody answered about it. */
+export interface WriteDoubtRow {
+  runId: string
+  seq: number
+  target: string
+  state: 'permitted' | 'unknown'
+  permittedAt: string
+  /** The frame the write fitted (the reviewed declaration's or the card's words, never the page's). */
+  frame: Omit<FrameRow, 'used' | 'max' | 'idx'>
+}
+
 export interface BrowserFrameRepository {
   run(runId: string): FrameRunRow | null
   /** The run not ended on this domain, if any (at most one: a unique index). */
@@ -93,6 +116,13 @@ export interface BrowserFrameRepository {
   made(runId: string): FrameMadeRow[]
   /** Keep what a done write made (once per write; only beside a `done` write of that frame: the trigger). */
   insertMade(runId: string, row: FrameMadeRow, recordedAt: string): void
+  /** Keep a permitted write's target in the ledger (the permit's transaction; once per write). */
+  insertLedger(row: WriteLedgerRow, recordedAt: string): void
+  /**
+   * The writes in doubt on this domain for this outside account, of any run (ended ones included, whatever their age):
+   * the ledger's rows whose write is `permitted` or `unknown` with no answer of the person. Oldest first.
+   */
+  ledgerDoubts(host: string, account: string): WriteDoubtRow[]
   /** Compare-and-set of a write's state; false when it was not `from`. */
   setWriteState(runId: string, seq: number, from: FrameWriteState, to: FrameWriteState, change: { settledAt: string; reason?: string | null }): boolean
 }

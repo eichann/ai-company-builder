@@ -7,7 +7,7 @@
  * in this run; a query fits only a frame that declares exactly that raw string. Fictional paths.
  */
 import { describe, expect, it } from 'vitest'
-import { browserAdhocWritesProblem, browserFrameMismatch, browserFramePathFits } from '../../../shared/core/browser-frame-match'
+import { browserAdhocWritesProblem, browserFrameMismatch, browserFramePathFits, browserFramesMayMeet, browserWriteTarget } from '../../../shared/core/browser-frame-match'
 import type { BrowserSkillWrite } from '../../../shared/core/browser-skill'
 
 const frame = (path: string, fields: Record<string, string> = {}, method: BrowserSkillWrite['method'] = 'POST', query: string | null = null): BrowserSkillWrite => ({ method, path, query, max: 1, fields })
@@ -174,5 +174,33 @@ describe('a request with a query (agent-browser.md "A write with an exact query"
   it('an AI-written plan carries no query', () => {
     expect(browserAdhocWritesProblem([frame('/api/a', {}, 'POST', 'return')])).toBe('query')
     expect(browserAdhocWritesProblem([frame('/api/a')])).toBeNull()
+  })
+})
+
+describe('the write ledger\'s words (agent-browser.md "The write ledger across requests")', () => {
+  it('a target is the method, the body\'s _method and the path with its query — never another field', () => {
+    expect(browserWriteTarget({ method: 'POST', path: '/api/a/1?x=1', fields: { _method: 'PATCH', kind: 'k' } })).toEqual({ method: 'POST', override: 'PATCH', path: '/api/a/1?x=1' })
+    expect(browserWriteTarget({ method: 'POST', path: '/api/a', fields: { kind: 'k' } })).toEqual({ method: 'POST', override: null, path: '/api/a' })
+  })
+
+  it.each([
+    [frame('/api/orders/register'), frame('/api/orders/register'), true],
+    [frame('/api/orders/{n}/note'), frame('/api/orders/{x}/note'), true],
+    [frame('/api/orders/{n}/note'), frame('/api/orders/42/note'), true],
+    [frame('/api/orders/42/note'), frame('/api/orders/{n}/note'), true],
+    [frame('/api/orders/{n}/note'), frame('/api/orders/abc/note'), false],
+    [frame('/api/orders/{made:1}/items'), frame('/api/orders/7/items'), true],
+    [frame('/api/orders/register'), frame('/api/orders/cancel'), false],
+    [frame('/api/orders/register'), frame('/api/orders/register/'), false],
+    [frame('/api/orders/register'), frame('/api/orders/register/x'), false],
+    [frame('/api/orders/register'), frame('/api/orders/register', {}, 'PUT'), false],
+    [frame('/api/a', { _method: 'PATCH' }), frame('/api/a'), false],
+    [frame('/api/a', { _method: 'PATCH' }), frame('/api/a', { _method: 'PATCH', kind: 'k' }), true],
+    [frame('/api/a', {}, 'POST', 'x=1'), frame('/api/a'), false],
+    [frame('/api/a', {}, 'POST', 'x=1'), frame('/api/a', {}, 'POST', 'x=2'), false],
+    [frame('/api/a', {}, 'POST', 'x={n}'), frame('/api/a', {}, 'POST', 'x=2'), true],
+  ])('%o may meet %o: %s', (a, b, want) => {
+    expect(browserFramesMayMeet(a, b)).toBe(want)
+    expect(browserFramesMayMeet(b, a)).toBe(want)
   })
 })

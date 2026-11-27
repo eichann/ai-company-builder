@@ -130,6 +130,8 @@ MODEL=(
   server/src/services/browser-line-steps.ts server/src/services/browser-lines.ts
   client/electron/features/browser/write-line-runner.ts client/shared/browser-line-writes.ts
   server/src/services/browser-frames.ts client/electron/features/browser/frame-writes.ts
+  # The write ledger's read-back (LedgerLife.tla, agent-browser.md "The write ledger across requests").
+  client/electron/features/browser/work.ts
   # The Drive video viewing model (model/drive-view/, google-drive.md "Streaming a picked video") and what it copies.
   model/drive-view/ shared/core/google-drive.ts server/src/services/google-drive.ts
   server/src/services/google-drive-view.ts server/src/services/google-client.ts

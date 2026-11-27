@@ -37,6 +37,13 @@
  *   ends at once (`work-ended`) and frees the domain — never a `waiting` run (its card is up), never a `locked` one (a write
  *   in doubt keeps the domain as before), never while a write may be on its way.
  *
+ * - **The write ledger** (agent-browser.md "The write ledger across requests"; `model/browser-plan/LedgerLife.tla`): every
+ *   permit also writes a ledger row — company × domain × outside account × the target's hash — so the once-rules reach
+ *   across runs: a permit to a target whose earlier write (any run, however old) is still `permitted` / `unknown` with no
+ *   answer of the person is refused (`BROWSER_WRITE_IN_DOUBT`; the run goes on for other targets), and a start names the
+ *   doubts its frames may meet (`doubts`) so the app asks first. A doubt never times out: the person's answer
+ *   (`confirm`) or the site's answer (a late sure report, or the app's read-back `done` with reason `read-back`) ends it.
+ *
  * Time-outs are judged on every touch, never by a timer. Everything is the member's own session; another member's or
  * another company's run is the same 404 as one that does not exist.
  */
@@ -44,12 +51,14 @@ import { browserAiStopped, levelAllows, type BrowserOperationSettings } from '..
 import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/browser-plans'
 import { browserSkillDeclarationFrom, BROWSER_SKILL_PROBLEM_WORDS, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
-import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
+import {
+  browserAdhocWritesProblem, browserFrameMismatch, browserFramesMayMeet, browserWriteTarget, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest, type BrowserMadeIds,
+} from '../../shared/core/browser-frame-match'
 import { browserMadeFrom } from '../../shared/core/browser-skill'
 import { BROWSER_FRAME_RUN_TIMES, browserFrameApproveMs } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import type {
-  BrowserFrameConfirmAnswer, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
+  BrowserFrameConfirmAnswer, BrowserFrameDoubt, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
 } from '../../shared/types/browser-frames'
 import type { TokenDigest } from '../ports/key-broker'
 import type { BrowserFrameRepository, FrameRunRow, FrameWriteRow } from '../ports/browser-frames'
@@ -133,6 +142,7 @@ export const BROWSER_FRAME_WORDS = {
   confirmNotUnknown: 'この書き込みは、届いたか分からないものではありません',
   confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
   confirmDone: 'この書き込みについては、もう答えてあります',
+  inDoubt: '前にこの送り先へ送った書き込みの結果が分からないままです。済んでいたかどうかを答えてから、もう一度頼んでください',
 } as const
 const W = BROWSER_FRAME_WORDS
 
@@ -176,6 +186,14 @@ const iso = (ms: number) => new Date(ms).toISOString()
 const ms = (s: string) => Date.parse(s)
 const RESULTS: readonly BrowserFrameWriteResult[] = ['done', 'not_sent', 'unknown', 'refused']
 const CONFIRM_ANSWERS: readonly BrowserFrameConfirmAnswer[] = ['done', 'not_done']
+
+/**
+ * The outside account a member's writes go to, as the write ledger keys it (agent-browser.md "The write ledger across
+ * requests"). The core knows no site's account marker, and each member's window holds their own login (one partition per
+ * account × company × site), so the account is that login: the member. Kept as its own column so a site's reviewed account
+ * reader can name it later without changing the table.
+ */
+export const ledgerAccountOf = (userId: string): string => `member:${userId}`
 
 /** What a run made, by the frame that made it (the permit's `{made:<n>}` matches against it). */
 function madeIds(rows: ReadonlyArray<{ frameIdx: number; made: string }>): BrowserMadeIds {
@@ -321,6 +339,26 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     return null
   }
 
+  /** A held write's target as the ledger keeps it (its hash only: the path is never kept as text). */
+  const targetOf = (request: BrowserFrameRequest): string => hashCanonical(canonicalJson(browserWriteTarget(request)))
+
+  /**
+   * `ServerKeepsDoubt` (LedgerLife.tla): the earlier writes in doubt on this domain for this member's account whose frame
+   * may meet one of `writes` (all of them when `writes` is null). Never judged by time: a doubt stays until the person
+   * answers it or the site's answer comes (late, or read back by the app).
+   */
+  function doubtsFor(companyId: string, host: string, userId: string, writes: readonly BrowserSkillWrite[]): BrowserFrameDoubt[] {
+    return repo(companyId).ledgerDoubts(host, ledgerAccountOf(userId)).flatMap((d) => {
+      const frame = { method: d.frame.method, path: d.frame.path, query: d.frame.query, fields: JSON.parse(d.frame.fields) as Record<string, string> }
+      if (!writes.some(w => browserFramesMayMeet(w, frame))) return []
+      return [{
+        runId: d.runId, write: d.seq,
+        frame: { method: frame.method, path: frame.path, ...(frame.query !== null ? { query: frame.query } : {}), fields: frame.fields },
+        permittedAt: d.permittedAt, confirmableAt: iso(ms(d.permittedAt) + BROWSER_FRAME_TIMES.permit + BROWSER_FRAME_TIMES.grace),
+      }]
+    })
+  }
+
   const planHashOf = (member: Member, f: StartFrames) => hashCanonical(canonicalJson({
     company: member.companyId, user: member.userId, host: f.host, source: f.source, skill: f.skill, declarationHash: f.declarationHash,
     // A frame's query is part of what the card shows and the person approves (absent when none: a plan without queries
@@ -434,7 +472,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
         r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, query: w.query, fields: canonicalJson({ ...w.fields }), max: w.max })))
-        return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead] })
+        // The write ledger: earlier writes in doubt this run's frames may meet — the app asks the person before writing.
+        const doubts = doubtsFor(member.companyId, f.host, member.userId, f.writes)
+        return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead], doubts })
       })
     },
 
@@ -510,6 +550,13 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         if (frame.used >= frame.max) return refuse('conflict', W.usedUp, { code: 'BROWSER_FRAME_USED_UP' })
         const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, query: frame.query, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request, madeIds(r.made(run.id)))
         if (mismatch) return refuse('conflict', W.mismatch, { code: 'BROWSER_FRAME_MISMATCH', reason: mismatch })
+        // The write ledger (`LedgerGuard`, LedgerLife.tla): an earlier write to this very target of this member's account,
+        // in any run however old, whose result nobody knows → no permit until the person answers or the site's answer
+        // comes. Nothing is taken and the run goes on (another target is not held up).
+        const target = targetOf(request)
+        if (r.ledgerDoubts(run.host, ledgerAccountOf(run.userId)).some(d => d.target === target)) {
+          return refuse('conflict', W.inDoubt, { code: 'BROWSER_WRITE_IN_DOUBT' })
+        }
         const passed = gate(member, run.host, deviceKey, run)
         const refused: Refusal | null = !passed.ok
           ? passed
@@ -524,6 +571,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         if (!r.takeUnit(run.id, frameIdx)) return refuse('conflict', W.usedUp, { code: 'BROWSER_FRAME_USED_UP' })
         const seq = writes.length + 1
         r.insertWrite(run.id, { seq, frameIdx, state: 'permitted', permittedAt: iso(now), permittedMonoMs: monotonic.monoMs(), permittedBoot: monotonic.bootId })
+        r.insertLedger({ runId: run.id, seq, userId: run.userId, host: run.host, account: ledgerAccountOf(run.userId), target }, iso(now))
         return ok({ write: seq, frame: frameIdx, permittedAt: iso(now), validMs: BROWSER_FRAME_TIMES.permit })
       })
     },
