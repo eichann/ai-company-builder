@@ -38,7 +38,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>w</title><p>w</p><scri
 window.save = name => fetch('/w/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })
   .then(async r => ({ status: r.status, body: await r.json() }), () => 'failed')
 window.keep = name => { fetch('/w/save', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }).catch(() => {}); return 'sent' }
-window.form = name => { const f = document.createElement('form'); f.method = 'POST'; f.action = '/w/save'; const i = document.createElement('input'); i.name = 'name'; i.value = name; f.appendChild(i); document.body.appendChild(f); f.submit(); return 'sent' }
+window.form = (name, to = '/w/save') => { const f = document.createElement('form'); f.method = 'POST'; f.action = to; const i = document.createElement('input'); i.name = 'name'; i.value = name; f.appendChild(i); document.body.appendChild(f); f.submit(); return 'sent' }
 </script>`
 
 function startSite() {
@@ -47,12 +47,15 @@ function startSite() {
     let body = ''
     req.on('data', chunk => { body += chunk })
     req.on('end', () => {
+      if (req.method === 'GET' && req.url === '/w/done') { res.setHeader('content-type', 'text/plain'); res.end('done page'); return }
       if (req.method === 'GET') { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(PAGE); return }
       let name = '?'
       try { name = String(req.headers['content-type']?.startsWith('application/json') ? JSON.parse(body).name : new URLSearchParams(body).get('name')) } catch { /* ? */ }
       // The run's copy is main's own request (Chromium marks it `no-cors`); the page's fetch is `cors`, its form `navigate`.
       const hit: Hit = { name, original: req.headers['sec-fetch-mode'] !== 'no-cors', end: 0 }
       hits.push(hit)
+      // A save that answers as many sites do after a form: 303 to a relative address.
+      if (req.url === '/w/redirect') { setTimeout(() => { hit.end = Date.now(); res.writeHead(303, { location: '/w/done' }); res.end() }, 200); return }
       setTimeout(() => { hit.end = Date.now(); res.writeHead(201, { 'content-type': 'application/json' }); res.end(JSON.stringify({ id: 7, name })) }, answerAfter.get(name) ?? 200)
     })
   }).listen(port, '127.0.0.1')
@@ -130,9 +133,9 @@ async function uncut(i: number) {
   await page.loadURL('https://op.test/w')
   const writer = createFrameWriter({
     companyId: 'company-1', runId: `bf_${'b'.repeat(32)}`, host: 'op.test', going: () => true, stepsSoFar: () => 0,
-    frames: [{ frame: 1, method: 'POST', path: '/w/save', query: null, fields: {}, max: 4, left: 4 }],
+    frames: [{ frame: 1, method: 'POST', path: '/w/save', query: null, fields: {}, max: 4, left: 4 }, { frame: 2, method: 'POST', path: '/w/redirect', query: null, fields: {}, max: 2, left: 2 }],
     api: {
-      async framePermit() { return { kind: 'ok', value: { write: 1, frame: 1, permittedAt: new Date().toISOString(), validMs: 5000 } } },
+      async framePermit(_c, _r, body) { return { kind: 'ok', value: { write: 1, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } } },
       async frameReport() { return { kind: 'ok', value: {} } },
     },
   })
@@ -143,10 +146,20 @@ async function uncut(i: number) {
   await page.executeJavaScript(`form('f${i}')`, true)
   await Promise.race([landed, wait(5000)])
   const formLanded = { url: page.getURL(), text: await page.executeJavaScript('document.body.innerText', true).catch(() => null) }
-  const mine = hits.filter(h => h.name === `w${i}` || h.name === `f${i}`)
+  // A form whose save answers 303 to a relative address: followed from the address the page posted to.
+  await page.loadURL('https://op.test/w')
+  const redirected = new Promise<void>(resolve => page.once('did-stop-loading', () => resolve()))
+  await page.executeJavaScript(`form('r${i}', '/w/redirect')`, true)
+  await Promise.race([redirected, wait(5000)])
+  await wait(300)
+  const redirectLanded = { url: page.getURL(), text: await page.executeJavaScript('document.body.innerText', true).catch(() => null) }
+  // A fetch whose save answers the same: it follows to the same page.
+  await page.loadURL('https://op.test/w')
+  const fetchRedirect = await page.executeJavaScript(`fetch('/w/redirect', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'name=x${i}' }).then(async r => ({ url: r.url, status: r.status, text: await r.text() }), () => 'failed')`, true)
+  const mine = hits.filter(h => [`w${i}`, `f${i}`, `r${i}`, `x${i}`].includes(h.name))
   await win.browse.leave()
   win.close()
-  return { answer, formLanded, copies: mine.filter(h => !h.original).length, originals: mine.filter(h => h.original).length, records: writer.records().map(r => r.outcome) }
+  return { answer, formLanded, redirectLanded, fetchRedirect, copies: mine.filter(h => !h.original).length, originals: mine.filter(h => h.original).length, records: writer.records().map(r => r.outcome) }
 }
 
 app.on('window-all-closed', () => {})

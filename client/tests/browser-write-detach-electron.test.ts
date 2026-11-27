@@ -32,7 +32,8 @@ interface Case {
   records: string[]
   page: unknown
 }
-interface Result { error?: string; cases: Case[]; uncut: { answer: unknown; formLanded: { url: string; text: string | null }; copies: number; originals: number; records: string[] } }
+interface Landed { url: string; text: string | null }
+interface Result { error?: string; cases: Case[]; uncut: { answer: unknown; formLanded: Landed; redirectLanded: Landed; fetchRedirect: unknown; copies: number; originals: number; records: string[] } }
 let result: Result
 
 function freePort(): Promise<number> {
@@ -103,12 +104,15 @@ test('a write never says "not sent" when it reached the site, and a copy cut on 
   assert.deepEqual(sending.reports, ['done'])
 })
 
-test('uncut, the page still gets the site\'s answer through its held write (its flow goes on): a fetch\'s answer, a form\'s page at the address it posted to', { skip }, () => {
+test('uncut, the page still gets the site\'s answer through its held write (its flow goes on): a fetch\'s answer, a form\'s page at the address it posted to, a 303 to a relative address followed from there', { skip }, () => {
   const n = result.cases.length
   assert.deepEqual(result.uncut.answer, { status: 201, body: { id: 7, name: `w${n}` } })
   assert.equal(result.uncut.formLanded.url, 'https://op.test/w/save')
   assert.deepEqual(JSON.parse(result.uncut.formLanded.text ?? 'null'), { id: 7, name: `f${n}` })
-  assert.equal(result.uncut.copies, 2)
+  // The answer is given at the parked pause: a relative Location is still read from the address the page posted to.
+  assert.deepEqual(result.uncut.redirectLanded, { url: 'https://op.test/w/done', text: 'done page' })
+  assert.deepEqual(result.uncut.fetchRedirect, { url: 'https://op.test/w/done', status: 200, text: 'done page' })
+  assert.equal(result.uncut.copies, 4)
   assert.equal(result.uncut.originals, 0)
-  assert.deepEqual(result.uncut.records, ['done', 'done'])
+  assert.deepEqual(result.uncut.records, ['done', 'done', 'done', 'done'])
 })

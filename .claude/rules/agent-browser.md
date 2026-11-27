@@ -3761,9 +3761,13 @@ else. **No site word** anywhere (a fictional site in the tests).
   (copy + original); a reload, a navigation or a renderer crash cancel the original (no detach) and the copy alone went.
   Now the first thing done with a page write at the request stage is `Fetch.continueRequest` pointing it at
   `PARKED_WRITE_URL` (`https://acb-parked-write.invalid:1/`: port 1 is on Chromium's unsafe-port list, so it fails before
-  any connection, proxy or DNS; the change is not observable by the page) with `interceptResponse: true`; it pauses again
-  with that failure (`responseErrorReason`) and only then is it held and decided, and the page gets the copy's answer at
-  that pause (`Fetch.fulfillRequest`, as before). Released at any moment from then on, the original only fails. Measured,
+  any connection, proxy or DNS; the page still sees its own address — a fetch's `url`, the page a form lands on) with
+  `interceptResponse: true`; it pauses again with that failure (`responseErrorReason`) and only then is it held and
+  decided — by the run it was parked for, only while that run's gate holds the window —, and the page gets the copy's
+  answer at that pause (`Fetch.fulfillRequest`, as before). A redirect's `Location` is made absolute against the address
+  the page posted to (`fromPageAddress`; at that pause Chromium would resolve a relative one against the parked address:
+  a form's 303 to `/next` landed nowhere — independent review). Released at any moment from then on, the original only
+  fails. Measured,
   cut before the permit / while the copy is on its way / after its answer, by detach, closing the window (keepalive),
   reload: the site gets 0 / 1 / 1 — the permitted copy once or nothing, never the original (before: 1 original / 2 / 2
   by detach, likewise for a keepalive by closing).
@@ -3771,8 +3775,9 @@ else. **No site word** anywhere (a fictional site in the tests).
   originalMayHaveGone)`) and nothing more is sent (the write session's hook asks `aiGateReady` too). Every original was
   parked (`false`, what the tests see): the work **closes** the writer (`close()`) — a held write not sent yet is
   `not_sent` (a permit taken is reported so), one already on its way keeps its own result (the page then sees a failure);
-  a write the page made whose parking Chromium had not answered yet (`parking`: the command sent, no reply) may have gone
-  out as the page made it (`true`): `abandon('detached')` as before — every held write `unknown`, the run locked, a
+  a write the page made whose parking Chromium had not answered yet (`parking`: the command sent, no reply), or whose
+  parking Chromium refused since the connection was made (`parkingFailed`: the connection may already be going), may have
+  gone out as the page made it (`true`): `abandon('detached')` as before — every held write `unknown`, the run locked, a
   permitted one reported `unknown`, never `not_sent` (independent review of #856).
 - **Deciding one** (`createFrameWriter`, in this order; each `refused` / `not-sent` fails the page's request): the run
   over, locked or stopped → not sent; `readHeldWrite` — another host, a body that is not a form, JSON or multipart text
@@ -3868,10 +3873,10 @@ else. **No site word** anywhere (a fictional site in the tests).
 - **Never read** (a Skill's `never_read`): the window's read rule refuses the page's and the operator's reads of the
   operated host that `browserNeverReadFits` names (its path pattern, and each query word it lists) during the preview and
   the work.
-- **Remaining limits** (said): a page write whose pause Chromium reports at the very moment the DevTools connection goes —
-  before main has even seen the event, so it is neither held nor parked — goes out as the page made it, unknown to the run
-  (Chromium lets it go; no request hook sees it again). Not reproducible in a test; the window of time is one message
-  between Chromium and main; the operator reads the page and may be misled by it — what it can do is bounded by the
+- **Remaining limits** (said): a page write whose pause Chromium reports at the very moment the DevTools connection goes
+  or the gate lets go (`Fetch.disable` in `setMode('human')`) — before main has even seen the event, so it is neither held
+  nor parked — goes out as the page made it, unknown to the run (Chromium lets it go; no request hook sees it again). Not
+  reproducible in a test; the window of time is one message between Chromium and main; the operator reads the page and may be misled by it — what it can do is bounded by the
   domain and the frames, and its words reach only the member's card; what a write *contains* (which number, which date)
   is not checked by the machine beyond the frame's fixed fields — the plan card and the after-read card are where a
   person sees it (§8); a site that sets a new cookie on each save gets none back (decision of the runner's write
@@ -3917,8 +3922,9 @@ kept on purpose (time only): the end not waiting twice after a give-up, the mome
 write cut before the permit, while the copy is on its way and after its answer, by `debugger.detach()`, closing the window
 and a reload — the site gets the permitted copy once or nothing, never the page's original; cut before the permit the
 write is `not-sent` and reported `not_sent`; a write that reached the site never says not sent; uncut, the page still gets
-the site's answer, and a form lands on the address it posted to with that answer (the parked address never shows) —
-mutation-checked: holding without parking sends the original in 8 of the 9 cases), the work's
+the site's answer, a form lands on the address it posted to with that answer, and a 303 to a relative address is followed
+from the address the page posted to, by a form and a fetch — mutation-checked (the relative redirect without
+`fromPageAddress` lands nowhere): holding without parking sends the original in 8 of the 9 cases), the work's
 `detached` wiring in `browser-frame-writes.test.ts` (parked → not sent, not parked yet → unknown; each branch
 mutation-checked; kept on purpose: the `parking` set itself, whose race no test can make),
 `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
