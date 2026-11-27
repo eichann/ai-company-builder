@@ -271,9 +271,10 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    「件名・目的を直す」 box under 期限 was 「最悪の UX」 and is gone, with its link and its ［保存］［やめる］). For the
    requester or the assignee of an open task (`card.canEdit` from the type's `retitle` / `set_purpose` and the member's
    place; the two actions are not in 「…」, `NOT_ON_CARD`): **the title** is RecordPage's `titleEdit` — hover shows a
-   quiet pencil, press it (or Enter / Space, name 「…（件名を直す）」) and it becomes a one-line field in the same place and
+   quiet pencil; press the title (from the keyboard: the pencil button 「件名を直す」, Enter / Space — the heading's text
+   stays the title alone) and it becomes a one-line field in the same place and
    size, focused with the text selected; Enter saves (never while an IME converts), leaving the field saves, Esc puts it
-   back (focus back on the title). Line breaks are turned into spaces, ≤ 200. **目的** is its own line right under the
+   back (focus back on the pencil). Line breaks are turned into spaces, ≤ 200. **目的** is its own line right under the
    title (`TaskPurpose`, in RecordPage's `from` before where it came from); empty, a quiet 「目的を書く」 there. Pressed,
    a several-line field in the same place: ⌘Enter / Ctrl+Enter or leaving saves, Enter is a new line, Esc puts it back.
    The generic part is `src/shared/ui/InlineText.tsx` (opens, keeps the draft, closes; no rule). **One place decides

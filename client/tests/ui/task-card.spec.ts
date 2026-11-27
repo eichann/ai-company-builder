@@ -74,7 +74,9 @@ test('件名: pressing the title makes it a field in place; Enter saves only a c
   const title = card.getByRole('heading', { level: 1 })
   // No separate box or link any more (owner 2026-11-27: 「最悪の UX」).
   await expect(card.getByRole('button', { name: '件名・目的を直す' })).toHaveCount(0)
-  await title.getByRole('button', { name: /件名を直す/ }).click()
+  // The heading's text stays the title alone (the pencil only names the action).
+  await expect(title).toHaveText('A社 見積書を 150万円 で作り直す')
+  await title.getByText('A社 見積書を 150万円 で作り直す').click()
   const field = title.getByRole('textbox', { name: '件名' })
   await expect(field).toBeFocused()
   // Focused with the whole text selected, so typing replaces it.
@@ -83,13 +85,13 @@ test('件名: pressing the title makes it a field in place; Enter saves only a c
   await field.press('Enter')
   await expect(field).toHaveCount(0)
   await expect(page.locator('#acted')).toHaveText('')
-  // Esc puts it back unchanged, nothing sent, focus back on the title.
-  await title.getByRole('button', { name: /件名を直す/ }).click()
+  // Esc puts it back unchanged, nothing sent, focus back on the title's pencil.
+  await title.getByRole('button', { name: '件名を直す' }).click()
   await field.fill('別の件名')
   await field.press('Escape')
   await expect(field).toHaveCount(0)
   await expect(title).toContainText('A社 見積書を 150万円 で作り直す')
-  await expect(title.getByRole('button', { name: /件名を直す/ })).toBeFocused()
+  await expect(title.getByRole('button', { name: '件名を直す' })).toBeFocused()
   await expect(page.locator('#acted')).toHaveText('')
   // Enter on the focused title opens it again (keyboard-reachable); an Enter while the IME converts does not save.
   await page.keyboard.press('Enter')
@@ -111,7 +113,7 @@ test('件名: leaving the field saves a changed title; a title over the rule is 
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
   const title = card.getByRole('heading', { level: 1 })
-  await title.getByRole('button', { name: /件名を直す/ }).focus()
+  await title.getByRole('button', { name: '件名を直す' }).focus()
   await page.keyboard.press('Space')
   const field = title.getByRole('textbox', { name: '件名' })
   await expect(field).toBeFocused()
@@ -161,7 +163,8 @@ test('目的 already written: pressing the line opens it with the text; a change
   const state = await openPreview(page, 'task-card', { purpose: '1' })
   const card = page.getByTestId('task-card')
   await expect(card.getByRole('button', { name: '目的を書く' })).toHaveCount(0)
-  await card.getByRole('button', { name: /提案に使う.*目的を直す/ }).click()
+  await expect(card.getByRole('button', { name: '目的を直す' })).toBeVisible()
+  await card.locator('[data-purpose]').getByText('提案に使う').click()
   const field = card.getByRole('textbox', { name: '目的' })
   await expect(field).toHaveValue('提案に使う')
   await field.fill('提案と見積に使う')
@@ -173,7 +176,7 @@ test('目的 already written: pressing the line opens it with the text; a change
 test('a title stored before the rule: 目的 alone saves; the assignee of a request 引き受け待ち is told, under the field, that saving accepts', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { task: 'legacy' })
   const card = page.getByTestId('task-card')
-  await card.getByRole('heading', { level: 1 }).getByRole('button', { name: /件名を直す/ }).click()
+  await card.getByRole('heading', { level: 1 }).getByRole('button', { name: '件名を直す' }).click()
   await expect(card.getByRole('heading', { level: 1 })).toContainText('保存すると、このやることを引き受けたことになります。')
   await card.getByRole('textbox', { name: '件名' }).press('Escape')
   await card.getByRole('button', { name: '目的を書く' }).click()

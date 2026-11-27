@@ -27,14 +27,18 @@ export interface InlineTextProps {
 }
 
 /**
- * Pressed (or Enter / Space when focused), the shown words turn into a field in the same place, focused with the
+ * Pressed (or its pencil, the keyboard's way in: Enter / Space), the shown words turn into a field in the same place, focused with the
  * text selected. Enter (one line) or ⌘Enter saves — never while an IME converts; leaving the field saves; Esc
  * puts it back unchanged.
  */
 export function InlineText({ value, label, fieldLabel, children, multiline = false, maxLength, busy = false, note, className = '', onSave }: InlineTextProps) {
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
+  // Focused with the text selected as the field appears (in the commit, so no key typed first is lost).
+  const opened = useRef(false)
+  const takeField = (el: HTMLInputElement | HTMLTextAreaElement | null) => {
+    if (el && opened.current) { opened.current = false; el.focus(); el.select() }
+  }
   const shown = useRef<HTMLButtonElement>(null)
   // One save at a time (Enter then the blur it causes); a closed field's late blur saves nothing.
   const saving = useRef(false)
@@ -45,7 +49,7 @@ export function InlineText({ value, label, fieldLabel, children, multiline = fal
     open.current = true
     setError(null)
     setDraft(value)
-    requestAnimationFrame(() => { field.current?.focus(); field.current?.select() })
+    opened.current = true
   }
   const close = (back: boolean) => {
     open.current = false
@@ -72,17 +76,28 @@ export function InlineText({ value, label, fieldLabel, children, multiline = fal
   }
 
   if (draft === null) {
+    const pencil = <PencilSimpleLine aria-hidden size={14} className="shrink-0 self-center text-text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" />
+    // Only a call to write (「目的を書く」): the words are the button.
+    if (children === label) {
+      return (
+        <button ref={shown} type="button" disabled={busy} onClick={start}
+          className={`group -mx-1 inline-flex items-baseline gap-1 rounded-small px-1 text-left hover:bg-surface-sunken disabled:opacity-disabled ${className}`}>
+          {children}{pencil}
+        </button>
+      )
+    }
+    // The words themselves are pressed with the mouse; the pencil is the keyboard's way in and names the action, so
+    // the heading's text stays the title alone.
     return (
-      <button ref={shown} type="button" disabled={busy} onClick={start}
-        className={`group -mx-1 inline-flex max-w-full items-baseline gap-1.5 rounded-small px-1 text-left hover:bg-surface-sunken disabled:cursor-default disabled:hover:bg-transparent ${className}`}>
-        <span className={`min-w-0 [overflow-wrap:anywhere] ${multiline ? 'whitespace-pre-wrap' : ''}`}>{children}</span>
-        <PencilSimpleLine aria-hidden size={14} className="shrink-0 self-center text-text-subtle opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-disabled:opacity-0" />
-        {children !== label && <span className="sr-only">（{label}）</span>}
-      </button>
+      <span className={`group -mx-1 inline-flex max-w-full items-baseline gap-1 rounded-small px-1 ${busy ? '' : 'cursor-text hover:bg-surface-sunken'} ${className}`}>
+        <span onClick={start} className={`min-w-0 [overflow-wrap:anywhere] ${multiline ? 'whitespace-pre-wrap' : ''}`}>{children}</span>
+        <button ref={shown} type="button" aria-label={label} title={label} disabled={busy} onClick={start}
+          className="inline-flex shrink-0 self-center rounded-small focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">{pencil}</button>
+      </span>
     )
   }
   const common = {
-    ref: field, 'aria-label': fieldLabel, value: draft, maxLength, onKeyDown: onKey,
+    ref: takeField, 'aria-label': fieldLabel, value: draft, maxLength, onKeyDown: onKey,
     onBlur: () => { void save(false) },
     // The field takes the shown text's size and weight, so nothing jumps.
     style: { font: 'inherit' },
