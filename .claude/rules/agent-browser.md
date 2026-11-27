@@ -3698,6 +3698,20 @@ else. **No site word** anywhere (a fictional site in the tests).
   unknown), the page still gets the answer. A report the server did not record (3 tries)
   locks the run too. **One at a time**: the next held write starts only once this one's report was recorded (a promise
   chain); a write held meanwhile waits paused.
+- **The operator looks again only once the page's writes are decided** (incident 2026-11-27: after a press the operator's
+  next material had no write and the frame's unit already used — the permit was taken, the site's answer not in yet — so
+  it could not tell whether its press had gone out and stopped). Before each look at the page in the work (`operate` →
+  `settleWrites`): right after a press, typing, a choice or back, main watches for **`BROWSER_WORK_LIMITS.writeStartMs`**
+  (1 s, one value for every site; never tuned per site) for a write the page's script starts a moment later; then, when
+  any write is held, it waits for the writer to be idle (`idle()`: until the chain stops growing, so a write held during
+  the wait counts too), at most the same 45 s as at the end (`idleOrGiveUp`). **Past it**: `abandon('timeout')` as at the
+  end — every held write kept `unknown`, the run locked and closed, the operator not asked again, nothing sent again;
+  the end then does not wait a second time (`gaveUp`). The preview holds no write and does not wait. A write still held
+  when the operator is shown the page (the page wrote as it was read) is in its material as **「送っている途中」**
+  (`WORK_WRITE_SENDING`, `writer.sending()`: held and not yet kept), beside the frame's `left` — never a unit gone with no
+  write to show; the prompt says not to press again but to `wait`. Neither changes what is sent, permitted or reported
+  (`FramesLife.tla`'s app actions are unchanged: the operator is not modelled, and giving up mid-run is the model's
+  `AppCrashes` / the server's time-out, as at the end).
 - **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
   page sent), its outcome, the site's status when not a success, what it sent (`sentFields`: one value per field, never
   a login, CSRF or session field, `isSensitiveFieldName`) and, for a success, its answer text (what `{created}` is read
@@ -3764,7 +3778,12 @@ page without the site's cookie in the page or the window, two saves at once one 
 the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after
 the stop never reach the site, a lost answer reaches it once and nothing more is sent; no cookie, CSRF or value in a
 permit, a report or the log; the DevTools connection detached while a save is held: the run's copy never sent, at most
-the page's original arrives, the write unknown and reported so), `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
+the page's original arrives, the write unknown and reported so; the same file since the 2026-11-27 fix: a press whose page
+writes a moment later to a slow site → the next step's material shows it done beside the used unit, a press whose write
+gets no answer within the wait → unknown before the operator looks again (asked no more, pressed and permitted once), a
+write the page makes as it is read → shown as being sent then done, `idle` covering a write held while it waits — each
+mutation-checked: no wait, no moment after the press, no idle wait, the old `idle`, no 「送っている途中」, no give-up),
+`client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
 only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value
 refused, append-only), `server/tests/unit/browser-frames.test.ts` (the start's `afterRead` / `neverRead`, not in `get`;

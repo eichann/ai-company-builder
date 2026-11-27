@@ -97,6 +97,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
    * page's original go out on its own, so a held write is never sent and is told `unknown`, never `not_sent`.
    */
   let originalMayHaveGone = false
+  /** `abandon` ran: what was held is kept as unknown and the run is over (the end of the run need not wait again). */
+  let gaveUp = false
   /** What this run made, by the frame that made it: only ids the server recorded (the same answers its permits read). */
   const made = new Map<number, Set<string>>()
   /** Frames a later frame's `{made:<n>}` refers to: only their done writes report what they made. */
@@ -256,11 +258,24 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     abandon(why: 'timeout' | 'detached') {
       if (why === 'detached' && pending.size > 0) originalMayHaveGone = true
       closed = true
+      gaveUp = true
       if (pending.size > 0) locked = true
       for (const h of [...pending]) keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null, write: h.write, permittedAt: h.permittedAt }, 'unknown')
     },
-    /** Until the write on its way (if any) is recorded. */
-    idle: () => chain.then(() => undefined),
+    /**
+     * Until every write held so far is decided — also one the page makes while this waits (it joins the chain, so the
+     * wait goes on until the chain stops growing).
+     */
+    idle: async (): Promise<void> => {
+      for (;;) {
+        const c = chain
+        await c
+        if (c === chain) return
+      }
+    },
+    /** Writes held and not yet kept (on their way, or queued behind one): the operator is told they are being sent. */
+    sending: () => pending.size,
+    gaveUp: () => gaveUp,
     locked: () => locked,
     records: () => records.slice(),
     log: () => log.slice(),

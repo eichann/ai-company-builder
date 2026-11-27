@@ -17,8 +17,8 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
-  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
+  WORK_WRITE_SENDING, topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
+  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason, type WorkWriteState,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { browserSkillRef } from '../../../../shared/core/browser-skill'
@@ -63,6 +63,8 @@ export interface BrowserWorkDeps {
   monoMs?: () => number
   /** How long the run waits for a write on its way before giving it up as unknown (default 45 s; tests shorten it). */
   idleMaxMs?: number
+  /** How long main watches for a write the page starts after an action (default `BROWSER_WORK_LIMITS.writeStartMs`; tests shorten it). */
+  writeStartMs?: number
   /** Ends the server did not hear (a lost `end` / `finish`): retried, and flushed before this member's next task. */
   pendingEnds?: PendingEnds
 }
@@ -216,8 +218,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     steps: string | null
     adhoc: boolean
     frames: () => WorkFrame[] | null
-    writes: () => FrameWriteRecord[]
+    writes: () => WorkWriteState[]
     locked: () => boolean
+    /**
+     * Before the page is looked at again: every write the page held is decided (and, right after an action that may make
+     * one, a moment for the page's script to start it). False: the wait ran out and the writes still held were given up.
+     */
+    settleWrites: (afterAction: boolean) => Promise<boolean>
     cut: AbortController
     /** The operator's trail for the member's card only (its actions in the log's kept form, its reasons, notes and end). */
     trail: OperatorTrailRecorder
@@ -234,7 +241,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     // The app's one re-ask after an answer out of its form (fixed words), or null: one per slip, within the run's steps.
     let retry: string | null = null
     const stopped = (why: WorkStopReason) => ({ kind: 'stopped' as const, why })
+    // Whether the last thing done was an action that may make the page write (a press, typing, a choice, back).
+    let acted = false
     for (let round = 1; round <= o.budget.steps; round++) {
+      // The page's writes are decided before the operator sees the page again, so its material never shows a frame's unit
+      // taken without the write's result (incident 2026-11-27: the operator could not tell whether its press was sent).
+      await o.settleWrites(acted)
+      acted = false
       // A write that may have been sent without an answer: nothing more in this run.
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
@@ -256,7 +269,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         prompt: o.phase === 'preview' ? 'work-preview' : 'work',
         material: workMaterial({
           phase: o.phase, task: o.task, items: o.items, steps: o.steps, frames: o.frames(), page, history,
-          writes: o.writes().map(w => w.outcome), notes, round, rounds: o.budget.steps, retry,
+          writes: o.writes(), notes, round, rounds: o.budget.steps, retry,
         }),
         image,
       })
@@ -289,9 +302,42 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(logStep)
       o.trail.step(logStep, parsed.reason)
       const done = await o.win.act(action, o.cut.signal)
+      acted = action.do !== 'wait' && action.do !== 'go'
       history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
     }
     return { kind: 'end', reason: 'rounds', end: stopped('rounds') }
+  }
+
+  /**
+   * Until every write the writer holds is recorded, at most `idleMaxMs`. A write still on its way when the wait runs out:
+   * kept as unknown (the card, the AI's words, the run log) and the run locked and closed — never counted as done or left
+   * out, never sent again (independent review of #856).
+   */
+  async function idleOrGiveUp(writer: FrameWriter): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const idle = await Promise.race([
+      writer.idle().then(() => true),
+      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), deps.idleMaxMs ?? IDLE_MAX_MS) }),
+    ])
+    clearTimeout(timer)
+    if (!idle) writer.abandon('timeout')
+    return idle
+  }
+
+  /**
+   * Between an operator's action and its next look at the page (agent-browser.md "Writes within frames, in the app"):
+   * right after an action that may make the page write, a moment (`writeStartMs`, one value for every site) for the
+   * page's script to start it; then every held write decided (`idleOrGiveUp`). A cut run does not wait for the moment.
+   */
+  async function settleWrites(writer: FrameWriter, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
+    if (afterAction) {
+      const until = performance.now() + (deps.writeStartMs ?? L.writeStartMs)
+      while (writer.sending() === 0 && !signal.aborted && performance.now() < until) {
+        await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))))
+      }
+    }
+    if (writer.sending() === 0) return true
+    return idleOrGiveUp(writer)
   }
 
   /** The consultation AI's write task. Off: nothing asked, started or sent. Its words only: never the page's text. */
@@ -586,7 +632,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         phase: o.phase, companyId: o.companyId, browseRunId, host: o.host, win: o.win, operator: o.operator, cli: o.cli, parentEnv: deps.parentEnv(),
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
-        writes: () => writer?.records() ?? [], locked: () => writer?.locked() ?? false,
+        writes: () => (writer ? [...writer.records().map(r => r.outcome), ...Array<WorkWriteState>(writer.sending()).fill(WORK_WRITE_SENDING)] : []),
+        locked: () => writer?.locked() ?? false,
+        settleWrites: (afterAction: boolean) => (writer ? settleWrites(writer, afterAction, o.cut.signal) : Promise.resolve(true)),
         cut: o.cut, trail: o.trail, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })
       if (got.kind === 'end') {
@@ -598,18 +646,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       return got
     } finally {
-      // Nothing more is held; a write on its way finishes (its result recorded) before the window is given back.
+      // Nothing more is held; a write on its way finishes (its result recorded) before the window is given back — unless
+      // the run already gave its writes up (a wait during the work ran out: they are kept unknown, never waited for twice).
       if (writer) {
         writer.close()
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const idle = await Promise.race([
-          writer.idle().then(() => true),
-          new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), deps.idleMaxMs ?? IDLE_MAX_MS) }),
-        ])
-        clearTimeout(timer)
-        // A write still on its way when the wait ran out: kept as unknown (the card, the AI's words, the run log) and the run
-        // locked, never counted as done or left out (independent review of #856).
-        if (!idle) writer.abandon('timeout')
+        if (!writer.gaveUp()) await idleOrGiveUp(writer)
       }
       if (entered) await o.win.leave().catch(() => {})
       const writes: BrowserRunWriteStep[] = writer?.log() ?? []

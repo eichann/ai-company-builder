@@ -52,6 +52,11 @@ export const BROWSER_WORK_LIMITS = Object.freeze({
   afterValue: 300,
   /** A company Skill's steps handed to the operator. */
   steps: 20_000,
+  /**
+   * After the operator's press, typing or choice: how long main still watches for a write the page's script makes a
+   * moment later, before the next look at the page (one value for every site; then every held write is waited for).
+   */
+  writeStartMs: 1000,
 })
 const L = BROWSER_WORK_LIMITS
 
@@ -516,6 +521,7 @@ export const BROWSER_OPERATOR_WORK_PROMPT = [
   WORK_STOP_LINE,
   '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）。',
   'writes に「分からない」が出たら、それ以上は書かず stop（blocked）にしてください。',
+  'writes に「送っている途中」があるときは、同じ保存を押し直さず wait で待ってください（答えが来ると次の回で結果に変わります）。',
   '書き終えたら、手順の「確かめること」をページで確かめ、checks に書いてから done にしてください。checks は人のカードにだけ出ます（AI が確かめた、と表示されます）。',
   ...COMMON_LINES,
 ].join('\n')
@@ -528,6 +534,14 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
   refused: '枠に合わないので止めました（送っていません）',
   'site-refused': 'サイトが受け付けませんでした（エラーで、保存されていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
 }
+
+/**
+ * A held write whose result is not kept yet (on its way to the site, or queued behind one): its permit — and the frame's
+ * unit — may already be taken, so the operator sees it beside the frames' `left` and never presses again for it.
+ */
+export const WORK_WRITE_SENDING = 'sending' as const
+export const WORK_WRITE_SENDING_WORDS = '送っている途中です（サイトの答えを待っています。同じ保存をもう一度押さないでください）'
+export type WorkWriteState = BrowserRunWriteOutcome | typeof WORK_WRITE_SENDING
 
 /**
  * The material of one step of a write run. **The page** (address, title, text, element names and values), the item
@@ -546,7 +560,8 @@ export function workMaterial(input: {
   frames: readonly WorkFrame[] | null
   page: BrowserPageSnapshot
   history: readonly BrowserBrowseHistoryEntry[]
-  writes: readonly BrowserRunWriteOutcome[]
+  /** Each held write so far: its kept outcome, then the ones still being sent (`sending`). */
+  writes: readonly WorkWriteState[]
   notes: string
   round: number
   /** The run's budget of steps (the server's answer: browser-run-budget.ts). */
@@ -575,7 +590,7 @@ export function workMaterial(input: {
       ...(p.screen ? { screen: { width: p.screen[0], height: p.screen[1] } } : {}),
     },
     history: input.history.map(h => ({ ...h })),
-    writes: input.writes.map((w, i) => ({ number: i + 1, result: WORK_WRITE_WORDS[w] })),
+    writes: input.writes.map((w, i) => ({ number: i + 1, result: w === WORK_WRITE_SENDING ? WORK_WRITE_SENDING_WORDS : WORK_WRITE_WORDS[w] })),
     notes: o(input.notes),
     round: input.round,
     roundsLeft: input.rounds - input.round,

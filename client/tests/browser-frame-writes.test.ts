@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
+  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -482,6 +482,14 @@ interface WorkWorld {
   sendHangs: boolean
   frameApprove: () => Promise<BrowserLinesAnswer>
   idleMaxMs?: number
+  /** How long main watches for a write the page starts after a press (the real value is a second; short here). */
+  writeStartMs?: number
+  /** The page's script makes the write this long after the press (the press itself returns at once). */
+  writeDelayMs?: number
+  /** The site takes this long to answer a write. */
+  siteDelayMs?: number
+  /** The page saves by itself (a timer) right as it is looked at for this snapshot (1-based), after main's wait. */
+  saveOnSnapshot?: number
   frameConfirm: () => Promise<BrowserLinesAnswer>
   frameGet: () => Promise<BrowserLinesAnswer>
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
@@ -516,11 +524,17 @@ function workWorld(over: Partial<WorkWorld> = {}) {
   }
   let permits = 0
   let shots = 0
+  let snapshots = 0
   let hooks: Parameters<BrowserBrowseSurface['enter']>[1]
   const surface: BrowserBrowseSurface = {
     async enter(_stopped, work) { hooks = work; w.calls.push('enter'); return true },
     async leave() { w.calls.push('leave') },
-    async snapshot() { return snapshot() },
+    async snapshot() {
+      if (++snapshots === w.saveOnSnapshot && hooks) {
+        void hooks.holdWrite(held(w.site, 'POST', '/coupons', JSON_TYPE, '{"title":"自動"}', () => new Promise<void>(r => setTimeout(r, w.siteDelayMs ?? 0))))
+      }
+      return snapshot()
+    },
     // The screen of this moment (memory only, for the operator): a marker no other channel could carry by chance.
     async screenshot() { return { mediaType: 'image/jpeg', data: new TextEncoder().encode(`${SCREEN_MARKER}-${++shots}`) } },
     async act(action) {
@@ -528,7 +542,9 @@ function workWorld(over: Partial<WorkWorld> = {}) {
       // 保存 makes the page's write (to the frame), 自動保存 one outside it.
       if (action.do === 'click' && hooks) {
         const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, '{"title":"冬のクーポン","_token":"csrf-9"}',
-          w.sendHangs ? () => new Promise<void>(() => {}) : undefined)
+          w.sendHangs ? () => new Promise<void>(() => {}) : w.siteDelayMs ? () => new Promise<void>(r => setTimeout(r, w.siteDelayMs)) : undefined)
+        const pageHooks = hooks
+        if (w.writeDelayMs !== undefined) { setTimeout(() => { void pageHooks.holdWrite(page) }, w.writeDelayMs); return 'ok' }
         const holding = hooks.holdWrite(page)
         if (!w.pressDoesNotWait) await holding
       }
@@ -569,6 +585,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     reader: () => shown ? ({ async read(address) { w.calls.push(`read ${address}`); return w.reads[address] !== undefined ? { status: 200, body: w.reads[address] } : { status: 404, body: '' } }, closed: () => false }) : null,
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
+    writeStartMs: w.writeStartMs ?? 20,
     ...(w.now ? { now: w.now } : {}),
     ...(w.skillSteps ? { skillSteps: async (_root: string, skill: string) => w.skillSteps?.(skill) ?? null } : {}),
   })
@@ -662,6 +679,99 @@ test('a write still on its way when the run\'s wait runs out is unknown — in t
   assert.deepEqual(view.ok && view.view.result?.unknown, ['POST /coupons'])
   // Given up as unknown, it can still be answered about on the card (its permit was kept: Codex review).
   assert.ok(view.ok && view.view.result?.confirm, 'the card offers the answer for a write given up while on its way')
+})
+
+/** The material's writes and the frame's units left, as the operator got them at one step of the work. */
+const writesSeen = (material: unknown) => {
+  const m = material as { phase: string; writes: Array<{ result: string }>; frames: Array<{ left: number }> | null }
+  return { phase: m.phase, writes: m.writes.map(x => x.result), left: m.frames?.map(f => f.left) ?? null }
+}
+
+test('a press whose page writes a moment later to a slow site: the next step sees the write done beside the unit it used, never a unit gone without a result (incident 2026-11-27)', async () => {
+  const { w, tool } = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], writeStartMs: 1000, writeDelayMs: 150, siteDelayMs: 300,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'done' }, [], []))
+  const seen = w.materials.map(writesSeen)
+  assert.deepEqual(seen[0], { phase: 'work', writes: [], left: [1] })
+  assert.deepEqual(seen[1], { phase: 'work', writes: ['送りました（サイトが答えました）'], left: [0] }, JSON.stringify(seen))
+  assert.deepEqual(w.site.requests.length, 1)
+})
+
+test('a press whose write gets no answer within the wait: given up as unknown before the operator looks again — the run stops, the operator is not asked again and nothing is sent twice', async () => {
+  const { w, wiring, tool } = workWorld({
+    answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], writeStartMs: 1000, writeDelayMs: 100, sendHangs: true, idleMaxMs: 200,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'unknown' }, [], []))
+  // One step pressed; the operator never got a page whose frame was used up without the write's result.
+  assert.equal(w.materials.length, 1, JSON.stringify(w.materials.map(writesSeen)))
+  assert.equal(w.calls.filter(c => c === 'framePermit').length, 1)
+  assert.equal(w.calls.filter(c => c === 'act click').length, 1)
+  const finish = w.calls.filter(c => c.startsWith('runFinish')).pop() ?? ''
+  assert.match(finish, /"outcome":"unknown"/)
+  assert.match(finish, /"reason":"write-unknown"/)
+  const view = wiring.card(COMPANY, FRAME_RUN)
+  assert.ok(view?.ok && view.view.result?.outcome === 'unknown')
+  assert.deepEqual(view.ok && view.view.result?.unknown, ['POST /coupons'])
+})
+
+test('a held write not yet decided is told to the operator as being sent (its permit may already have used the unit)', async () => {
+  const site: Site = { requests: [], answer: ok201 }
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const { writer } = writerWorld([frame({ max: 2, left: 2 })])
+  const first = writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a', () => gate))
+  const second = writer.hold(held(site, 'POST', '/coupons', FORM, 'name=b'))
+  await new Promise(r => setTimeout(r, 10))
+  assert.equal(writer.sending(), 2)
+  assert.deepEqual(writer.frames().map(f => f.left), [1], 'the first one\'s unit is taken while it is on its way')
+  let idle = false
+  const waiting = writer.idle().then(() => { idle = true })
+  release()
+  await Promise.all([first, second, waiting])
+  assert.equal(idle, true)
+  assert.equal(writer.sending(), 0)
+  assert.deepEqual(writer.records().map(r => r.outcome), ['done', 'done'])
+  const material = workMaterial({
+    phase: 'work', task: 't', items: [], steps: null, frames: [frame()], page: snapshot(), history: [],
+    writes: ['done', WORK_WRITE_SENDING], notes: '', round: 2, rounds: 20,
+  }) as { writes: Array<{ number: number; result: string }> }
+  assert.deepEqual(material.writes, [{ number: 1, result: '送りました（サイトが答えました）' }, { number: 2, result: WORK_WRITE_SENDING_WORDS }])
+})
+
+test('a write the page makes as the operator looks again is shown to it as being sent, never left out', async () => {
+  const { w, tool } = workWorld({
+    answers: ['{"do":"wait","seconds":1}', '{"do":"wait","seconds":1}', DONE_PLAIN], saveOnSnapshot: 2, siteDelayMs: 300,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  const seen = w.materials.map(writesSeen)
+  assert.deepEqual(seen[1]?.writes, [WORK_WRITE_SENDING_WORDS], JSON.stringify(seen))
+  // Before the next look main waits for it: then it is the site's answer.
+  assert.deepEqual(seen[2], { phase: 'work', writes: ['送りました（サイトが答えました）'], left: [0] }, JSON.stringify(seen))
+  assert.equal(w.site.requests.length, 1)
+})
+
+test('the writer\'s idle waits for a write the page holds while it waits', async () => {
+  const site: Site = { requests: [], answer: ok201 }
+  const { writer } = writerWorld([frame({ max: 2, left: 2 })])
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  void writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a'))
+  const waiting = writer.idle()
+  // Held after the wait began: the wait covers it too.
+  void writer.hold(held(site, 'POST', '/coupons', FORM, 'name=b', () => gate))
+  let idle = false
+  void waiting.then(() => { idle = true })
+  await new Promise(r => setTimeout(r, 30))
+  assert.equal(idle, false)
+  release()
+  await waiting
+  assert.deepEqual(writer.records().map(r => r.outcome), ['done', 'done'])
 })
 
 test('the window\'s DevTools connection gone while a write is held: its copy is never sent, it is told unknown, the run is locked', async () => {
