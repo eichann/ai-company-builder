@@ -196,6 +196,10 @@ describe('what is left out, and why', () => {
     expect(browserRecordingProblem({ format: 1, domain: SHOP, hosts: [], steps: steps({ bareQuery: false }) }, SHOP)).toBe('send')
     expect(browserRecordingProblem({ format: 1, domain: SHOP, hosts: [], steps: steps({}) }, SHOP)).toBeNull()
     expect(browserRecordingProblem({ format: 3, domain: SHOP, hosts: [], steps: steps({ bareQuery: false }) }, SHOP)).toBe('format')
+    // A malformed address beside `bareQuery: true` is refused, never a thrown error (an internal error to the sender).
+    for (const address of [null, 7, ['/a?b'], { includes: 1 }]) {
+      expect(browserRecordingProblem({ format: 2, domain: SHOP, hosts: [], steps: steps({ address, bareQuery: true }) }, SHOP)).toBe('send')
+    }
   })
 
   it('a write whose address says delete or remove is marked: only the method DELETE is left out', () => {

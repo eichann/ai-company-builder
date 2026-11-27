@@ -395,10 +395,11 @@ export function browserRecordingProblem(content: unknown, domain: string): strin
         break
       case 'send': {
         if (!exactKeys(s, sendKeys)) return 'send'
-        // Format 2 says for every send whether its query was kept exactly; "exactly" needs a query.
-        if (content.format === 2 && (typeof s.bareQuery !== 'boolean' || (s.bareQuery && !(s.address as string).includes('?')))) return 'send'
         if (!(METHODS as readonly unknown[]).includes(s.method) || !(s.override === null || (OVERRIDES as readonly unknown[]).includes(s.override))) return 'send'
         if (!isBrowserAddressPattern(s.address)) return 'send'
+        // Format 2 says for every send whether its query was kept exactly; "exactly" needs a query (the address is a string
+        // by now: Codex review).
+        if (content.format === 2 && (typeof s.bareQuery !== 'boolean' || (s.bareQuery && !s.address.includes('?')))) return 'send'
         if (!(s.status === null || (typeof s.status === 'number' && Number.isInteger(s.status) && s.status >= 100 && s.status <= 599))) return 'send'
         if (!posInt(s.count, BROWSER_RECORDING_LIMITS.count)) return 'send'
         if (s.after !== null) {

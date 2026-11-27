@@ -3919,7 +3919,7 @@ every reason left out; a query only when vouched for (format 1 and `?preview=fal
 dropped beside a broader target, the frame then fitting only what was made; 300 generated recordings: the text parses, is
 within itself, never deletes, each write one the person sent; the change rule: drops, reorders, narrowing, fixed fields, the
 shared budget, every refusal), `client/tests/browser-recorder.test.ts` (`bareQuery` for each kind of query; format 2 passes the
-server's check). Each guard mutation-checked (20 mutations).
+server's check). Each guard mutation-checked (21 mutations; a malformed address beside `bareQuery` is refused, never thrown — Codex review).
 
 ## Letting a domain go, why a write run stopped, the Skill's steps as written (incident 2026-11-27)
 
