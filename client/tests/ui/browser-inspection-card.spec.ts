@@ -101,8 +101,10 @@ for (const stop of ['decide', 'work'] as const) {
     await expect(ask).toContainText(`決めてほしいこと：${QUESTION}`)
     // The first thing after the title row: nothing sits between them.
     expect(await card.evaluate(el => el.firstElementChild?.nextElementSibling?.hasAttribute('data-stop-ask') ?? false)).toBe(true)
+    // The screen the operator stopped on, beside the question (agent-browser.md "The stopped card shows the screen").
+    await expect(ask.getByRole('img', { name: '止まったときの画面（ブラウザ操作の係の AI が見ていたもの）' })).toHaveCount(1)
     // The reason once (the memo's line with the very same words is not repeated either).
-    await expect(card.getByText('人の判断が要る画面', { exact: false })).toHaveCount(1)
+    await expect(card.getByText('本人に決めてほしいことがある', { exact: false })).toHaveCount(1)
     await card.getByText('係の AI のメモを見る').click()
     await expect(card.locator('[data-trail-stop]')).toHaveCount(0)
     await expect(card).not.toContainText('サイトから読み取った情報')

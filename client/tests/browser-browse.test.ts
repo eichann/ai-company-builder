@@ -544,7 +544,7 @@ test('the hit-test\'s answer is read strictly: an unknown refusal or shape is "n
   // The prompts say how to press by position and type without a ref, both operators.
   for (const p of [BROWSER_OPERATOR_BROWSE_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT]) {
     assert.match(p, /"do":"click","x":/)
-    assert.match(p, /\{"do":"type","text":/)
+    assert.match(p, /"do":"type","ref":<ref。省くといまの入力欄>/)
     assert.match(p, /page\.screen/)
   }
 })

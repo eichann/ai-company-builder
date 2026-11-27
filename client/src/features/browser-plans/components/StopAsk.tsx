@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Question } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
-import { BROWSER_STOP_WORDS as W, stopAnswerMessage, type BrowserStopNext } from '../../../../shared/browser-operator-trail'
+import { BROWSER_STOP_WORDS as W, stopAnswerMessage, type BrowserStopNext, type BrowserStopScreen } from '../../../../shared/browser-operator-trail'
 import { openBrowserSite } from '../api'
 
 /**
@@ -9,13 +9,17 @@ import { openBrowserSite } from '../api'
  * 「決めてほしいこと：…」 with ［そのまま進める］［やめる］, or ［開いてログイン］. The two answers are the member's own message
  * to the consultation, sent through the chat's ordinary send (`say`): nothing here reaches the site — the consultation AI
  * asks again and the new run reads the site afresh. The question is the operator's words (outside text): React text only.
+ * Beside it, the screen the operator stopped on (agent-browser.md "The stopped card shows the screen"): an image held in
+ * memory only, handed with the card's view — never kept by the chat.
  */
-export function StopAsk({ next, companyId, host, say }: { next: BrowserStopNext; companyId: string; host: string; say?: (text: string) => void }) {
+export function StopAsk({ next, companyId, host, say, screen }: { next: BrowserStopNext; companyId: string; host: string; say?: (text: string) => void; screen?: BrowserStopScreen }) {
   const [sent, setSent] = useState(false)
+  const shot = screen ? <StopScreen screen={screen} /> : null
   if (next.kind === 'login') {
     return (
       <div className="mt-2">
         <Button size="sm" onClick={() => { void openBrowserSite(companyId, host) }}>{W.openSite}</Button>
+        {shot}
       </div>
     )
   }
@@ -43,6 +47,17 @@ export function StopAsk({ next, companyId, host, say }: { next: BrowserStopNext;
             <p className="mt-1 text-small text-text-muted">{W.sendsNote}</p>
           </>
         ))}
+      {shot}
     </div>
+  )
+}
+
+/** The screen the operator stopped on: a JPEG from main's memory (its shape checked by the view's reader). */
+function StopScreen({ screen }: { screen: BrowserStopScreen }) {
+  return (
+    <figure data-stop-screen className="mt-2">
+      <img src={`data:${screen.mediaType};base64,${screen.base64}`} alt={W.screen} className="max-h-80 w-auto max-w-full rounded-control border border-border" />
+      <figcaption className="mt-1 text-small text-text-muted">{W.screen}</figcaption>
+    </figure>
   )
 }

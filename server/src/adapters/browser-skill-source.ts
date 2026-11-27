@@ -15,7 +15,8 @@ import { BROWSER_SKILL_FILE, BROWSER_SKILL_LIMITS, browserSkillPathOf, parseBrow
 import { isValidFolderName } from '../../shared/core/names'
 import { isSameOrAncestorPath, pathKey } from '../../shared/core/paths'
 import { companyRepoPath } from '../lib/config'
-import { gitAsync } from '../lib/git-exec'
+import { gitAsync, gitBufferAsync } from '../lib/git-exec'
+import { BROWSER_SKILL_STEP_FILES, BROWSER_SKILL_STEPS_LIMITS, type BrowserSkillStepFile } from '../../shared/core/browser-skill-steps'
 import { resolveSharedBranch } from '../lib/repo-folders'
 import type { BrowserSkillContent, BrowserSkillLanded, BrowserSkillSource } from '../ports/browser-skills'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -50,6 +51,17 @@ async function blobText(repo: string, blob: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+/** A step file at a Skill folder's tree: its text, too large, null when not there; throws when it cannot be read. */
+async function stepFileAt(repo: string, tree: string, name: BrowserSkillStepFile['name']): Promise<BrowserSkillStepFile | null> {
+  const blob = await entryOf(repo, tree, name, 'blob')
+  if (!blob) return null
+  const size = Number((await gitAsync(['-C', repo, 'cat-file', '-s', blob], GIT)).trim())
+  if (!Number.isFinite(size)) throw new Error('unreadable size')
+  if (size > BROWSER_SKILL_STEPS_LIMITS.fileBytes) return { name, tooLarge: true }
+  // The bytes as stored (never a trimmed output), read as UTF-8 like the app reads the member's copy.
+  return { name, text: (await gitBufferAsync(['-C', repo, 'cat-file', 'blob', blob])).toString('utf8') }
 }
 
 /** Is `path` at or under one of the private folders (compared as the core names a place)? */
@@ -269,6 +281,39 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
         ...content, declarationChanged: before !== after, previousDeclaration: before === null ? null : declarationText(before),
         sameElsewhere: { paths: elsewhere, complete: true },
       }
+    },
+
+    async stepFiles(companyId, content) {
+      const place = placeOf(companyId, content.path)
+      if (!place) return null
+      const files: BrowserSkillStepFile[] = []
+      if (content.files.startsWith('git:')) {
+        const tree = content.files.slice(4)
+        const git = await repoOf(companyId)
+        if (!git || !OBJECT_RE.test(tree)) return null
+        try {
+          for (const name of BROWSER_SKILL_STEP_FILES) {
+            const f = await stepFileAt(git.repo, tree, name)
+            if (f) files.push(f)
+          }
+        } catch {
+          return null
+        }
+        return files
+      }
+      if (!content.files.startsWith('shelf:') || deps.hasCompanyFolder(companyId)) return null
+      const department = shelfDepartment(companyId, place.department)
+      if (department === undefined) return null
+      const row = deps.companyData.forCompany(companyId).skillShelf.itemAt('skill', department?.id ?? null, place.name)
+      const stored = row ? deps.companyData.forCompany(companyId).skillShelf.versionFiles(row.id, content.files.slice(6)) : null
+      if (!stored) return null
+      for (const name of BROWSER_SKILL_STEP_FILES) {
+        const f = stored.find(x => x.path === name)
+        if (!f) continue
+        const bytes = Buffer.from(f.base64, 'base64')
+        files.push(bytes.length > BROWSER_SKILL_STEPS_LIMITS.fileBytes ? { name, tooLarge: true } : { name, text: bytes.toString('utf8') })
+      }
+      return files
     },
 
     async pushed(companyId, refUpdates) {

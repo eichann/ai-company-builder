@@ -202,6 +202,39 @@ const SLOW_SAVE_PAGE = `<!doctype html><meta charset="utf-8"><title>slow save</t
   document.getElementById('save').addEventListener('click', () => { pressed++; if (pressed === 1) setTimeout(send, 2000); else send() })
 </script>`
 
+/**
+ * A generic copy-and-register flow (agent-browser.md "The operator works from the approved steps": the completion
+ * regression; no real site's shape): a list whose row opens a menu with 「コピー」; a dialog to choose the setting again and
+ * 「決定」 (the page writes the copy, then opens the copy's edit page); there a name and a date and 「登録」 (the page writes
+ * the registration).
+ */
+const FLOW_LIST_PAGE = `<!doctype html><meta charset="utf-8"><title>一覧</title>
+<table><tr><td>秋の回</td><td><button id="menu" type="button">メニュー</button></td></tr></table>
+<div id="pop" role="menu" hidden><button id="copy" type="button" role="menuitem">コピー</button></div>
+<div id="dlg" role="dialog" aria-label="コピーの設定" hidden>
+  <label for="setting">設定</label><select id="setting"><option>A設定</option><option>B設定</option></select>
+  <button id="decide" type="button">決定</button>
+</div>
+<script>
+  document.getElementById('menu').addEventListener('click', () => { document.getElementById('pop').hidden = false })
+  document.getElementById('copy').addEventListener('click', () => { document.getElementById('pop').hidden = true; document.getElementById('dlg').hidden = false })
+  document.getElementById('decide').addEventListener('click', async () => {
+    const r = await fetch('/flow/copy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: 12, setting: document.getElementById('setting').value }) })
+    const made = await r.json()
+    location.href = '/flow/edit/' + made.id
+  })
+</script>`
+const FLOW_EDIT_PAGE = (id: string) => `<!doctype html><meta charset="utf-8"><title>コピーの編集</title>
+<label for="name">名前</label><input id="name" type="text">
+<label for="date">日付</label><input id="date" type="text">
+<button id="register" type="button">登録</button><p id="done"></p>
+<script>
+  document.getElementById('register').addEventListener('click', async () => {
+    const r = await fetch('/flow/items/${id}', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: document.getElementById('name').value, date: document.getElementById('date').value }) })
+    if (r.ok) document.getElementById('done').textContent = '登録しました'
+  })
+</script>`
+
 const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</title>
 <label for="end">受付終了日</label><input id="end" name="end_date" type="text">
 <label for="pw">パスワード</label><input id="pw" name="login_pw" type="password">
@@ -333,12 +366,14 @@ export interface Sites {
   /** UDP datagrams that reached the STUN stand-in. */
   udpPackets: number
   work: WorkHit[]
+  /** The copy-and-register flow's writes as the site received them (path and body). */
+  flow: Array<{ path: string; body: string }>
   close(): void
 }
 
 export async function startSites(certDir: string, ports: { site: number; evil: number; udp: number }): Promise<Sites> {
   const tls = { key: fs.readFileSync(path.join(certDir, 'key.pem')), cert: fs.readFileSync(path.join(certDir, 'cert.pem')) }
-  const state: Sites = { hits: [], lstep: { 201: ['300'], 202: [] }, evilConnections: 0, udpPackets: 0, work: [], close: () => {} }
+  const state: Sites = { hits: [], lstep: { 201: ['300'], 202: [] }, evilConnections: 0, udpPackets: 0, work: [], flow: [], close: () => {} }
   const record = (req: import('node:http').IncomingMessage, body: string) =>
     state.hits.push({ host: (req.headers.host ?? '').split(':')[0], method: req.method ?? '', path: req.url ?? '/', body })
 
@@ -398,6 +433,22 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
       if (host === 'op.test' && url === '/work') {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(WORK_PAGE)
+        return
+      }
+      if (host === 'op.test' && url === '/flow') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(FLOW_LIST_PAGE)
+        return
+      }
+      if (host === 'op.test' && /^\/flow\/edit\/\d+$/.test(url)) {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(FLOW_EDIT_PAGE(url.slice('/flow/edit/'.length)))
+        return
+      }
+      if (host === 'op.test' && req.method === 'POST' && (url === '/flow/copy' || /^\/flow\/items\/\d+$/.test(url))) {
+        state.flow.push({ path: url, body })
+        res.writeHead(201, { 'content-type': 'application/json' })
+        res.end(url === '/flow/copy' ? '{"id":99}' : '{"ok":true}')
         return
       }
       if (host === 'op.test' && url === '/work-slow') {

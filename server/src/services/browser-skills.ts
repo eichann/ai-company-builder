@@ -32,6 +32,7 @@ import {
   type BrowserSkillDeclaration, type BrowserSkillFrames, type BrowserSkillPlace, type BrowserSkillProblem,
 } from '../../shared/core/browser-skill'
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
+import { browserSkillStepsSeal, browserSkillStepsText, type BrowserSkillStepsSeal } from '../../shared/core/browser-skill-steps'
 import { isValidFolderName, isValidSkillName } from '../../shared/core/names'
 import {
   BROWSER_SKILL_APPROVAL_MODES, type BrowserSkillApprovalMode, type BrowserSkillStatus, type BrowserSkillsView, type BrowserSkillView,
@@ -399,6 +400,16 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       const place = browserSkillPlaceOf(skill)
       if (!place || !mayUse(member, place)) return false
       return inForce(repo(member.companyId).latest(place.path), declarationHash)?.seq === approval
+    },
+
+    /**
+     * The seal of a Skill's steps at exactly the folder version `approvedFrames` answered (`skill` its path, `files` its
+     * fingerprint): what the frames run's start hands the app, which starts the operator only with steps of that very
+     * text (agent-browser.md "The operator works from the approved steps"). Null when that version cannot be read.
+     */
+    async stepsSeal(member: Pick<Member, 'companyId'>, skill: string, files: string): Promise<BrowserSkillStepsSeal | null> {
+      const read = await deps.source.stepFiles(member.companyId, { path: skill, files })
+      return read === null ? null : browserSkillStepsSeal(browserSkillStepsText(read), deps.sha256)
     },
 
     /** Step ⑤: the per-run card was shown for this version (`files` as `approvedFrames` gave it); false when the approval moved. */

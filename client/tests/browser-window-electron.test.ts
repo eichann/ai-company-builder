@@ -58,6 +58,7 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   workPress: Record<string, unknown>
+  workFlow: Record<string, unknown>
   verify: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
@@ -106,7 +107,7 @@ before(async () => {
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 240_000)
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 330_000)
     // `close`: the process exited and its output streams ended; the result file was renamed into place before.
     child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
@@ -207,8 +208,9 @@ test('in ai mode no write reaches the operated host without an approving step; r
   assert.equal(w.websocket, 'refused')
   assert.equal(w.read, 200)
   // (The runner's own writes, to /line/…, are the next tests'.)
-  // (The recording's page saves through its own fetch, as a person does: the recording tests' own; a write run's, /work/…, the last test's.)
-  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-') && !h.path.startsWith('/work/'))
+  // (The recording's page saves through its own fetch, as a person does: the recording tests' own; a write run's, /work/…, the last test's;
+  // the completion regression's, /flow/…, its own.)
+  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-') && !h.path.startsWith('/work/') && !h.path.startsWith('/flow/'))
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
@@ -558,6 +560,26 @@ test('a write task on the real window: a press while a held write is being sent 
   // The operator was told in fixed words that its press was not done.
   const last = (r.histories as Array<Array<{ do: string; outcome: string; result?: string }>>).at(-1) ?? []
   assert.deepEqual(last.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', '送っている途中なので押していません']])
+})
+
+test('the completion regression: a company Skill\'s copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once', { skip }, () => {
+  const r = result.workFlow
+  assert.match(String(r.words), /^済みました/, JSON.stringify(r))
+  // Exactly the two writes, in order, with the setting chosen again and the person's own values as written.
+  assert.deepEqual(r.flow, [
+    { path: '/flow/copy', body: JSON.stringify({ source: 12, setting: 'B設定' }) },
+    { path: '/flow/items/99', body: JSON.stringify({ name: '【冬の回】', date: '2026-12-03' }) },
+  ])
+  assert.deepEqual((r.calls as string[]).filter(c => c.startsWith('permit') || c.startsWith('report') || c === 'approve'), [
+    'approve', 'permit 1 /flow/copy', 'report done', 'permit 2 /flow/items/99', 'report done',
+  ])
+  // The work had the person's words, the sealed steps and the approved plan — and not the consultation AI's request.
+  for (const m of r.workMaterials as Array<{ person: unknown; steps: unknown; plan: unknown; request: unknown }>) {
+    assert.deepEqual(m.person, { said: ['元の行は変えない'], values: [{ label: '名前', value: '【冬の回】' }, { label: '日付', value: '2026-12-03' }] })
+    assert.match(String(m.steps), /B設定/)
+    assert.deepEqual(m.plan, { summary: '秋の回をコピーして登録します', affects: 'なし', values: [{ label: 'コピー元', value: '秋の回' }] })
+    assert.equal(m.request, null)
+  }
 })
 
 test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {

@@ -70,6 +70,7 @@ import type { Member } from './access'
 import type { BrowserDeviceGate } from './browser-devices'
 import type { BrowserSiteGrants } from './browser-site-grants'
 import { BROWSER_SKILL_REF_MAX, type BrowserSkillApproved, type BrowserSkillService } from './browser-skills'
+import type { BrowserSkillStepsSeal } from '../../shared/core/browser-skill-steps'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface BrowserFrameDeps {
@@ -88,7 +89,7 @@ export interface BrowserFrameDeps {
   /** The person's own level on the registered site (agent-browser.md "Who may use a site"). */
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
   /** 「Skill の承認」 (services/browser-skills.ts): the frames of an approved declaration, read by the server. */
-  skills: Pick<BrowserSkillService, 'resolve' | 'approvedFrames' | 'stillApproved' | 'runCardShown'>
+  skills: Pick<BrowserSkillService, 'resolve' | 'approvedFrames' | 'stillApproved' | 'runCardShown' | 'stepsSeal'>
   /**
    * Whether an operator run (services/browser-runs.ts, step ④) holds the domain now: step ⑤b joins the two locks, so a
    * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
@@ -214,6 +215,8 @@ interface StartFrames {
   neverRead: readonly string[]
   /** The run may open at once (a pre-approved Skill version whose text nobody changed since). */
   preApproved: boolean
+  /** A Skill's steps sealed at the folder version the frames come from (answered by the start only); null for an ad-hoc plan. */
+  steps: BrowserSkillStepsSeal | null
   /** A Skill's approval row the frames rest on (checked again inside the start's transaction). */
   approval: number | null
 }
@@ -378,10 +381,13 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       const approved = await deps.skills.approvedFrames(member, which.value)
       if (!approved.ok) return approved
       const a = approved.value
+      // The steps the operator may be handed: exactly the text of this folder version (the app checks its copy against it).
+      const steps = await deps.skills.stepsSeal(member, a.skill, a.files)
+      if (!steps) return refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' })
       return ok({
         host: a.frames.domain, source: 'skill', skill: a.skill, declarationHash: a.declarationHash, files: a.files, writes: a.frames.writes,
         afterRead: a.frames.afterRead, neverRead: a.frames.neverRead,
-        preApproved: a.mode === 'pre_approved' && !a.needsRunCard, approval: a.approval,
+        preApproved: a.mode === 'pre_approved' && !a.needsRunCard, approval: a.approval, steps,
       })
     }
     const plan = body.plan
@@ -397,7 +403,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
     return ok({
       host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes,
-      afterRead: [], neverRead: [], preApproved: false, approval: null,
+      afterRead: [], neverRead: [], preApproved: false, approval: null, steps: null,
     })
   }
 
@@ -474,7 +480,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, query: w.query, fields: canonicalJson({ ...w.fields }), max: w.max })))
         // The write ledger: earlier writes in doubt this run's frames may meet — the app asks the person before writing.
         const doubts = doubtsFor(member.companyId, f.host, member.userId, f.writes)
-        return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead], doubts })
+        return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead], doubts, ...(f.steps ? { steps: f.steps } : {}) })
       })
     },
 

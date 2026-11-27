@@ -118,7 +118,7 @@ test('the incident: a preview that stops for a person\'s decision puts the opera
     assert.equal(finished.join('\n').includes('冬セミナー'), false)
     // The reason once: the headline holds it, no note repeats it, nothing read is framed.
     const card = view!.card
-    assert.equal(occurrences(JSON.stringify(card), '人の判断が要る'), 1)
+    assert.equal(occurrences(JSON.stringify(card), '本人に決めてほしいことがある'), 1)
     assert.deepEqual(card.notes, [])
     assert.deepEqual(card.sections, [])
     assert.equal(card.account, undefined)

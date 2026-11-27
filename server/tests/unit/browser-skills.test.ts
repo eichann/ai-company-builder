@@ -66,6 +66,7 @@ const source: BrowserSkillSource = {
   read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,
+  stepFiles: async () => [],
 }
 /** Put a Skill into the server's copy: a bare name is the company's, else a path. */
 function put(companyId: string, skill: string, declaration: string, text = 'v1'): BrowserSkillContent {

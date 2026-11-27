@@ -90,9 +90,9 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
       </div>
 
       {/* A stopped run: what it asks first (the operator's question with its two answers), then why it stopped, once. */}
-      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} screen={view.screen} />}
       {result && <p role="status" className="mt-1 text-body font-strong text-text">{result.headline}</p>}
-      {result && view.next?.kind === 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} />}
+      {result && view.next?.kind === 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} screen={view.screen} />}
 
       {view.phase === 'confirming' && (
         <div className="mt-2">

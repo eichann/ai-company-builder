@@ -102,9 +102,11 @@ const stopTrail: BrowserOperatorTrail = [{
   phase: WORK_STOP ? 'work' : 'preview', steps: [{ action: 'click', page: '/tags', label: 'タグを作る', reason: 'タグの一覧を開くため' }], more: 0,
   end: { kind: 'stop', reason: STOP === 'blocked' ? '保存ボタンが押せないため' : QUESTION }, notes: null,
 }]
+/** The screen the operator stopped on (a tiny JPEG: only that it is drawn matters here). */
+const STOP_SCREEN = { mediaType: 'image/jpeg' as const, base64: '/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==' }
 const stoppedPreview: BrowserInspectionView = {
   card: workPreviewStoppedCard({ kind: 'stopped', why: stopWhy }), readAt: new Date().toISOString(), siteLabel: 'shop.example.test', trail: stopTrail,
-  ...(stopNext ? { next: stopNext } : {}),
+  ...(stopNext ? { next: stopNext, screen: STOP_SCREEN } : {}),
 }
 const stoppedWork = (): BrowserWriteView => {
   const wrote = STOP === 'wrote'
@@ -114,7 +116,7 @@ const stoppedWork = (): BrowserWriteView => {
     title: 'ブラウザ操作：AI が書く作業', siteLabel: 'shop.example.test', phase: 'finished', values: [], sentences: ['見本セミナーの申し込みに付けるタグを作ります'],
     card, readAt: new Date().toISOString(), contentHash: null, message: null,
     result: { outcome: wrote ? 'partial' : 'stopped', headline: card.headline, done: wrote ? ['POST /tags'] : [], notDone: [], unknown: [], byHand: [], confirm: null },
-    trail: stopTrail, next: { kind: wrote ? 'question' : 'decide', question: QUESTION },
+    trail: stopTrail, next: { kind: wrote ? 'question' : 'decide', question: QUESTION }, screen: STOP_SCREEN,
   }
 }
 const calls: string[] = []

@@ -106,6 +106,8 @@ paths:
   - "admin/src/lib/agent-browser-recordings.ts"
   - "admin/tests/agent-browser-recordings.test.tsx"
   - "shared/core/browser-skill.ts"
+  - "shared/core/browser-skill-steps.ts"
+  - "client/tests/browser-operator-sources.test.ts"
   - "shared/core/browser-skill-draft.ts"
   - "server/tests/unit/browser-skill-draft.test.ts"
   - "shared/types/browser-skills.ts"
@@ -3170,7 +3172,8 @@ with it yet. The company's Skills and the departments' ("Department Skills" belo
   a bare name meant for the company's Skill is now refused while a department the member reads has one of that name too
   (its words: the generic 「使えません」; safe side). The run keeps the resolved path, and the app reads the
   operator's steps (SKILL.md, site-notes.md) from **that** path in the member's company folder
-  (`features/browser/skill-steps.ts`; after the frames run started, never from the AI's word).
+  (`features/browser/skill-steps.ts`; after the frames run started, never from the AI's word), and hands them over only when
+  they are exactly the text the server sealed for that folder version ("The operator works from the approved steps").
 - **Who uses it**: a department's Skill only by a member who **reads its path now** (`BrowserSkillDeps.readsPath`,
   composition: `resolveAccess` over the company's scopes — read-restricted places of a company without the shared
   folder, private folders' gates), asked by `resolve`, by `approvedFrames` at every start, approve and permit (else the
@@ -3706,7 +3709,7 @@ else. **No site word** anywhere (a fictional site in the tests).
   `workPlanSentences` / `workResultCard`; the window port `HeldPageWrite` / `HeldPageWriteAnswer` / `BrowserWorkHooks`);
   `electron/features/browser/frame-writes.ts` (`createFrameWriter`: one held write at a time; no Electron);
   `electron/features/browser/work.ts` (`wireBrowserWork`: the task's flow, the cards in memory); `skill-steps.ts` (a
-  Skill's `SKILL.md` / `site-notes.md` from the member's company folder at the path the frames run names — the company's or a department's, "Department Skills" —, through the allowed roots); the shell's hold
+  Skill's `SKILL.md` / `site-notes.md` from the member's company folder at the path the frames run names — the company's or a department's, "Department Skills" —, through the allowed roots, joined by the core's rule and checked against the server's seal: "The operator works from the approved steps"); the shell's hold
   (`browser-window.ts`: `BrowserAiGate.hold`, `holdPageWrite`, `sendHeld`); the tool `browser_work`
   (`electron/browser-request/inspect-tool.ts`, registered in `agents/claude.ts`, category `web`); the core's
   `browserNeverReadFits` (`shared/core/browser-frame-match.ts`), the card row's `compared` / `by` / `mark`
@@ -4602,13 +4605,14 @@ Skill wrote 【】.
   stopped card asks one thing"), never repeated in headings or a note; the read-only operator's card says the same; the
   card body's heading 「サイトから読み取った情報（相談の AI には渡していません）」 (who read each part is said by its own
   heading or row); a line inspection's (machine) 「アプリがサイトから読み取った情報」.
-- **The Skill's steps as written** (`workMaterial`): the page (address, title, text, element names, values, options), the
+- **The Skill's steps as written** (`workMaterial`; since "The operator works from the approved steps" the keys are
+  `person`, `steps`, `plan`, `request`): the page (address, title, text, element names, values, options), the
   item headings and the operator's own notes stay outside text (`{ outside }`, 【】 → 〔〕). **A company Skill's steps**
-  (its `SKILL.md` and `site-notes.md`, company-reviewed text approved with the Skill) go as `steps: { skill }` and **the
-  task** (the request the consultation AI wrote for the member) as `task: { request }`, **as written** — no bracket
+  (its `SKILL.md` and `site-notes.md`, the sealed text) go as `steps`, the person's words as `person`, and (ad hoc only)
+  the consultation AI's request as `request`, **as written** — no bracket
   neutralization: the values the operator types come from them, never from the page. Each is its own JSON value (the
   encoding is the fence: nothing inside a value can end it, which is also why neutralizing brackets inside JSON guarded
-  nothing). No Skill → `steps: null`. Both prompts say: what to do and the values to type come from `request` and `skill`,
+  nothing). No Skill → `steps: null`. Both prompts say: what to do and the values to type come from them,
   as written, 【】 included; `outside` text is data, and its 〔〕 may be 【】 in the original. Checked elsewhere: no other
   company text reaches the operator neutralized (the frames, after-read and never-read patterns are plain values; the
   read-only operator has no Skill steps; its task stays `outside` — it types only search words).
@@ -4770,6 +4774,95 @@ Each guard mutation-checked (the preview's and the work's `next`, the reason fal
 asking, no answers after a held write, the message's quote and 【】 neutralization, no summary on a stop, the cleaning, the
 renderer's check, a non-string question, the 「何も書いていません」 claim only with no write held; on the card: the memo's repeat, the
 write card's headline twice, the question not first, a button that writes, the folded line on a card without marks).
+
+## The operator works from the approved steps (owner 2026-11-28: 「AI に守らせたいことは説明文ではなく仕組みで保証する」)
+
+A trial on 2026-11-27 stopped four times. Half of it was the operator's prompt itself: an example sentence (「同名のタグを
+使ってよいか」) became the model of a stop, a stop condition the consultation AI added to the task outranked the Skill, what
+the preview had checked was gone by the work, and the prompts (≈3,000 characters each) explained the app to the operator.
+Owner rule: what the operator must keep to is guaranteed by the app; the prompt says only the answer's form, what to work
+from, when to stop, and that page text is data. Codex's review kept two more: the person's own prohibitions stay, and a
+Skill is bound to its approved version. Owner condition: what the operator can do, how it is asked and whether it finishes
+are not made worse.
+
+- **Shorter prompts** (characters, before → after): the write task's work 2,946 → 1,331, its preview 3,000 → 1,356, the
+  read task 2,172 → 853. Kept: the answers' exact forms (the same actions; lines merged only), what to work from and in
+  which order, when to stop, outside text is data. Gone: example questions, 「人の判断が要る画面」 (too wide),
+  「unlisted … 進められないなら stop」, how the app shows things (cards, 「相談の AI には渡りません」, `retry` being the app's
+  words), what a refusal's fixed words already say (`history`, `writes`), repetitions; limits the parser cuts by itself (a
+  plan's words, a question, a reason) are no longer stated.
+- **When the operator may stop** (both write prompts, one line): a login (`need-login`), the thing asked is not there
+  (`not-found`), a write in doubt (`blocked`, the work only), a fork no source answers (`need-person`, its `question` one
+  that 「はい」 answers). Otherwise it goes on by the steps. A person's prohibition that really conflicts with the steps is
+  asked once, before writing (`need-person`; with no write held the card offers the answers: "The stopped card asks one
+  thing").
+- **The order of sources, by the material** (`workMaterial`): `person` first — the person's own prohibitions and limits
+  (`said`) and values (`values`), as they said them —, then `steps` (the Skill's sealed text), then `plan` (the work only:
+  the preview's plan the person approved, `{ summary, affects, values }`; **`null` when there was no preview** — a
+  pre-approved Skill version), then `request`: the consultation AI's own words of the task **only when no Skill steps are
+  handed** (`null` when they are; an ad-hoc task, a Skill with no steps, or a company without the company folder keeps it —
+  else the operator would have nothing to go on: Codex review). So a step or a stop condition the consultation AI writes
+  into the task never reaches an operator that has the Skill's steps; then the task's sentence is the card's only. The
+  prompts' one ranking line: `person.said` before `steps` (the owner's order).
+- **The tool** (`browser_work`, `inspect-tool.ts`): `said` (≤ 10, each ≤ 300, the person's words — never the AI's own
+  steps or stops) and `values` (≤ 16 `{ label ≤ 40, value ≤ 200 }`), both optional, read strictly (`workPersonOf`: exact
+  keys, no control character but a line break in `said`) else `badInput`; its description says the operator works from
+  `said`, `values` and the Skill, and that with a Skill nothing is added and `task` does not reach the operator. The
+  card's 「決めてほしいこと」 footer tells the consultation AI to add what was decided to `said`.
+- **A Skill's steps bound to the approved version** (`shared/core/browser-skill-steps.ts`, knows no site): the steps are
+  `SKILL.md` then `site-notes.md`, each `# <name>` + newline + its text, joined by a blank line (`browserSkillStepsText`); a
+  file over 64 KiB or the text over 20,000 characters is **too large** (never cut). The frames run's start answers `steps`
+  (`BrowserFrameRunStart.steps`, additive): the **seal** — `sealed` with `sha256:` of that text, `none` or `too-large` —
+  computed by the server (`BrowserSkillService.stepsSeal`) from **its own copy at exactly the folder version
+  `approvedFrames` answered** (`BrowserSkillSource.stepFiles`: the repository tree the fingerprint names, the bytes as
+  stored with the size read first, or the shelf's version); that version unreadable → the start is refused
+  `BROWSER_SKILL_CHANGED`, nothing started. The folder version is already in the plan hash (`files`), so a text change
+  shows the card as before. The app (`work.ts`, `browserSkillStepsCheck`) reads its copy (`skill-steps.ts`) and starts
+  only when its text hashes to the seal, or neither side has steps. Else **nothing is operated** (no operator run, no
+  permit), the frames run ends, and the card and the AI say one of `steps-changed` (this PC's copy differs: not synced,
+  edited here), `steps-missing` (sealed, none here: a department not downloaded), `steps-too-large`, `steps-unsealed`
+  (no seal: an older server) — fixed words, 「始めませんでした…サイトには何も書いていません」. **A company without the
+  company folder** has no copy on this PC: its operator gets no steps, as before (the shelf's steps for the app: "Not yet").
+  The check runs **before** the member is asked about an earlier write in doubt (the write ledger), so nobody answers for
+  a run that cannot start.
+- **Not covered** (said): the app's own text is trusted after the check (a modified app is outside what this protects);
+  the seal says the text equals the server's copy of that version, not that a person read it (the approval's
+  `files_seen` and the per-run card do, as before). `said` / `values` are still written by the consultation AI: nothing
+  can prove they are the person's words, and `said` ranks above the steps — the frames still bound every write, and the
+  tool's description and field limits narrow it (independent review). A checkout that converts line endings
+  (`core.autocrlf=true`) or a step file stored as a link makes the copy differ for good: `steps-changed`, safe side.
+
+## The stopped card shows the screen (same day)
+
+The card's 「決めてほしいこと」 asked the member about a screen they could not see. Now a stopped write task's card carries
+the screen the operator stopped on.
+
+- **What**: the image of the operator's last step (`operate` returns the answer's screen), kept as `BrowserStopScreen`
+  `{ mediaType: 'image/jpeg', base64 }` (`browserStopScreen`, ≤ 4 MiB of base64, else none) **only beside a `next`** — the
+  question, or the login (`workStopNext`) — on the stopped preview's `bo_` card (`previewStoppedView`) and the write run's
+  `bf_` card (`Entry.screen`; `viewOf` hands it only with `next`). The renderer takes it only in its exact shape and only
+  beside a valid `next` (`readBrowserStopScreen` in `readBrowserInspectionView` / `readBrowserWriteView`) and draws it under
+  the question as an `<img>` of a `data:` address (`StopAsk.tsx`, the CSP's `img-src data:`; its text alternative and
+  caption 「止まったときの画面（ブラウザ操作の係の AI が見ていたもの）」).
+- **Where it lives**: main's memory with its card (gone at quit and sign-out, `clear()`), the card's IPC to the window
+  that shows the consultation, the renderer's memory. Never in the consultation AI's words, the run log, any server call,
+  the site, the chat history (the chat keeps the card's reference only) or a file.
+
+Tests: `client/tests/browser-operator-sources.test.ts` (with a Skill the material has the person's words and the sealed
+steps and never the consultation AI's request, the person first; ad hoc the request; steps changed / missing / too large
+/ unsealed / sealed-none-but-present start nothing, with the card's and the AI's words; the core's join, limits and check;
+the approved plan in the work, `null` without a preview; the screen on both stopped cards, the renderer's check, never in
+the AI's words or the server's calls, none without `next`, gone at sign-out; the tool's shapes),
+`server/tests/unit/browser-frames.test.ts` (the start's seal of exactly the folder version, too large, none, unreadable →
+nothing started, none for an ad-hoc plan), `server/tests/integration/browser-skill-push.test.ts` (the source's step files
+at a repository tree and a shelf version, bound to the version, too large, the seal's hash),
+`client/tests/browser-window-electron.test.ts` **the completion regression** (a generic copy-and-register flow,
+`tests/browser-window-harness/sites.ts` `/flow`: a list row's menu → 「コピー」 → a dialog to choose the setting again →
+「決定」 (the page writes) → the copy's page: name and date → 「登録」 (the page writes); the real window and wiring with a
+scripted operator — no model — through the preview, the card and the work: done, exactly the two writes in their frames,
+once each, the person's values as written; a later guard that stops this flow fails it). Each guard mutation-checked;
+kept on purpose: the work card's screen kept only with a `next` (`viewOf` hands it only beside one, so dropping the first
+check changes nothing seen).
 
 ## Not yet (later PRs)
 
