@@ -282,7 +282,8 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    the title is sent (so 目的 alone saves under a title stored before the rule); the assignee of a request still
    引き受け待ち reads 「保存すると、このやることを引き受けたことになります。」 under the field (`accepts`). The card says
    「件名を直しました」 / 「目的を直しました」 with ［取り消す］. A refusal stays under the field with the draft; someone
-   else's change first is the usual conflict notice. A member who may not correct them sees plain text, no control.
+   else's change first is the usual conflict notice. A card left (another task, another tab) before a leave-save is
+   answered keeps nothing of a refused draft — as before, when leaving the form always dropped it (Codex review: accepted). A member who may not correct them sees plain text, no control.
    An older server's type offers nothing. 経緯 says 「件名を直しました（「前」→「後」）」 (`historyLines`). Tests:
    `client/tests/task-card.test.ts`, `src/features/tasks/cardActions.test.ts`, `tests/ui/task-card.spec.ts` 「件名: …」,
    「目的: …」, 「a title stored before the rule…」, and the done card (plain text).
