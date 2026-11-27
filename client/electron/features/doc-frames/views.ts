@@ -145,6 +145,13 @@ export const SELECTION_READ_LIMIT_MS = 1000
 
 /** Which page of a grant an address shows (its path under the grant's folder), or null. */
 const pageOf = (url: string) => parseDocFrameUrl(url)?.segments.join('/') ?? null
+/** An address that is an origin alone (`https://drive.google.com`, `…/`): how Chromium reports a refused frame. */
+const isBareOrigin = (url: string) => {
+  try {
+    const u = new URL(url)
+    return u.pathname === '/' && !u.search && !u.hash
+  } catch { return false }
+}
 
 /** What one view's page wanted from the internet so far (main only; the window gets hosts and a count). */
 interface BlockedTally {
@@ -223,11 +230,15 @@ export function createDocViews(deps: DocViewsDeps) {
   /** View id → the Drive videos its own document embeds, as last served. */
   const videos = new Map<number, DriveVideos>()
   /**
-   * View id → Drive file addresses its page asked for while its document's videos were still being read:
-   * held back from the band's count until the read ends, then counted only when the id is not one of the
+   * View id → Drive addresses its page asked for before its document's videos were read (or while they are
+   * read again): held back from the band's count until the read ends, then counted only when not one of the
    * document's videos (those are offered in ACB's player, so the blocked Drive embed is not a missing part).
+   * `id: null` is Drive's bare origin: Chromium reports a refused frame by its origin alone (measured,
+   * Electron 45: `https://drive.google.com`, no path), so it is the document's when the document has any.
    */
-  const heldDrive = new Map<number, Array<{ key: string; host: string; id: string }>>()
+  const heldDrive = new Map<number, Array<{ key: string; host: string; id: string | null }>>()
+  /** Whether a refused Drive address (`id` null: the bare origin) is one of the document's own videos. */
+  const ownDriveVideo = (list: DriveVideos, id: string | null) => id === null ? list.seen.size > 0 : list.seen.has(id)
   /**
    * Tell the window the view's videos when what is offered changed: the list only while its main frame
    * shows the document (`onOwnPage`), else none; a reload serving the same file says nothing.
@@ -318,16 +329,18 @@ export function createDocViews(deps: DocViewsDeps) {
       if (!host) return
       const key = createHash('sha256').update(url).digest('base64')
       // A Drive embed of one of the document's own videos is ACB's player's, not a missing part.
-      const driveId = host === 'drive.google.com' ? driveFileIdFromLink(url) : null
-      if (driveId !== null) {
+      const driveId = host === 'drive.google.com' ? driveFileIdFromLink(url) ?? (isBareOrigin(url) ? null : undefined) : undefined
+      if (driveId !== undefined) {
+        // Not read yet — the list is made when the document's answer has gone, and Chromium reports the
+        // embed's refusal while parsing that answer, before it — or being read again: decided after the read.
         const list = videos.get(viewId)
-        if (list?.reading) {
+        if (!list || list.reading) {
           const held = heldDrive.get(viewId) ?? []
           if (held.length < DOC_BLOCKED_PARTS_MAX) held.push({ key, host, id: driveId })
           heldDrive.set(viewId, held)
           return
         }
-        if (list?.seen.has(driveId)) return
+        if (ownDriveVideo(list, driveId)) return
       }
       countBlocked(viewId, key, host)
     },
@@ -415,7 +428,7 @@ export function createDocViews(deps: DocViewsDeps) {
       // Drive addresses held while reading: counted now unless the document's own videos name them.
       const held = heldDrive.get(viewId)
       heldDrive.delete(viewId)
-      for (const h of held ?? []) if (!list.seen.has(h.id)) countBlocked(viewId, h.key, h.host)
+      for (const h of held ?? []) if (!ownDriveVideo(list, h.id)) countBlocked(viewId, h.key, h.host)
       const next = list.next
       list.next = null
       if (next && next.version !== list.version) readVideos(viewId, list, next.bytes, next.version)
