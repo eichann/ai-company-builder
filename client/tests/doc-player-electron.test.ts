@@ -124,7 +124,9 @@ test('［ここで再生］: not picked → the Picker, then the video plays and
   assert.deepEqual([refused.status, probe.status], [403, 206], 'not picked, then picked')
   // The server answers 512 KB at most per request; the index is 3 MB past the start: main joined the
   // server's chunks (each its own request) into the ranges the player asked, or the player sought there.
-  assert.ok(ranges.length >= 3, JSON.stringify(ranges))
+  // How many ranges Chromium asks depends on timing (CI's macOS runners asked 2: the start and the index),
+  // so only the start and a range near the end are required.
+  assert.ok(ranges.length >= 2, JSON.stringify(ranges))
   assert.ok(ranges.every(r => r.status === 206 && r.cookie === 'session=member' && /^bytes=\d+-\d*$/.test(r.range ?? '')), JSON.stringify(ranges))
   assert.ok(ranges.some(r => Number(/^bytes=(\d+)/.exec(r.range ?? '')?.[1]) >= 3 * 1024 * 1024), 'the bytes near the end (the index) were asked for')
 })
@@ -150,7 +152,9 @@ test('hidden while it plays: paused and stopped (nothing plays unseen); ［続�
   assert.equal(result.whileHidden.video, false)
   assert.match(result.whileHidden.text, /一時停止しました/)
   assert.equal(result.resumed.src, 'video#t=0.5')
-  assert.ok(Math.abs(result.resumed.at - 0.5) < 0.1, JSON.stringify(result.resumed))
+  // Read after it resumed: it may already have played on a little (CI's runners measured 0.61), but it never
+  // starts again from the beginning.
+  assert.ok(result.resumed.at >= 0.45 && result.resumed.at <= 1, JSON.stringify(result.resumed))
 })
 
 test('the player\'s own guards: only its own page, no popup, no redirect, no permission; its session lets out nothing else and alone serves the scheme', { skip }, () => {
