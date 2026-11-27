@@ -470,7 +470,11 @@ test('the operator\'s window tools read only: a submit, a fetch button, a confir
 
 test('the operator sees a folder tree driven by script alone: each item listed once (never the list and its spans), a press reaches the page\'s handler, a card that saves by fetch writes nothing; the screen is a JPEG with the marks on the pixels, never in the page', { skip }, () => {
   const r = result.browse
-  assert.deepEqual(r.treeItems, ['▸キャンペーン', '▸未分類', '▸アーカイブ', 'すぐ反映（下書き）'])
+  assert.deepEqual(r.treeItems, ['▸キャンペーン', '▸未分類', '▸アーカイブ', 'すぐ反映（下書き）', '秘密のフォルダ 88123'])
+  // A row's or tree item's words are data: never a run-log label (the recording's rule).
+  assert.deepEqual(r.treeLogLabels, ['', '', '', '', ''])
+  // A file input stays out whatever its tabindex or cursor: no element the operator can press opens a file chooser.
+  assert.equal((r.treeNames as string[]).includes('アップロード'), false)
   assert.equal(r.folderClick, 'ok')
   assert.match(String(r.treeShown), /キャンペーン の中身/)
   assert.equal(r.cardClick, 'ok', 'the page saw the press on the card')

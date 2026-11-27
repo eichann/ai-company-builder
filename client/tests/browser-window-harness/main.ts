@@ -412,6 +412,8 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   const before = await domSize()
   const tree = await win.browse.snapshot()
   out.treeItems = tree?.elements.filter(e => e.role === 'item').map(e => e.name)
+  out.treeLogLabels = tree?.elements.filter(e => e.role === 'item').map(e => e.logLabel)
+  out.treeNames = tree?.elements.map(e => e.name)
   out.treeViewport = tree?.viewport
   // The operator's screen: a JPEG at most 1280 wide, the folder's mark drawn on its box (the mark's colour at its edge).
   if (tree) {

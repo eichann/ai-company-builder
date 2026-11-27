@@ -360,7 +360,10 @@ const clean = (v: unknown, max: number): string | null => (typeof v === 'string'
 const cut = (v: unknown, max: number): string | null => {
   if (typeof v !== 'string') return null
   const s = v.replace(CONTROL_RE, ' ')
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`
+  if (s.length <= max) return s
+  // Never half a surrogate pair at the cut.
+  const end = /[\ud800-\udbff]/.test(s.charAt(max - 2)) ? max - 2 : max - 1
+  return `${s.slice(0, end)}…`
 }
 const hasOnly = (o: Record<string, unknown>, keys: readonly string[]) => Object.keys(o).every(k => keys.includes(k))
 /** An answer itself (not an item inside it) may also carry the operator's notes and reason. */

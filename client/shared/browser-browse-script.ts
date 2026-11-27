@@ -80,7 +80,7 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   // a native button's own text only when it holds few elements; anything else only its aria-label or title; nothing from a
   // row, a list item or a cell, or an element holding many others. A page's data never becomes a stored label.
   const SMALL = 8
-  const rowLike = el => el.matches('tr, td, th, li, [role=row], [role=gridcell], [role=cell], [role=listitem], [role=option], [role=menuitem]')
+  const rowLike = el => el.matches('tr, td, th, li, [role=row], [role=gridcell], [role=cell], [role=listitem], [role=option], [role=menuitem], [role=treeitem]')
   const ownText = label => { const c = label.cloneNode(true); c.querySelectorAll('input, select, textarea, option, datalist').forEach(n => n.remove()); return c.textContent || '' }
   const fieldLabel = el => clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] && ownText(el.labels[0])) || el.getAttribute('placeholder') || el.getAttribute('title') || '')
   const nativeButton = el => el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && /^(submit|button|reset|image)$/.test(el.type))
@@ -125,18 +125,29 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   const insideControl = el => { for (let p = el.parentElement; p; p = p.parentElement) if (listed.has(p)) return true; return false }
   const pointer = el => getComputedStyle(el).cursor === 'pointer'
   const ITEM = 'li, tr, [role=treeitem], [role=listitem], [role=row], [role=option], [role=menuitem]'
+  // Its own words: the text under it, a nested item's, a script's or a field's left out — read in place (never a copy:
+  // copying would run a custom element's constructor and start its images loading; independent review).
+  const NOT_OWN = ITEM + ', script, style, template, input, select, textarea, option'
   const ownWords = el => {
-    const c = el.cloneNode(true)
-    c.querySelectorAll(ITEM + ', script, style, template, input, select, textarea, option').forEach(n => n.remove())
-    return clean(c.textContent || '')
+    let out = ''
+    const walk = node => {
+      for (const c of node.childNodes) {
+        if (out.length > MAX_NAME * 4) return
+        if (c.nodeType === 3) out += c.nodeValue
+        else if (c.nodeType === 1 && !c.matches(NOT_OWN)) walk(c)
+      }
+    }
+    walk(el)
+    return clean(out)
   }
   const candidates = []
-  for (const el of document.querySelectorAll('[onclick], [tabindex]:not([tabindex^="-"]), [role=treeitem], [role=switch], [role=menuitemcheckbox], [role=menuitemradio]')) candidates.push(el)
+  const marked = document.querySelectorAll('[onclick], [tabindex]:not([tabindex^="-"]), [role=treeitem], [role=switch], [role=menuitemcheckbox], [role=menuitemradio]')
+  for (let i = 0; i < marked.length && i < MAX_SCAN; i++) candidates.push(marked[i])
   const all = document.body ? document.body.getElementsByTagName('*') : []
   for (let i = 0; i < all.length && i < MAX_SCAN; i++) {
     const el = all[i]
     if (pointer(el) && !(el.parentElement && pointer(el.parentElement))) {
-      const items = Array.from(el.querySelectorAll(ITEM)).filter(visible)
+      const items = Array.from(el.querySelectorAll(ITEM)).slice(0, MAX_CLICKABLE * 2).filter(visible)
       if (items.length >= 2) candidates.push(...items)
       else candidates.push(el)
     }
@@ -154,6 +165,8 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   for (const el of ordered) {
     if (elements.length >= MAX_EL || clickables >= MAX_CLICKABLE) break
     if (listed.has(el) || el === document.body || el === document.documentElement) continue
+    // A native control the list above left out on purpose (a file chooser, a hidden or disabled one) stays out.
+    if (el.matches('input, select, textarea, button, option, a[href], [disabled]')) continue
     if (!visible(el) || insideControl(el) || insidePicked(el)) continue
     const r = el.getBoundingClientRect()
     if (r.width * r.height > 0.4 * vw * vh) continue

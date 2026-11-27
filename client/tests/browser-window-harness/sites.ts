@@ -40,12 +40,15 @@ const BROWSE_PAGE = `<!doctype html><meta charset="utf-8"><title>events</title>
 /**
  * A fictional folder tree driven by script alone (agent-browser.md "The operator sees the screen"): no link or button —
  * the list has a pointer cursor and one click handler for its items (event delegation), each item made of spans; a card (a focusable part inside it)
- * whose click handler saves by fetch (a write the gate must hold back however the press reached it).
+ * whose click handler saves by fetch (a write the gate must hold back however the press reached it); a tree item whose
+ * label is data (never a run-log label) and a visible file input with a tabindex (never listed: no file chooser).
  */
 const TREE_PAGE = `<!doctype html><meta charset="utf-8"><title>folders</title>
 <style>#tree { cursor: pointer; list-style: none } #card { cursor: pointer; border: 1px solid #888; width: 200px }</style>
 <div id="side"><ul id="tree"><li data-f="1"><span>▸</span><span>キャンペーン</span></li><li data-f="2"><span>▸</span><span>未分類</span></li><li data-f="3"><span>▸</span><span>アーカイブ</span></li></ul></div>
 <div id="card"><span>すぐ反映</span><span tabindex="0">（下書き）</span></div>
+<div role="treeitem" aria-label="秘密のフォルダ 88123">秘密のフォルダ 88123</div>
+<input id="upload" type="file" tabindex="0" aria-label="アップロード" style="cursor: pointer">
 <p id="shown">フォルダを選んでください</p>
 <script>
 const mark = id => (window.__clicks = window.__clicks || []).push(id)

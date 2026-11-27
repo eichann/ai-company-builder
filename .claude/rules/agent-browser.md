@@ -3378,11 +3378,15 @@ preview had the 20-step budget, and its notes were 2000 characters. The model wa
   `onclick` attribute, `tabindex` ≥ 0, an interactive role the control list does not take (`treeitem`, `switch`,
   `menuitemcheckbox`, `menuitemradio`), or the top of a `cursor: pointer` subtree (cursor is inherited: only the outermost
   element of each subtree is a candidate). A pointer subtree holding two or more list or tree items (event delegation on
-  the list: Lステップ's folder tree) gives its items instead. Deduped: never one inside a listed control, never one inside
+  the list: Lステップ's folder tree) gives its items instead. Never a native control the first list left out on purpose (a
+  file input, a hidden or disabled one: `input`, `select`, `textarea`, `button`, `option`, a link, `[disabled]`; Codex
+  review). Deduped: never one inside a listed control, never one inside
   an `item` already listed (except an item inside an item: a folder inside its parent folder), never the page itself or
   a container over 40 % of the screen, never one without its own words; named by its **own** words (a nested item's text
-  is the nested item's), in the kept caps (120 characters); at most `clickables` 150 of the 300 elements, the page's first
-  `clickableScan` 20 000 elements looked at. Their run-log label is the recording's control rule (a row's text never).
+  is the nested item's), in the kept caps (120 characters); at most `clickables` 150 of the 300 elements; each scan (the marked elements, the pointer
+  subtrees) looks at no more than `clickableScan` 20 000 elements, a list's items at no more than 300; its words read in
+  place (never a copy: no custom element's constructor runs, no image loads; independent review). Their run-log label is the recording's control rule — a row's, list item's or
+  tree item's text never (`rowLike` now also takes `[role=treeitem]`; Codex review).
 - **No write guard moves**: a press on an `item` is the same trusted press as on a button (`act`, at the element's
   centre); whatever the page's handler then sends is held or refused by the same `ai`-mode gate — every write refused in
   a read run, held and decided against the frames in a write run, a never-read address refused — and the frames, permits
@@ -3400,8 +3404,9 @@ viewport, only sane boxes kept, the number and outline on the pixels, nothing ou
 only — never an argument or a variable —; an image over the cap left out), `browser-browse.test.ts` and
 `browser-frame-writes.test.ts` (each step's operator gets that step's screen, in a read run and a write run's preview and
 work; never the consultation AI's words, the card, the run's log, the server, the site or the material; no screen → the
-text alone), `browser-window-electron.test.ts` (a fictional folder tree driven by script alone: its three folders and a
-clickable card listed once each, never the list, its spans or the card's focusable part; a press on a folder reaches the page's handler; the card's
+text alone), `browser-window-electron.test.ts` (a fictional folder tree driven by script alone: its three folders, a
+clickable card and a tree item listed once each, never the list, its spans or the card's focusable part, no run-log
+label from any of them, never a visible file input with a tabindex; a press on a folder reaches the page's handler; the card's
 handler's fetch POST never leaves the window; the screen a JPEG ≤ 1280 wide with the mark's colour on the folder's edge
 and the page inside it; the page's document unchanged by the snapshot and the screen). Each guard mutation-checked.
 

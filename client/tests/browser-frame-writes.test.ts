@@ -149,6 +149,11 @@ test('a plan\'s slips of form are taken where that is safe: a Skill run\'s write
   assert.equal(p.values[0].label.length, 40)
   assert.equal(p.values[0].value.length, 200)
   assert.ok(p.values[0].value.endsWith('…') && !p.values[0].value.includes('末尾'))
+  // A cut never leaves half a character (a surrogate pair stays whole or goes).
+  const emoji = parseWorkAnswer(plan({ summary: '😀'.repeat(600) }), { ...ctx, adhoc: false })
+  assert.ok('answer' in emoji && emoji.answer.do === 'plan')
+  const cutSummary = (emoji.answer as Extract<typeof emoji.answer, { do: 'plan' }>).summary
+  assert.ok(cutSummary.length <= 1000 && /^(😀)+…$/u.test(cutSummary), cutSummary.slice(-4))
   // What still refuses, each naming its rule: an unknown key, a wrong type, an empty summary, a bad number, too many values.
   assert.deepEqual(parseWorkAnswer(plan({ extra: 1 }), { ...ctx, adhoc: false }), { problem: 'plan-keys' })
   assert.deepEqual(parseWorkAnswer(plan({ summary: 3 }), { ...ctx, adhoc: false }), { problem: 'plan-summary' })
