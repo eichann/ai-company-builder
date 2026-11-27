@@ -3164,7 +3164,8 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
   not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done. Any answer may
   carry `notes` (≤ 2000): the operator's own working memory, handed back to it at the next step (each step is a fresh
-  process; Codex review) and to nobody else.
+  process; Codex review), and `reason` (its short reason for the answer); both reach the member's card only, never the
+  consultation AI ("The operator's trail on the card").
 - **Main acts** in the member's own window (controller `browseWindow`): `enter` puts it in `ai` mode with a decider that
   **refuses every write** (`decide: () => false`; reads pass, the request rule and frames as in any `ai` run) and dialogs
   dismissed, never accepted (`dismissDialogs`: `Page.handleJavaScriptDialog { accept: false }`, so a confirm never says yes
@@ -3937,6 +3938,55 @@ before the next task's frames run; each stop's words in the card and the AI's se
 only an ISO `freeAt` taken; a Skill step and the task with 【】 reach the operator unchanged while the page's text and the
 notes are neutralized; the prompts; the card's who-read-what), `client/tests/ui/browser-inspection-card.spec.ts` (the
 headings). Each guard mutation-checked.
+
+## The operator's trail on the card (owner 2026-11-27: a stopped run showed nobody what the operator tried)
+
+A write task's preview stopped with `need-person` and nobody — the member, the owner, the FDE tuning the Skill's steps —
+could see what the operator AI had tried or why it stopped: the run log keeps actions and kept-form labels only, and a
+preview that ended without a plan made **no card at all**. Now the person's card carries the operator's own trail.
+
+- **The answer format** (both operators' prompts, `OPERATOR_REASON_LINE`): any answer may carry `reason` — its short
+  reason for this step, for stopping, for finishing or for its plan (`stop`'s `why` stays the fixed word, so the free
+  text has its own key). `operatorReason` (`client/shared/browser-browse.ts`, also used by `parseWorkAnswer`): absent →
+  none; a string → one line, cut at 200 (a long reason costs its end, never the run); anything else → the answer is not
+  in its form (`reason`, the run ends as for any bad answer). `notes` are now shown on the card too (the prompts say so).
+  Inner objects of an answer (a plan's values, a done's checks) take neither key.
+- **One place** (`client/shared/browser-operator-trail.ts`): `createOperatorTrail(phase)` records, per action, the run
+  log's own step (`browseLogStep`: the page pattern, the action and the label **in the recording's kept form** — a row's
+  text never) plus the operator's reason; its own end (`done` / `plan` / `stop` + reason; none when the app ended the
+  run); its last notes. Caps (`BROWSER_TRAIL_LIMITS`): reason 200, one line, no control / bidirectional / zero-width
+  character (`trailLine` = `cleanLabel`); notes 2000, line breaks kept (`trailNotes`); 60 steps shown, the rest counted;
+  2 runs per card. `trailForCard` leaves out a run that did nothing. `readBrowserOperatorTrail` is the renderer's check:
+  a trail off its shape or caps is left off the view (`readBrowserInspectionView`, `readBrowserWriteView`), the card
+  still shows.
+- **Where it shows**: `BrowserInspectionView.trail` (a read run's `bo_` card, `browse.ts`) and `BrowserWriteView.trail`
+  (a write run's `bf_` card, `work.ts`: the preview's run and the work's, read live while the card is up). **A write
+  task's preview that ends without a plan** (the operator's stop, or the app ending it — rounds, a bad answer, a stop
+  button…) now keeps a card named by the preview's operator run (`bo_`, `workPreviewStoppedCard`: 「下見の途中で止まりました。」
+  + the fixed `stoppedBy` word; the note pointing to the memo only when there is one — a preview the app ended before
+  any answer has neither) with the trail, in the work wiring's memory (`previewCard`; main's `runCard` asks the
+  browse wiring first, then it), and puts its reference into the reply. A read run's endings without `done` / `stop`
+  still make no card (as before).
+- **Outside text, the person's card only**: the operator reads page text, so everything it wrote is treated as outside
+  text — never in the consultation AI's words (`browseWordsForAi`, `workWordsForAi` are fixed words), never in the
+  server's run log (the finish body: steps and writes as before), never on disk (main's memory with its card, gone at
+  quit and sign-out; the renderer's stores are memory only; the chat keeps only the card's reference). The card
+  (`OperatorTrail.tsx`) shows it **collapsed** under ［係の AI のメモを見る］, labelled 「ブラウザ操作の係の AI のメモ（係の AI が
+  書いたもの。確かめた事実ではありません）」 (`BROWSER_TRAIL_WORDS`), as React text only (no markup, no Markdown): per step
+  the action's word, the label, the page pattern and the reason; 「止まった理由（係の AI の言葉）」; the notes. The fixed reason
+  word stays the card's headline.
+- **Remaining limits** (said): the reason and notes may hold what the page showed (names, values) — the card shows them
+  to the member who ran the task, as the operator's summary already was; a stopped preview's `bo_` card opens in the
+  main window only (the inspection card's IPC), not in a consultation's own window.
+
+Tests: `client/tests/browser-operator-trail.test.ts` (a read run's steps, labels — a row's text never —, reasons, stop
+words and notes on the card and never in the AI's words or the finish body; the incident: a stopped preview, ad hoc and
+with a Skill, leaves a `bo_` card with the fixed word and the trail, another member's none, cleared on sign-out; a write
+run's card with the preview's and the work's trails; the caps, unsafe characters, a non-string reason refused; the
+prompts; the renderer's check leaving a bad trail off while the card stays), `src/features/browser-plans/components/
+OperatorTrail.test.ts` (collapsed, labelled, nothing of it before the disclosure, markup escaped). Each guard
+mutation-checked (the trail on both cards, the stopped preview's card, the reason per step, every cap, the unsafe
+characters, the renderer's line / notes / runs checks, the collapsed disclosure).
 
 ## Not yet (later PRs)
 

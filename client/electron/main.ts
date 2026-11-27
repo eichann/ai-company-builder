@@ -759,8 +759,8 @@ const browserInspections = wireBrowserInspections(ipc, {
   sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account }],
   lines: LSTEP_LINES,
   declarations: [lstep.declaration],
-  // An operator run's card (`bo_…`) is the browse wiring's (above).
-  runCard: (userId, companyId, runId) => browserBrowses.card(userId, companyId, runId),
+  // An operator run's card (`bo_…`) is the browse wiring's (above), or a write task's stopped preview (the work wiring's).
+  runCard: (userId, companyId, runId) => browserBrowses.card(userId, companyId, runId) ?? browserWorks.previewCard(userId, companyId, runId),
 })
 // Its writes on the new path (agent-browser.md "Writing on the new path"): the chat's `browser_write` proposes, the member
 // confirms each value and presses ［任せる］ on the card, the write runner writes in order. No site has writers yet (they

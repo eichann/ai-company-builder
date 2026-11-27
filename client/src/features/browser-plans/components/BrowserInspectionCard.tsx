@@ -7,6 +7,7 @@ import { BROWSER_INSPECTION_CARD_WORDS as W, type BrowserInspectionView } from '
 import type { BrowserInspectionReads } from '../api'
 import { useBrowserInspection } from '../hooks/useBrowserInspection'
 import { BrowserWriteCard } from './BrowserWriteCard'
+import { OperatorTrail } from './OperatorTrail'
 
 // Everything ✓ is green; a ✗ or something unread asks the member to look at the site, so amber (design-system.md
 // 「止まっている」の色: something to do).
@@ -93,7 +94,7 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
       </div>
       <p role="status" className="mt-1 text-body text-text">{card.headline}</p>
 
-      <div className="mt-2">
+      {card.checks.length > 0 && <div className="mt-2">
         <p className="text-small font-strong text-text-muted">{W.checks}</p>
         <ul className="mt-1 space-y-1">
           {card.checks.map((c, i) => {
@@ -111,9 +112,10 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
             )
           })}
         </ul>
-      </div>
+      </div>}
 
-      <div className="mt-2 rounded-control border border-[color:var(--color-border)] bg-surface-raised p-2">
+      {/* A card with nothing read (a write task's stopped preview) shows no empty box. */}
+      {(card.sections.length > 0 || card.account) && <div className="mt-2 rounded-control border border-[color:var(--color-border)] bg-surface-raised p-2">
         <p className="text-small font-strong text-text-muted">{W.siteValues}</p>
         <dl className="mt-1">
           {card.account && <Row label={card.account.label}><Value value={card.account.value} /></Row>}
@@ -131,9 +133,10 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
           </div>
         ))}
         {view.readAt && <dl className="mt-1"><Row label={W.readAt}>{time(view.readAt)}</Row></dl>}
-      </div>
+      </div>}
 
       {card.notes.map((n, i) => <Callout key={i} tone="warning" className="mt-2">{n}</Callout>)}
+      {view.trail && <OperatorTrail trail={view.trail} />}
     </section>
   )
 }
