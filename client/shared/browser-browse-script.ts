@@ -15,6 +15,11 @@
  *   previous snapshot), then what is on the screen, then the rest in document order, what is behind an open modal last;
  *   the refs follow that order, and an element an open overlay covers (or behind an open modal) gets no mark.
  * - The element scripts find an element by its number in that list, and answer null when it is gone (another page).
+ * - Before acting on a number they check the element is still what the snapshot showed — its role, its name and the words of
+ *   the row it sits in — and, for a press, that it is itself on top where it is pressed; a press by position compares the
+ *   element at the point the same way (or, with no number, what changed in and around it). Otherwise nothing is done
+ *   (`moved` / `covered`). A press then says which element its click reached; typing, what the field holds
+ *   (agent-browser.md "What a press did").
  */
 import { BROWSER_BROWSE_LIMITS as L } from './browser-browse'
 
@@ -152,7 +157,7 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     for (let i = Math.max(MAX_SCAN, n - SCAN_TAIL); i < n; i++) yield list[i]
   }
 
-  const sel = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=option],[contenteditable=""],[contenteditable=true]'
+  const sel = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=option],[contenteditable=""],[contenteditable=true],[contenteditable=plaintext-only]'
   const controls = []
   const listed = new Set()
   const takeControl = el => {
@@ -280,7 +285,7 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
       const role = roleOf(el)
       item = { ref, role, name: nameOf(el, role), logLabel: logLabelOf(el, role) }
       if (role === 'link') item.href = el.href
-      if (role === 'textbox' && !el.isContentEditable) item.value = clean(el.value)
+      if (role === 'textbox') item.value = clean(el.isContentEditable ? el.innerText : el.value)
       if (role === 'select') item.options = Array.from(el.options).slice(0, MAX_OPTIONS).map(o => clean(o.text))
       if (role === 'checkbox' || role === 'radio') item.checked = !!el.checked
     }
@@ -291,11 +296,100 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   for (const l of layersNow) floatLayers.add(l)
   window.__acbLayers = new WeakSet(floatLayers)
 
+  // ── What each listed element was (agent-browser.md "What a press did"): its role, its name, and the words of the row or
+  // container it sits in — checked again right before it is pressed, typed into or chosen, so a list that re-sorted or
+  // re-used its rows (the same button now in another person's row), or a button whose words changed, is never acted on.
+  const ROW = 'tr, li, [role=row], [role=listitem], [role=treeitem], [role=option]'
+  const textCache = new Map()
+  const textOf = el => {
+    if (!textCache.has(el)) textCache.set(el, String(el.innerText || '').replace(/\\s+/g, ' ').trim())
+    return textCache.get(el)
+  }
+  // The row it sits in, else the nearest of its next four ancestors with words beyond its own (what tells which one it is).
+  const contextOf = el => {
+    const row = el.parentElement ? el.parentElement.closest(ROW) : null
+    if (row) return row
+    const own = textOf(el)
+    let p = el.parentElement
+    for (let i = 0; p && i < 4 && p !== document.body && p !== document.documentElement; i++, p = p.parentElement) {
+      const t = textOf(p)
+      if (t && t !== own) return p
+    }
+    return null
+  }
+  // The context's words whole (never cut: a long row whose start stays the same after a re-sort must not pass), kept as a
+  // short hash (FNV-1a, 32 bits); null when there is none.
+  const hashOf = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) } return h >>> 0 }
+  const ctxKey = el => { const c = contextOf(el); return c ? hashOf(textOf(c)) : null }
+  const itemSet = new Set(items.map(it => it.el))
+  // The field being typed into (set by the checks before typing; read again once the page settled).
+  let typing = null
+  const identityOf = el => {
+    if (itemSet.has(el) && !listed.has(el)) return { role: 'item', name: ownWords(el) || clean(el.getAttribute('aria-label') || el.getAttribute('title') || '') }
+    const role = roleOf(el)
+    return { role, name: nameOf(el, role) }
+  }
+  const seen = new Map()
+  // How many listed elements share a role and a name: one with no context words and a twin cannot be told apart from it.
+  const twins = new Map()
+  for (let i = 0; i < chosen.length; i++) {
+    seen.set(chosen[i].el, { role: elements[i].role, name: elements[i].name, ctx: ctxKey(chosen[i].el) })
+    const k = elements[i].role + '\u0000' + elements[i].name
+    twins.set(k, (twins.get(k) || 0) + 1)
+  }
+  textCache.clear()
+  const sameAsSeen = el => {
+    const was = seen.get(el)
+    if (!was || !el.isConnected) return false
+    if (was.ctx === null && (twins.get(was.role + '\u0000' + was.name) || 0) > 1) return false
+    textCache.clear()
+    const now = identityOf(el)
+    return now.role === was.role && now.name === was.name && ctxKey(el) === was.ctx
+  }
+  // What changed in the page since this snapshot (a press by position on something that has no ref: its own words and its
+  // row's are compared through what changed there). Bounded: past MAX_CHANGES, every press by position is refused as moved.
+  const MAX_CHANGES = 20000
+  if (window.__acbWatch) window.__acbWatch.disconnect()
+  const changed = []
+  const added = new WeakSet()
+  let tooMany = false
+  const note = list => {
+    for (const m of list) {
+      if (changed.length >= MAX_CHANGES) { tooMany = true; return }
+      changed.push(m.type === 'characterData' ? m.target.parentNode : m.target)
+      for (const n of m.addedNodes) if (n.nodeType === 1) added.add(n)
+    }
+  }
+  const watch = new MutationObserver(note)
+  watch.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
+    attributeFilter: ['aria-label', 'aria-labelledby', 'title', 'alt', 'role', 'disabled', 'href', 'type', 'value', 'contenteditable', 'onclick'] })
+  window.__acbWatch = watch
+  const changedNear = el => {
+    note(watch.takeRecords())
+    if (tooMany) return true
+    for (let p = el; p; p = p.parentElement) if (added.has(p)) return true
+    const scope = contextOf(el) || el
+    return changed.some(n => n && (scope === n || scope.contains(n)))
+  }
+  // The element a press's click reached, judged when the click comes (before the page's own handlers on the target run):
+  // a trusted click, the isolated world's capturing listener on the window, set once per document. A page's own capturing
+  // listener on the window added before it runs first and may stop the click there: then nothing is told and the result
+  // says the click is unknown (click-unknown), never that nothing was pressed.
+  if (!window.__acbClick) {
+    window.__acbClick = { told: null, armed: false, judge: null }
+    window.addEventListener('click', e => {
+      const c = window.__acbClick
+      if (!e.isTrusted || !c.armed) return
+      c.armed = false
+      try { c.told = c.judge ? c.judge(e.composedPath()[0] || e.target) : null } catch { c.told = null }
+    }, true)
+  }
+
   // ── The hit-test of a press by position and of typing without a ref (browseAimScript; agent-browser.md "Pressing by
   // position"): the same rules as this list, against the layout this snapshot — and the screen image made right after
   // it — showed. Kept in the isolated world (the page's script cannot see or replace it).
   const shownAt = { sx: window.scrollX, sy: window.scrollY, vw, vh, roots: overlayRoots.slice(), layers: floatLayers,
-    boxes: chosen.filter(c => boxOf(c.el)).map(c => [c.el, c.el.getBoundingClientRect()]) }
+    boxes: new Map(chosen.filter(c => boxOf(c.el)).map(c => [c.el, c.el.getBoundingClientRect()])) }
   const near = (a, b) => Math.abs(a - b) <= 2
   // The page moved since: scrolled, resized, an overlay opened or closed, or an element shown on the screen moved or went.
   const moved = () => {
@@ -311,16 +405,17 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   const FRAME = 'iframe, frame, object, embed'
   const fileField = el => el.matches('input') && (el.getAttribute('type') || '').toLowerCase() === 'file'
   const no = why => ({ ok: false, why })
-  const itemSet = new Set(items.map(it => it.el))
   const aimAt = (x, y) => {
     if (!(x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight)) return no('outside')
-    if (moved()) return no('moved')
+    // Something on the screen moved: a press still goes on when what is at the point is a listed element that was there
+    // in the snapshot (its box then held the point) and is still what it was; anything else is refused below.
+    const layoutMoved = moved()
     // The page now, not the snapshot's cached ancestry: an element that became a floating layer since must be seen as one
     // (Codex review).
     layerCache.clear()
     overlayCache.clear()
     const top = document.elementFromPoint(x, y)
-    if (!top || top === document.documentElement || top === document.body) return no('nothing')
+    if (!top || top === document.documentElement || top === document.body) return no(layoutMoved ? 'moved' : 'nothing')
     // A floating layer the screen image did not show (appeared since): the point may be on something else now.
     const layer = layerOf(top)
     if (layer && !shownAt.layers.has(layer)) return no('moved')
@@ -332,7 +427,21 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     for (let p = top; p && !target; p = p.parentElement) if (listed.has(p) || itemSet.has(p)) target = p
     if (!target) target = top.closest(sel) || top
     if (fileField(target)) return no('file')
+    if (seen.has(target)) {
+      // A listed element: still what the snapshot showed (its role, its name, its row's words) — 保存 that became 削除 is
+      // refused —, and when the page moved, it held this point in the snapshot too.
+      if (!sameAsSeen(target)) return no('moved')
+      if (layoutMoved) {
+        const r = shownAt.boxes.get(target)
+        if (!r || x < r.left || x >= r.right || y < r.top || y >= r.bottom) return no('moved')
+      }
+    } else if (layoutMoved || changedNear(target)) {
+      // Not listed: nothing to compare its words with but what changed — anything added, or changed in it or in its row,
+      // since the snapshot.
+      return no('moved')
+    }
     const role = listed.has(target) || target.matches(sel) ? roleOf(target) : 'item'
+    arm()
     return { ok: true, role, logLabel: role === 'item' ? controlLabel(target) : logLabelOf(target, role) }
   }
   const aimFocus = () => {
@@ -343,9 +452,68 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     const role = roleOf(a)
     if (role === 'password') return no('password')
     if (role !== 'textbox' || a.disabled || a.readOnly) return no('not-editable')
+    typing = a
     return { ok: true, role, logLabel: logLabelOf(a, role) }
   }
-  window.__acbAim = { at: aimAt, focus: aimFocus }
+  // ── A press by ref (browsePointScript): the element is still what the snapshot showed, and at the point pressed the
+  // element on top is it (or inside it, or its label) — not a banner over it, not another listed element inside it. Its
+  // centre first, then the middle of its first line of words (a tree's parent folder holds its children's rows).
+  const parentOf = n => n.parentElement || (n.getRootNode && n.getRootNode() !== document && n.getRootNode().host) || null
+  const deepAt = (x, y) => {
+    let t = document.elementFromPoint(x, y)
+    for (let i = 0; t && t.shadowRoot && i < 10; i++) { const inner = t.shadowRoot.elementFromPoint(x, y); if (!inner || inner === t) break; t = inner }
+    return t
+  }
+  const takesPress = (el, x, y) => {
+    const t = deepAt(x, y)
+    if (!t) return false
+    for (let p = t; p; p = parentOf(p)) {
+      if (p === el) return true
+      if (seen.has(p)) return false
+    }
+    const labels = el.labels ? Array.from(el.labels) : []
+    for (let p = t; p; p = parentOf(p)) if (labels.includes(p)) return true
+    return false
+  }
+  const pointsOf = el => {
+    const r = el.getBoundingClientRect()
+    const out = [[r.left + r.width / 2, r.top + r.height / 2]]
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(), i = 0; n && i < 50; n = walker.nextNode(), i++) {
+      if (!n.nodeValue.trim()) continue
+      const range = document.createRange()
+      range.selectNodeContents(n)
+      const q = range.getClientRects()[0]
+      if (q && q.width > 0 && q.height > 0) { out.push([q.left + Math.min(q.width, 40) / 2, q.top + q.height / 2]); break }
+    }
+    return out.filter(([x, y]) => x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight)
+  }
+  const pressRef = ref => {
+    const el = refs[ref]
+    if (!el || !sameAsSeen(el)) return no('moved')
+    for (const [x, y] of pointsOf(el)) if (takesPress(el, x, y)) { arm(); return { ok: true, x, y } }
+    return no('covered')
+  }
+  // What a press's click reached: the listed element it sits in (its role and name, and whether its row's words are still
+  // the snapshot's: a row re-used between the check and the press), else the control, else the element's own words.
+  const judgeClick = t => {
+    for (let p = t; p && p !== document.body && p !== document.documentElement; p = parentOf(p)) {
+      if (seen.has(p)) { textCache.clear(); return { el: identityOf(p), row: ctxKey(p) === seen.get(p).ctx ? 'same' : 'changed' } }
+      if (p.matches && p.matches(sel)) return { el: identityOf(p) }
+    }
+    return { el: { role: 'other', name: ownWords(t.nodeType === 1 ? t : t.parentElement || document.body) } }
+  }
+  const arm = () => { window.__acbClick.told = null; window.__acbClick.judge = judgeClick; window.__acbClick.armed = true }
+  const clicked = () => window.__acbClick.told || { none: true }
+  // The field typed into (by ref: its element after the check; without one: the focused text field the hit-test passed),
+  // read again once the page settled. Never a password field's value.
+  const typingRef = ref => { const el = refs[ref]; if (!el || !sameAsSeen(el)) return false; typing = el; return true }
+  const typedValue = () => {
+    const el = typing
+    if (!el || !el.isConnected || roleOf(el) === 'password') return null
+    return { value: String(el.isContentEditable ? el.innerText : el.value) }
+  }
+  window.__acbAim = { at: aimAt, focus: aimFocus, same: ref => !!refs[ref] && sameAsSeen(refs[ref]), press: pressRef, clicked, typing: typingRef, typedValue }
   const text = document.body ? String(document.body.innerText || '') : ''
   return JSON.stringify({ address: location.href, title: document.title, text: text.slice(0, MAX_TEXT), truncated: text.length >= MAX_TEXT, elements, omitted: pool.length - chosen.length, viewport: [vw, vh] })
 })()`
@@ -368,29 +536,35 @@ export function browseAimScript(action: { do: string; x?: number; y?: number; re
 }
 
 const element = (ref: number) => `(window.__acbBrowse || [])[${JSON.stringify(ref)}]`
+/** The check before acting on a ref (agent-browser.md "What a press did"): the element is still what the snapshot showed. */
+const stillSeen = (ref: number) => `const a = window.__acbAim
+  if (!a || !a.same(${JSON.stringify(ref)})) return 'moved'`
 
 /**
- * Scrolls the element into view and answers its centre in the viewport (CSS pixels) as JSON, or null when it is gone —
- * after two frames, so the press lands on what is drawn (a page not drawn yet answers nothing and the press fails).
+ * A press by ref, checked right before it: the element still what the snapshot showed (its role, its name, its row's
+ * words), scrolled into view, and after two frames (the press lands on what is drawn) the point where the element itself
+ * takes the press — `{ ok, x, y }` (viewport CSS pixels) as JSON, else `{ ok: false, why: 'moved' | 'covered' }`.
  */
 export function browsePointScript(ref: number): string {
   return `(async () => {
   const el = ${element(ref)}
-  if (!el || !el.isConnected) return null
+  const a = window.__acbAim
+  if (!el || !a || !a.same(${JSON.stringify(ref)})) return JSON.stringify({ ok: false, why: 'moved' })
   el.scrollIntoView({ block: 'center', inline: 'center' })
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-  if (!el.isConnected) return null
-  const r = el.getBoundingClientRect()
-  if (r.width <= 0 || r.height <= 0) return null
-  return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
+  return JSON.stringify(a.press(${JSON.stringify(ref)}))
 })()`
 }
 
-/** Focuses a text field and selects what is in it (what is typed next replaces it); true, or null when it is gone. */
+/**
+ * Focuses a text field and selects what is in it (what is typed next replaces it): true; `'moved'` when the element is not
+ * what the snapshot showed (nothing focused); null when it could not be focused.
+ */
 export function browseFocusScript(ref: number): string {
   return `(() => {
   const el = ${element(ref)}
-  if (!el || !el.isConnected) return null
+  ${stillSeen(ref)}
+  if (!a.typing(${JSON.stringify(ref)})) return 'moved'
   el.scrollIntoView({ block: 'center', inline: 'center' })
   el.focus()
   if (typeof el.select === 'function') el.select()
@@ -399,11 +573,15 @@ export function browseFocusScript(ref: number): string {
 })()`
 }
 
-/** Chooses the option with exactly this text in a select, as a person would (input and change events); true or null. */
+/**
+ * Chooses the option with exactly this text in a select, as a person would (input and change events): true; `'moved'`
+ * when the select is not what the snapshot showed; null otherwise.
+ */
 export function browseSelectScript(ref: number, option: string): string {
   return `(() => {
   const el = ${element(ref)}
-  if (!el || !el.isConnected || el.tagName.toLowerCase() !== 'select') return null
+  ${stillSeen(ref)}
+  if (el.tagName.toLowerCase() !== 'select') return null
   const want = ${JSON.stringify(option)}
   const found = Array.from(el.options).find(o => String(o.text).replace(/\\s+/g, ' ').trim() === want)
   if (!found) return null
@@ -413,3 +591,16 @@ export function browseSelectScript(ref: number, option: string): string {
   return true
 })()`
 }
+
+/** What a press's click reached (`{ el: { role, name } }` or `{ none: true }` as JSON); null when the page went away. */
+export const BROWSE_CLICKED_SCRIPT = `(() => {
+  const a = window.__acbAim
+  return a ? JSON.stringify(a.clicked()) : null
+})()`
+
+/** The value of the field just typed into (`{ value }` as JSON); null when it is gone (or a password field: never read). */
+export const BROWSE_TYPED_VALUE_SCRIPT = `(() => {
+  const a = window.__acbAim
+  const v = a ? a.typedValue() : null
+  return v ? JSON.stringify(v) : null
+})()`

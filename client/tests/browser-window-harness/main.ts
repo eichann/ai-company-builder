@@ -21,13 +21,14 @@ import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnect
 import { lstepConnector } from '../../connectors/lstep'
 import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
 import { browserReadPartition, browserWritePartition } from '../../shared/browser-operation'
-import { browseLogStep, pageWithScreen, parseBrowseAnswer } from '../../shared/browser-browse'
+import { browseLogStep, pageWithScreen, parseBrowseAnswer, type BrowserActResult, type BrowserBrowseAction } from '../../shared/browser-browse'
 import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserChecker, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
 import { readBrowserFacts } from '../../shared/browser-facts'
 import { parseBrowserHtml } from '../../electron/features/browser/html'
 import { fakePlansServer, type FakeServerFaults } from '../browser-plans-fake'
 import { startSites, type Sites } from './sites'
 import { createBrowserRecorder } from '../../shared/browser-recorder'
+import { BROWSE_TYPED_VALUE_SCRIPT, BROWSER_BROWSE_WORLD } from '../../shared/browser-browse-script'
 import { browserRecordingProblem } from '../../../shared/core/browser-recording'
 import { newRecordingDigest } from '../../electron/features/browser/recording'
 import { createFrameWriter } from '../../electron/features/browser/frame-writes'
@@ -205,6 +206,7 @@ async function run() {
   result.browse = await browseScenarios(win, sites)
   result.work = await workScenarios(win, sites)
   result.workPress = await workPressScenario(win, sites)
+  result.verify = await verifyScenarios(win)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -336,6 +338,9 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   out.entered = await win.browse.enter(() => false)
   page.debugger.on('message', onMessage)
   const signal = new AbortController().signal
+  /** One action as the operator's loop runs it: its outcome word (the whole result kept in `last`). */
+  let last: BrowserActResult | null = null
+  const act = async (a: BrowserBrowseAction, s: AbortSignal) => { last = await win.browse.act(a, s); return last.outcome }
   const snapshot = async () => {
     const s = await win.browse.snapshot()
     return (name: string) => s?.elements.find(e => e.name === name)?.ref ?? -1
@@ -350,7 +355,7 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
     let result = 'failed'
     for (let i = 0; i < 3; i++) {
       const ref = await snapshot()
-      result = await win.browse.act({ do: 'click', ref: ref(name) }, signal)
+      result = await act({ do: 'click', ref: ref(name) }, signal)
       if ((await pressed()).includes(id)) return result
       await wait(300)
     }
@@ -358,38 +363,40 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   }
   const first = await snapshot()
   out.snapshot = await win.browse.snapshot()
-  out.typed = await win.browse.act({ do: 'type', ref: first('検索'), text: '山田花子' }, signal)
+  out.typed = await act({ do: 'type', ref: first('検索'), text: '山田花子' }, signal)
+  out.typedResult = last
   out.typedValue = await page.executeJavaScript(`document.getElementById('q').value`, true)
-  out.selected = await win.browse.act({ do: 'select', ref: first('並び順'), option: '古い順' }, signal)
+  out.selected = await act({ do: 'select', ref: first('並び順'), option: '古い順' }, signal)
   out.selectedValue = await page.executeJavaScript(`document.getElementById('order').value`, true)
   // The form's submit: its POST is refused by the gate, and the page is left on its error page.
-  out.submit = await win.browse.act({ do: 'click', ref: first('保存して送信') }, signal)
-  await win.browse.act({ do: 'go', path: '/browse' }, signal)
+  out.submit = await act({ do: 'click', ref: first('保存して送信') }, signal)
+  await act({ do: 'go', path: '/browse' }, signal)
   out.fetchClick = await press('すぐ保存', 'fetch')
   out.confirmClick = await press('消す', 'confirm')
+  out.confirmResult = last
   out.evilClick = await press('外のサイト', 'evil')
   out.urlAfterEvil = page.getURL()
   // A link of the site: pressed again until the page went there (it is a press that may land before a frame is drawn).
   for (let i = 0; i < 3 && page.getURL() !== 'https://op.test/browse-next'; i++) {
     const ref = await snapshot()
-    out.next = await win.browse.act({ do: 'click', ref: ref('次のページ') }, signal)
+    out.next = await act({ do: 'click', ref: ref('次のページ') }, signal)
     for (let j = 0; j < 30 && page.getURL() !== 'https://op.test/browse-next'; j++) await wait(100)
   }
   out.urlAfterNext = page.getURL()
-  out.back = await win.browse.act({ do: 'back' }, signal)
+  out.back = await act({ do: 'back' }, signal)
   out.urlAfterBack = page.getURL()
   // An address that would name another host (the parser refuses it first; the window checks again).
-  out.goOther = await win.browse.act({ do: 'go', path: '@evil.test/x' }, signal)
-  out.go = await win.browse.act({ do: 'go', path: '/browse-next' }, signal)
+  out.goOther = await act({ do: 'go', path: '@evil.test/x' }, signal)
+  out.go = await act({ do: 'go', path: '/browse-next' }, signal)
   out.urlAfterGo = page.getURL()
   // A navigation to a page that never answers ends when the run is stopped (and the load is stopped).
   const stop = new AbortController()
   setTimeout(() => stop.abort(), 500)
   const hangAt = Date.now()
-  out.hang = await win.browse.act({ do: 'go', path: '/browse-hang' }, stop.signal)
+  out.hang = await act({ do: 'go', path: '/browse-hang' }, stop.signal)
   out.hangMs = Date.now() - hangAt
   // A press that starts a write for later (a timer): once the operator leaves, the page was loaded afresh, so it never fires.
-  await win.browse.act({ do: 'go', path: '/browse' }, signal)
+  await act({ do: 'go', path: '/browse' }, signal)
   // A file chooser never opens a dialog of this computer (intercepted; its event comes a moment after the press).
   for (let i = 0; i < 3 && choosers === 0; i++) {
     out.pick = await press('ファイルを選ぶ', 'pick')
@@ -412,7 +419,7 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   // Its own run of the operator (entered again), so nothing of it touches the presses above.
   out.treeEntered = await win.browse.enter(() => false)
   const treeWritesBefore = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').length
-  await win.browse.act({ do: 'go', path: '/browse-tree' }, signal)
+  await act({ do: 'go', path: '/browse-tree' }, signal)
   const domSize = () => page.executeJavaScript(`document.documentElement.outerHTML.length`, true)
   const before = await domSize()
   const tree = await win.browse.snapshot()
@@ -451,7 +458,7 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   // Its own failure is its own (never the whole harness's): the assertions name what is missing.
   try {
     out.menuEntered = await win.browse.enter(() => false)
-    await win.browse.act({ do: 'go', path: '/browse-menu' }, signal)
+    await act({ do: 'go', path: '/browse-menu' }, signal)
     const list = await win.browse.snapshot()
     out.menuList = list && {
       count: list.elements.length, omitted: list.omitted ?? 0,
@@ -488,7 +495,7 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
       if ('problem' in parsed) return { problem: parsed.problem }
       const aimed = await win.browse.aim!(parsed.answer)
       const log = aimed.ok ? browseLogStep(parsed.answer, at, 'op.test', aimed) : null
-      const acted = aimed.ok ? await win.browse.act(parsed.answer, signal) : null
+      const acted = aimed.ok ? await act(parsed.answer, signal) : null
       return { aimed, label: log?.label ?? null, acted, listed: at.elements.some(e => e.name === '共有する') }
     }
     out.byPosition = await pressAt('share')
@@ -514,14 +521,147 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
     out.memoPress = await pressAt('memo')
     const typeAnswer = parseBrowseAnswer(JSON.stringify({ do: 'type', text: 'こんにちは' }), { snapshot: await shown(), items: 0 })
     out.typeAim = 'answer' in typeAnswer ? await win.browse.aim!(typeAnswer.answer) : typeAnswer
-    out.typed = 'answer' in typeAnswer ? await win.browse.act(typeAnswer.answer, signal) : null
+    out.typed = 'answer' in typeAnswer ? await act(typeAnswer.answer, signal) : null
     out.memoValue = await page.executeJavaScript(`document.getElementById('memo').value`, true)
     out.pwPress = await pressAt('pw')
     out.pwAim = 'answer' in typeAnswer ? await win.browse.aim!(typeAnswer.answer) : null
-    out.pwTyped = 'answer' in typeAnswer ? await win.browse.act(typeAnswer.answer, signal) : null
+    out.pwTyped = 'answer' in typeAnswer ? await act(typeAnswer.answer, signal) : null
     out.pwValue = await page.executeJavaScript(`document.getElementById('pw').value`, true)
   } catch (e) {
     out.menuError = String(e)
+  } finally {
+    await win.browse.leave()
+  }
+  await page.loadURL('https://op.test/')
+  await wait(500)
+  return out
+}
+
+/**
+ * What a press did (agent-browser.md "What a press did"; sites.ts `/verify`): a ref whose row was re-used after the
+ * snapshot, a ref under a banner, a listed button whose words changed in place and an unlisted line whose words changed
+ * (pressed by position) are refused and never pressed; a listed button still pressed by position when something else on
+ * the page moved; a confirm and an alert told with their text (the confirm cancelled); what each field holds after typing.
+ */
+async function verifyScenarios(win: BrowserShellWindow) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  const js = (code: string) => page.executeJavaScript(code, true)
+  const signal = new AbortController().signal
+  const clicks = async (): Promise<string[]> => JSON.parse(String(await js('JSON.stringify(window.__clicks || [])').catch(() => '[]')))
+  const clear = () => js('window.__clicks = []; 1')
+  const refOf = async (name: string, nth = 0) => (await win.browse.snapshot())?.elements.filter(e => e.name === name)[nth]?.ref ?? -1
+  /** A press by ref, done again (at most 3 times) until the page saw it (a press may land before the page is drawn). */
+  const press = async (name: string, id: string, nth = 0): Promise<BrowserActResult | null> => {
+    let r: BrowserActResult | null = null
+    for (let i = 0; i < 3; i++) {
+      r = await win.browse.act({ do: 'click', ref: await refOf(name, nth) }, signal)
+      if ((await clicks()).includes(id)) return r
+      await wait(300)
+    }
+    return r
+  }
+  /** The operator's answer to press the middle of an element by position, parsed as the loop does, on the page shown now. */
+  const pointAt = async (id: string) => {
+    await js(`document.getElementById(${JSON.stringify(id)}).scrollIntoView({ block: 'center' }); 1`)
+    const snap = await win.browse.snapshot()
+    const shot = snap ? await win.browse.screenshot?.(snap) : null
+    const at = snap ? pageWithScreen(snap, shot ?? null) : null
+    const b = JSON.parse(String(await js(`JSON.stringify(document.getElementById(${JSON.stringify(id)}).getBoundingClientRect())`))) as { x: number; y: number; width: number; height: number }
+    if (!at?.screen || !at.viewport) return null
+    const parsed = parseBrowseAnswer(JSON.stringify({ do: 'click', x: Math.floor((b.x + b.width / 2) * at.screen[0] / at.viewport[0]), y: Math.floor((b.y + b.height / 2) * at.screen[1] / at.viewport[1]) }), { snapshot: at, items: 0 })
+    return 'answer' in parsed ? parsed.answer : null
+  }
+  try {
+    out.entered = await win.browse.enter(() => false)
+    await win.browse.act({ do: 'go', path: '/verify' }, signal)
+    await wait(300)
+    // 1. The rows re-sort between the snapshot and the press: 山田's 保存 is now 佐藤's row — never pressed.
+    const yamada = await refOf('保存', 0)
+    await js('resort(); 1')
+    out.recycle = await win.browse.act({ do: 'click', ref: yamada }, signal)
+    out.recycleClicks = await clicks()
+    // Read again: the first row's 保存 is 佐藤's (33), and the press says what it reached.
+    out.recycleAgain = await press('保存', 'item-33')
+    out.recycleAgainClicks = await clicks()
+    await clear()
+    // 1b. Rows alike in their first 200 characters: the whole row's words are compared — refused after the re-sort.
+    const longFirst = await refOf('登録', 0)
+    await js('resortLong(); 1')
+    out.long = await win.browse.act({ do: 'click', ref: longFirst }, signal)
+    // Two 開く with no words around them: they cannot be told apart — refused, never pressed.
+    out.twin = await win.browse.act({ do: 'click', ref: await refOf('開く', 0) }, signal)
+    out.longClicks = await clicks()
+    await clear()
+    // 1c. The row re-sorts on mousedown (after the check, before the click): the result says the row changed.
+    out.down = await press('更新', 'down-丁')
+    out.downClicks = await clicks()
+    await clear()
+    // 1d. The page stops the click in its own capturing listener and saves: the click is unknown, and the page wrote.
+    out.stopper = await press('送る', 'stopper')
+    await clear()
+    // 2. A banner over the button after the snapshot: refused as covered; neither the button nor the banner is pressed.
+    // Centred first (where a press scrolls it), so the banner lies over it where it will be pressed, whatever the window's size.
+    await js("document.getElementById('save').scrollIntoView({ block: 'center', inline: 'center' }); 1")
+    const save = await refOf('保存する')
+    await js('cover(); 1')
+    out.covered = await win.browse.act({ do: 'click', ref: save }, signal)
+    out.coveredClicks = await clicks()
+    await js('uncover(); 1')
+    out.saveAgain = await press('保存する', 'save')
+    await clear()
+    // 3. By position: something else on the page moved (a block grew below), the listed button at the point is the same —
+    // pressed; its words then turn 保存 → 削除 in place after the snapshot — refused, never pressed.
+    const swapPoint = await pointAt('swap')
+    await js('growElsewhere(); 1')
+    out.stillAim = swapPoint ? await win.browse.aim!(swapPoint) : 'no point'
+    out.still = swapPoint ? await win.browse.act(swapPoint, signal) : 'no point'
+    out.stillClicks = await clicks()
+    await clear()
+    const swapAgain = await pointAt('swap')
+    await js('swap(); 1')
+    out.swapAim = swapAgain ? await win.browse.aim!(swapAgain) : 'no point'
+    out.swap = swapAgain ? await win.browse.act(swapAgain, signal) : 'no point'
+    // A column moves another listed button under the point (二番目's place now shows 一番目): refused, never pressed.
+    await js("document.getElementById('x2').scrollIntoView({ block: 'center' }); 1")
+    const x2Point = await pointAt('x2')
+    await js('shiftCol(); 1')
+    out.colAim = x2Point ? await win.browse.aim!(x2Point) : 'no point'
+    out.col = x2Point ? await win.browse.act(x2Point, signal) : 'no point'
+    out.colClicks = await clicks()
+    await clear()
+    // An unlisted line (no ref) whose words change after the snapshot: refused too.
+    const plain = await pointAt('plain')
+    out.plainListed = ((await win.browse.snapshot())?.elements ?? []).some(e => e.name === '確定')
+    await js('retext(); 1')
+    out.plain = plain ? await win.browse.act(plain, signal) : 'no point'
+    out.swapClicks = await clicks()
+    await clear()
+    // 4. A confirm (the app cancels it: the save does not happen) and an alert, told with their text.
+    out.confirm = await press('確認して保存', 'not-confirmed')
+    out.alert = await press('知らせる', 'alerted')
+    out.dialogClicks = await clicks()
+    // 5. Typing: what each field holds afterwards.
+    const typeInto = async (name: string, text: string) => win.browse.act({ do: 'type', ref: await refOf(name), text }, signal)
+    out.code = await typeInto('コード', 'ABCDEFGHIJ')
+    out.tel = await typeInto('電話', '03-1234-5678')
+    out.day = await typeInto('開始日', '2026-12-03')
+    out.amount = await typeInto('金額', '12,000')
+    out.memoListed = ((await win.browse.snapshot())?.elements ?? []).find(e => e.name === 'メモ')?.role ?? null
+    out.memo = await typeInto('メモ', 'メモの本文')
+    out.memoShown = ((await win.browse.snapshot())?.elements ?? []).find(e => e.name === 'メモ')?.value ?? null
+    // A password field's value is never read back, even when the field typed into is one (a second layer: typing into a
+    // password field is refused before). A text field's is, the same way.
+    const pwRef = await refOf('合言葉')
+    await js(`document.getElementById('pw').value = 'pw-secret-4242'; 1`)
+    const readBack = async (ref: number) => {
+      await page.executeJavaScriptInIsolatedWorld(BROWSER_BROWSE_WORLD, [{ code: `window.__acbAim.typing(${ref})` }])
+      return page.executeJavaScriptInIsolatedWorld(BROWSER_BROWSE_WORLD, [{ code: BROWSE_TYPED_VALUE_SCRIPT }])
+    }
+    out.pwReadBack = await readBack(pwRef)
+    out.codeReadBack = await readBack(await refOf('コード'))
+  } catch (e) {
+    out.error = String(e)
   } finally {
     await win.browse.leave()
   }

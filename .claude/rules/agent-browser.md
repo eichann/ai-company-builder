@@ -3243,7 +3243,8 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
 - **Main acts** in the member's own window (controller `browseWindow`): `enter` puts it in `ai` mode with a decider that
   **refuses every write** (`decide: () => false`; reads pass, the request rule and frames as in any `ai` run) and dialogs
   dismissed, never accepted (`dismissDialogs`: `Page.handleJavaScriptDialog { accept: false }`, so a confirm never says yes
-  and a page cannot hold the window). The page is read and acted on from an **isolated world** (`BROWSER_BROWSE_WORLD`,
+  and a page cannot hold the window; each alert / confirm / prompt is told to the operator with its text, "What a press
+  did"). The page is read and acted on from an **isolated world** (`BROWSER_BROWSE_WORLD`,
   `executeJavaScriptInIsolatedWorld`: the page's script cannot see the element list or replace the functions used): the
   snapshot is the address, title, visible text (`innerText`) and the visible usable elements — a text field named by its
   label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain —,
@@ -3469,7 +3470,9 @@ and a ref stays the surer way; a position is for what is visible but has no ref.
   `history` as `{ outcome: 'refused', why }`, nothing done, nothing logged): `outside` (off the viewport), `moved` (since
   the snapshot — and the screen image made right after it — the page scrolled or resized, an overlay opened or closed, an
   element shown on the screen moved more than 2 px or went, or the point is on a floating layer the image did not show:
-  the operator gets the next snapshot instead), `frame` (an `iframe` / `frame` / `object` / `embed` there: the hit-test
+  the operator gets the next snapshot instead; **except** when the element at the point is a listed one that held the
+  point in the snapshot too — a small movement elsewhere does not stop every press —; and always when that listed element
+  is no longer what it was, or an unlisted one changed: "What a press did"), `frame` (an `iframe` / `frame` / `object` / `embed` there: the hit-test
   cannot see inside it, a cross-origin one above all — every frame, the safe side), `file` (a file field or a label of one:
   no file chooser ever opens), `nothing`; for typing, `password` (a password field is never typed into by the operator),
   `file`, `frame`, `not-editable` (the focus is on no text field: `roleOf` = textbox, not disabled or read-only). A window
@@ -3483,8 +3486,8 @@ and a ref stays the surer way; a position is for what is visible but has no ref.
   in a read run; held and decided against the frames and the server's permits in a write run; a never-read address
   refused), and the file-chooser interception stays (the `file` refusal only spares the attempt).
 - **Remaining limits** (said): an element inside a shadow root is hit-tested at its host (a file field inside one is
-  caught by the interception, not by `file`); the layout check compares the listed elements on the screen and the
-  overlays — a change elsewhere (a picture swapped under the point) is not seen; a frame of the same site is refused too.
+  caught by the interception, not by `file`); a picture or canvas whose pixels change without a DOM change is not seen
+  ("What a press did" compares words and the DOM); a frame of the same site is refused too.
 
 Tests: `browser-window-electron.test.ts` (a real window: a menu choice with no ref pressed by its place on the screen image
 and logged by its own label; a file field and its label refused, never pressed; a point off the image refused by the
@@ -3493,6 +3496,76 @@ field, logged by its label; a password field never typed into), `browser-browse.
 the parser, no press by position without the image the operator got, a page's own size dropped; the loop logs the hit-test's
 label, never the typed text, and tells a refusal and why; a window without the hit-test refuses; the hit-test's answer read
 strictly; the prompts). Each guard mutation-checked.
+
+## What a press did (real-window probe 2026-11-27: a wrong row written, a press believed done that was not)
+
+On a real Electron window with fictional pages: a list that re-sorted between the snapshot and the press made a row's
+［保存］ ref write another person's row (`/p/item/33`, inside the frame `/p/item/{n}`); a banner over the button took the
+press and the result was `ok`; a button that turned 保存 → 削除 in place was pressed by position and the delete sent; a save
+behind `window.confirm` was cancelled by the app and the operator saw `ok`, no write, no change; a `maxlength` cut, an
+empty date field and a `beforeinput` refusal were all `ok`. The operator could not tell. Fixed in the window, for every
+site (no site word; the tests' pages are fictional).
+
+- **Checked before acting on a ref** (`BROWSER_SNAPSHOT_SCRIPT` keeps, per listed element, its role, its name and the
+  words of its context — the nearest row `tr` / `li` / `[role=row|listitem|treeitem|option]`, else the nearest of its
+  next four ancestors with words beyond its own; compared **whole** as a 32-bit hash, never cut (independent review of
+  #901: rows alike in their first 200 characters); an element with no context and another listed element of the same
+  role and name cannot be told apart and is never acted on (`moved`); `__acbAim.same`): a press (`browsePointScript`:
+  checked, scrolled into view, two frames, checked again — a virtual list may re-use rows on the scroll), a typing
+  (`browseFocusScript`) and a choice (`browseSelectScript`) are made only while all three are unchanged; else
+  `refused` / `moved`, nothing done. **A press also needs the element itself on top** where it lands (`takesPress`: the
+  deepest element there, through open shadow roots, is it or inside it — never another listed element inside it — or
+  inside one of its labels; its centre first, then the middle of its first line of words, so a tree's parent folder whose
+  centre holds its children is still pressed on its own words); else `refused` / `covered`.
+- **Checked before a press by position** (`aimAt`): a listed element at the point is compared the same way (保存 that became
+  削除 → `moved`); when the page moved it is pressed only if its snapshot box held the point. An unlisted element (no
+  ref: nothing to compare its words with) is refused when anything changed since the snapshot in it or in its context, or
+  it (or an ancestor) was added since — a `MutationObserver` the snapshot starts in the isolated world (child lists,
+  text, and the attributes that name or enable an element; past 20 000 changes every such press is refused) — or when
+  the page moved at all.
+- **What it did** (`BrowserActResult`, the shell's `act`; `browseHistoryEntry` puts it in the operator's next `history`):
+  `outcome` `ok` / `failed` / `refused` (+ `why`); a press's `pressed` — the element its trusted click reached, judged
+  when the click comes (a capturing click listener of the isolated world on the window, armed by the check right before
+  the press, before the page's handlers on the target run): its role and name, and `row-same` / `row-changed` (its
+  context's words against the snapshot's: a row re-used between the check and the click); `click-unknown` when no click
+  was told — a page's own capturing listener on the window added earlier may stop it first, so this never means "not
+  pressed" — with `pageWrite` `page-wrote` / `no-page-write` (a write the page made meanwhile, held or refused:
+  `BrowserAiGate.onPageWrite`), so the operator does not press again blindly;
+  `dialogs` — each alert / confirm / prompt the page opened since the previous action, with its text (≤ 200, ≤ 5), as
+  `alert-closed` / `confirm-cancelled` / `prompt-cancelled` (the app's answer is unchanged: never yes — a confirm-gated
+  save does not happen, and the operator now hears so; answering a dialog is not built: a Skill's steps avoid it or the
+  operator stops for a person); `typed` — the field's value once the page settled against what was typed (`typedResult`:
+  `value-same` / `value-cut` / `value-empty` / `value-changed` / `value-unknown`, with `value` when not the same). A
+  contenteditable field's text is its `value` in the snapshot; `contenteditable=plaintext-only` is listed. **Owner
+  2026-11-27: not more instructions** — these are fixed words that explain themselves; no prompt line was added for them
+  (the refusal line was shortened: each window-tool prompt is 106 characters shorter than before).
+- **Isolation unchanged**: the element's name, a dialog's text and a field's value are page text — `{ outside }` in the
+  operator's material only, never the consultation AI's words, the card, the run log or the server.
+- **Safety unchanged**: these checks spare the wrong press; they are not the boundary. Whatever the page sends is still
+  held or refused by the `ai` gate and decided against the frames and the server's permits ("Writes within frames, in the
+  app"). A press the last check refused is still in the run log and the trail as tried (they are written before `act`).
+- **Remaining limits** (said): the check and the input event are a few milliseconds apart (a page changing in exactly
+  that moment); a row whose words change by themselves (a live clock in it) refuses presses there until it is still; a
+  page that recreates an element without a visible change makes a press by position on an unlisted element `moved`
+  (the operator reads again); two elements of one role and name with no words around them (within four ancestors) are
+  never acted on, by ref or by position; dialogs between two actions are told with the next one.
+
+Tests: `browser-window-electron.test.ts` (a real window, the fictional `/verify` page: the re-sorted row's ref refused and
+never pressed, read again it reaches the right row and says so; a banner over the button → `covered`, neither pressed; by
+position, a block growing elsewhere still lets the same listed button be pressed, 保存 → 削除 in the same box and an
+unlisted line whose words changed refused, never pressed; a confirm and an alert told with their text, the confirm
+cancelled; `maxlength` → `value-cut`, a digits filter → `value-changed`, a date field and a `beforeinput` refusal →
+`value-empty`, a contenteditable memo listed with its value and `value-same`; the read page's own confirm told; since
+the independent review: rows alike in their first 200 characters and two 開く with no words around them refused; a row
+re-sorted on mousedown → `row-changed`; a click the page stops in its own capturing listener → unknown, with the page's
+write; another listed button moved under the point → refused; a password field's value never read back),
+`browser-browse.test.ts` (the next step's history carries the refusal, the click's element, the cancelled confirm and the
+cut value, the page's words as outside text, none of it in the consultation AI's words; `typedResult` as a table; the
+window's answers read strictly, a beforeunload never told). Each guard mutation-checked on the real window (the identity
+check, the top check, the position press's comparison of a listed and of an unlisted element, the tolerance, the dialogs,
+the typed check, the whole-row hash, the twins rule, the row at the click, the snapshot box of a moved page, the page's
+write count, the password read-back: each case flips); kept on purpose as a second layer: the identity check before scrolling (`press`
+checks again after it).
 
 ## Writes within frames (step ⑤a of the redesign: the model and the server's state; the app's half is ⑤b)
 

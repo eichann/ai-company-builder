@@ -90,6 +90,91 @@ document.getElementById('list').addEventListener('click', e => {
 </script>`
 
 /**
+ * What a press did (agent-browser.md "What a press did"; the real-window probe of 2026-11-27): a fictional list whose rows
+ * are re-used when it re-sorts (the same 保存 button then belongs to another person's row), a 保存 a banner can cover, a
+ * button whose words turn from 保存 to 削除 in place, an unlisted line whose words change, a save behind a confirm and an
+ * alert, and fields that cut, refuse or reformat what is typed (a maxlength, a date field, a beforeinput refusal, a
+ * digits-only filter) beside a contenteditable memo. Every press is recorded by the page (`window.__clicks`). Since the
+ * independent review of #901: rows whose long words differ only past their first 200 characters; two 開く buttons with no
+ * words around them; a list that re-sorts on mousedown (between the check and the click); a button whose click the page
+ * stops in its own capturing listener on the window, and saves; a column that moves another listed button under a point;
+ * a password field.
+ */
+const VERIFY_PAGE = `<!doctype html><meta charset="utf-8"><title>verify</title>
+<style>body { margin: 0 } .row { height: 30px } #banner { position: fixed; z-index: 50; background: #ffd }</style>
+<div id="list"></div>
+<div style="height: 20px"></div>
+<button id="save" type="button" style="width: 200px; height: 40px">保存する</button>
+<div><span>下書き</span> <button id="swap" type="button" style="width: 120px; height: 40px">保存</button></div>
+<div><p id="plain" style="cursor: default; margin: 0; width: 160px">確定</p></div>
+<button id="confirm" type="button">確認して保存</button> <button id="alert" type="button">知らせる</button>
+<button id="grow" type="button">広げる</button><div id="extra"></div>
+<div id="long"></div>
+<button id="twinA" type="button">開く</button><button id="twinB" type="button">開く</button>
+<div id="down"></div>
+<div><span>止める</span> <button id="stopper" type="button">送る</button></div>
+<div id="col"><button id="x1" type="button" style="display: block; height: 30px">一番目</button><button id="x2" type="button" style="display: block; height: 30px">二番目</button></div>
+<input id="pw" type="password" aria-label="合言葉">
+<div id="fields"><label for="code">コード</label><input id="code" maxlength="5"> <label for="tel">電話</label><input id="tel">
+<label for="day">開始日</label><input id="day" type="date"> <label for="amount">金額</label><input id="amount">
+<div id="memo" contenteditable="true" role="textbox" aria-label="メモ" style="min-height: 20px; border: 1px solid #888"></div></div>
+<script>
+const mark = id => (window.__clicks = window.__clicks || []).push(id)
+let data = [{ id: 11, n: '山田' }, { id: 22, n: '鈴木' }, { id: 33, n: '佐藤' }]
+const list = document.getElementById('list')
+for (let i = 0; i < 3; i++) {
+  const r = document.createElement('div'); r.className = 'row'; r.innerHTML = '<span></span> <button type="button">保存</button>'; list.appendChild(r)
+  r.querySelector('button').addEventListener('click', () => mark('item-' + r.dataset.id))
+}
+const draw = () => data.forEach((d, i) => { const r = list.children[i]; r.dataset.id = d.id; r.querySelector('span').textContent = d.n })
+draw()
+window.resort = () => { data = [data[2], data[0], data[1]]; draw() }
+document.getElementById('save').addEventListener('click', () => mark('save'))
+window.cover = () => {
+  const r = document.getElementById('save').getBoundingClientRect()
+  const d = document.createElement('div'); d.id = 'banner'; d.textContent = 'お知らせ'
+  d.style.cssText += ';left:' + (r.left - 10) + 'px;top:' + (r.top - 5) + 'px;width:240px;height:60px'
+  d.addEventListener('click', () => mark('banner')); document.body.appendChild(d)
+}
+window.uncover = () => { const b = document.getElementById('banner'); if (b) b.remove() }
+let mode = 'save'
+document.getElementById('swap').addEventListener('click', () => mark(mode))
+window.swap = () => { mode = 'delete'; document.getElementById('swap').textContent = '削除' }
+document.getElementById('plain').addEventListener('click', () => mark('plain-' + document.getElementById('plain').textContent))
+window.retext = () => { document.getElementById('plain').textContent = '取り消し' }
+document.getElementById('confirm').addEventListener('click', () => { if (confirm('本当に保存しますか？')) mark('confirmed'); else mark('not-confirmed') })
+document.getElementById('alert').addEventListener('click', () => { alert('入力に誤りがあります'); mark('alerted') })
+window.growElsewhere = () => { document.getElementById('extra').style.height = '7px' }
+// Rows whose words share a 250-character start: the name that tells them apart comes after it.
+const longList = document.getElementById('long')
+let longData = ['甲', '乙']
+for (let i = 0; i < 2; i++) {
+  const r = document.createElement('div'); r.innerHTML = '<span></span> <button type="button">登録</button>'; longList.appendChild(r)
+  r.querySelector('button').addEventListener('click', () => mark('long-' + r.dataset.n))
+}
+const drawLong = () => longData.forEach((n, i) => { const r = longList.children[i]; r.dataset.n = n; r.querySelector('span').textContent = 'あ'.repeat(250) + n })
+drawLong()
+window.resortLong = () => { longData = [longData[1], longData[0]]; drawLong() }
+document.getElementById('twinA').addEventListener('click', () => mark('twinA'))
+document.getElementById('twinB').addEventListener('click', () => mark('twinB'))
+// A list that re-sorts on mousedown: the row changes between the window's check and the click.
+const down = document.getElementById('down')
+let downData = ['丙', '丁']
+for (let i = 0; i < 2; i++) {
+  const r = document.createElement('div'); r.innerHTML = '<span></span> <button type="button">更新</button>'; down.appendChild(r)
+  r.querySelector('button').addEventListener('mousedown', () => { downData = [downData[1], downData[0]]; drawDown() })
+  r.querySelector('button').addEventListener('click', () => mark('down-' + r.dataset.n))
+}
+const drawDown = () => downData.forEach((n, i) => { const r = down.children[i]; r.dataset.n = n; r.querySelector('span').textContent = n })
+drawDown()
+// The page's own capturing listener on the window, added before the window's: it stops the click and saves.
+window.addEventListener('click', e => { if (e.target && e.target.id === 'stopper') { e.stopImmediatePropagation(); mark('stopper'); fetch('/verify-save', { method: 'POST', body: 's' }) } }, true)
+window.shiftCol = () => { document.getElementById('col').insertAdjacentHTML('afterbegin', '<div style="height: 30px"></div>') }
+document.getElementById('tel').addEventListener('input', e => { e.target.value = e.target.value.replace(/[^0-9]/g, '') })
+document.getElementById('amount').addEventListener('beforeinput', e => { if (e.data && /[^0-9]/.test(e.data)) e.preventDefault() })
+</script>`
+
+/**
  * A write run (agent-browser.md "Writes within frames, in the app"): the page's own script saves by fetch with a CSRF
  * header and body field (the answer sets a cookie the page must never get), makes a write whose answer is lost, an
  * autosave outside the plan, an upload with a file, and reads an address the run must not read.
@@ -346,6 +431,11 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
       if (host === 'op.test' && url === '/browse-menu') {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(MENU_PAGE)
+        return
+      }
+      if (host === 'op.test' && url === '/verify') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(VERIFY_PAGE)
         return
       }
       if (host === 'op.test' && url === '/browse-tree') {

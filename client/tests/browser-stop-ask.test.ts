@@ -54,7 +54,7 @@ function workWorld(answers: string[], skill: string | null) {
       if (a.do === 'click' && hooks) {
         await hooks.holdWrite({ method: 'POST', url: `https://${HOST}/tags`, contentType: 'application/json', body: { kind: 'text', text: '{"name":"x"}' }, send: async () => ({ kind: 'not-sent' }) as never })
       }
-      return 'ok'
+      return { outcome: 'ok' }
     },
     pageClean: () => true, closed: () => false,
   }
