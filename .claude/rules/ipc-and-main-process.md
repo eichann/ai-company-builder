@@ -65,7 +65,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   browserPlans:list / get / run / cancel / confirm: the plan card, main window only, `features/browser/wire.ts`,
   `agent-browser.md` "The card, the IPC and the request tool"; and browserLines:card: a read-only inspection's card held
   in main's memory, main window only, `features/browser/inspect.ts`, `agent-browser.md` "The inspection in the chat" (also an
-  operator run's card, a `bo_` id, held by `features/browser/browse.ts`: "The operator's window tools"); and
+  operator run's card, a `bo_` id, held by `features/browser/browse.ts`: "The operator's window tools" — or a write task's
+  stopped preview, held by `features/browser/work.ts`: "The operator's trail on the card"); and
   browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, the member's own,
   from a window that shows its consultation — the main window or the consultation's own window (「別ウィンドウで開く」), main
   frame only: chat-windows `showsConsultation`, the registry injected as `cardWindows`; `agent-browser.md` "A card in its

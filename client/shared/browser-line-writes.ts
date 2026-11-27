@@ -22,6 +22,7 @@ import type { BrowserMap } from '../../shared/core/browser-map'
 import type { BrowserOpenedLine } from '../../shared/core/browser-opened'
 import type { BrowserLineWrite } from '../../shared/core/browser-write-line'
 import type { BrowserGateDecision, BrowserRunGateHooks } from './browser-runner'
+import { readBrowserOperatorTrail, type BrowserOperatorTrail } from './browser-operator-trail'
 
 /** A form write's value source: the written object's id, its parent's id, or the value the line adds. */
 export type BrowserFormValueSource = '{id}' | '{parent}' | '{value}'
@@ -314,6 +315,8 @@ export interface BrowserWriteView {
   result: BrowserWriteResultView | null
   /** ［やめる］ can be pressed (a write run's card waiting for ［任せる］, step ⑤b); absent: no such button. */
   cancellable?: boolean
+  /** A write run's operator trail, its preview and its work (outside text, the person's card only; agent-browser.md "The operator's trail on the card"). */
+  trail?: BrowserOperatorTrail
 }
 
 export type BrowserWriteGetResult = { ok: true; view: BrowserWriteView } | { ok: false; message: string }
@@ -352,9 +355,11 @@ export function readBrowserWriteView(v: unknown, readCard: (c: unknown) => Brows
     result = { outcome: r.outcome as BrowserWriteResultView['outcome'], headline: r.headline, done: [...r.done], notDone: [...r.notDone], unknown: [...r.unknown], byHand: [...r.byHand], confirm }
   }
   if (x.cancellable !== undefined && typeof x.cancellable !== 'boolean') return null
+  // A trail not in its shape or past its caps is left off (the card itself still shows).
+  const trail = x.trail === undefined ? null : readBrowserOperatorTrail(x.trail)
   return {
     title: x.title, siteLabel: x.siteLabel, phase: x.phase as BrowserWriteCardPhase, values, sentences: [...x.sentences], card,
     readAt: x.readAt as string | null, contentHash: x.contentHash as string | null, message: x.message as string | null, result,
-    ...(x.cancellable === true ? { cancellable: true } : {}),
+    ...(x.cancellable === true ? { cancellable: true } : {}), ...(trail ? { trail } : {}),
   }
 }

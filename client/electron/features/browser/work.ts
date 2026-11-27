@@ -17,7 +17,7 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workResultCard, workWordsForAi,
+  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workWordsForAi,
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
@@ -27,6 +27,8 @@ import { browserRunBudget, type BrowserRunBudget } from '../../../../shared/core
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
+import type { BrowserInspectionView } from '../../../shared/browser-inspection'
+import { createOperatorTrail, trailForCard, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
@@ -101,6 +103,8 @@ interface Entry {
   conversationId: string | null
   /** A press on its way (［任せる］ or the answer): a second one from another window waits for it, never asks again. */
   pressing: Promise<unknown> | null
+  /** The operator's trails (the preview's when there was one, the work's), read live for the card. */
+  trails: OperatorTrailRecorder[]
 }
 
 /** A server refusal → the consultation AI's fixed words (busy: with roughly when the domain frees up, when the server said). */
@@ -128,6 +132,17 @@ const frameStartOf = (v: unknown): BrowserFrameRunStart | null => {
 }
 const workFrames = (frames: readonly BrowserFrameView[]): WorkFrame[] => frames.map(workFrameOf)
 
+/** The trails that did anything, as a view's field (absent when none). */
+const trailOf = (trails: readonly OperatorTrailRecorder[]) => {
+  const trail = trailForCard(trails.map(t => t.view()))
+  return trail ? { trail } : {}
+}
+
+/** A stopped preview's view: the fixed reason on the card, the operator's trail beside it. */
+const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun): BrowserInspectionView => ({
+  card: workPreviewStoppedCard(end), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
+})
+
 export function wireBrowserWork(deps: BrowserWorkDeps) {
   const now = deps.now ?? Date.now
   const busyWindows = deps.busyWindows ?? new Set<string>()
@@ -148,8 +163,18 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     return {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
-      result, ...(e.phase === 'ready' ? { cancellable: true } : {}),
+      result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails),
     }
+  }
+
+  // A stopped preview's card (no plan, so no frames run card): named by the preview's operator run (`bo_…`), shown by the
+  // generic card through the inspection card's IPC like a read run's; memory only, this member's.
+  const previews = new Map<string, BrowserInspectionView>()
+  const keepPreview = (userId: string, companyId: string, runId: string, view: BrowserInspectionView) => {
+    const k = key(userId, companyId, runId)
+    previews.delete(k)
+    previews.set(k, view)
+    while (previews.size > KEPT_CARDS) previews.delete(previews.keys().next().value as string)
   }
 
   /**
@@ -174,6 +199,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     writes: () => FrameWriteRecord[]
     locked: () => boolean
     cut: AbortController
+    /** The operator's trail for the member's card only (its actions in the log's kept form, its reasons, notes and end). */
+    trail: OperatorTrailRecorder
     /** The run's budget as the server chose it, and when the app stops operating (its start + `operateMs`). */
     budget: Readonly<BrowserRunBudget>
     deadline: number
@@ -211,10 +238,16 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const parsed = parseWorkAnswer(step.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
       if ('problem' in parsed) return { kind: 'end', reason: 'bad-answer', end: stopped('operator') }
       if (parsed.notes !== undefined) notes = parsed.notes
+      o.trail.notes(parsed.notes)
       const answer = parsed.answer
-      if (answer.do === 'plan' || answer.do === 'done' || answer.do === 'stop') return { kind: 'answer', answer }
+      if (answer.do === 'plan' || answer.do === 'done' || answer.do === 'stop') {
+        o.trail.end(answer.do, parsed.reason)
+        return { kind: 'answer', answer }
+      }
       const action: BrowserBrowseAction = answer
-      if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(browseLogStep(action, page, o.host))
+      const logStep = browseLogStep(action, page, o.host)
+      if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(logStep)
+      o.trail.step(logStep, parsed.reason)
       const done = await o.win.act(action, o.cut.signal)
       history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
     }
@@ -275,16 +308,29 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const neverRead = frameRun?.neverRead ?? []
       const neverReadFits = (pq: string) => neverRead.some(p => browserNeverReadFits(p, pq))
 
+      // The operator's trails (the preview's, the work's): on the member's card only (agent-browser.md "The operator's trail on the card").
+      const previewTrail = createOperatorTrail('preview')
+      const workTrail = createOperatorTrail('work')
       // The preview (read only): unless a pre-approved Skill version whose text nobody changed since.
       let plan: Extract<WorkAnswer, { do: 'plan' }> | null = null
       if (!frameRun || frameRun.needsApproval) {
         const previewFinished = { ok: false }
+        const previewRan: { runId: string | null } = { runId: null }
         const previewed = await runOperator({
           phase: 'preview', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
-          cut, current, whyNot, conversation, neverReadFits, writer: null, finished: previewFinished,
+          cut, current, whyNot, conversation, neverReadFits, writer: null, trail: previewTrail, finished: previewFinished, ran: previewRan,
         })
         if (previewed.kind === 'refused') return said(previewed.words)
+        // A preview that ended without a plan still leaves the member a card: why it stopped (the fixed words) and what the
+        // operator tried (its trail), named by the preview's operator run (incident 2026-11-27: a need-person stop left nothing).
+        const previewEnd: WorkEnd | null = previewed.kind === 'end' ? previewed.end
+          : previewed.answer.do === 'stop' ? { kind: 'stopped', why: previewed.answer.why }
+            : previewed.answer.do === 'plan' ? null : { kind: 'stopped', why: 'operator' }
+        if (previewEnd && previewRan.runId && deps.userId() === userId) {
+          keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view()))
+          input.onCard(previewRan.runId)
+        }
         // The preview's run must have let the domain go before the frames run starts (one lock across both, Codex review).
         if (!previewFinished.ok) return said(W.offline)
         if (previewed.kind === 'end') return said(workWordsForAi(previewed.end, input.items, []))
@@ -305,7 +351,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
-        inDoubt: null, conversationId: input.conversationId, pressing: null,
+        inDoubt: null, conversationId: input.conversationId, pressing: null, trails: plan ? [previewTrail, workTrail] : [workTrail],
       }
       const e = entry
       keep(e)
@@ -365,7 +411,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const worked = await runOperator({
         phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
         adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
-        neverReadFits, writer, log: workLog,
+        neverReadFits, writer, log: workLog, trail: workTrail,
       })
       const records = writer.records()
       // The after-read: each declared address, `{created}` from the answers, read again through the read session.
@@ -444,8 +490,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     neverReadFits: (pathAndQuery: string) => boolean
     writer: FrameWriter | null
     log?: BrowserRunLogStep[]
+    trail: OperatorTrailRecorder
     /** Set to whether the server took the run's finish (its log and the lock released), awaited before returning. */
     finished?: { ok: boolean }
+    /** Set to the operator run's id once the server gave it (a stopped preview's card is named by it). */
+    ran?: { runId: string | null }
   }): Promise<
     | { kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> }
     | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }
@@ -455,6 +504,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     if (started.kind !== 'ok') return { kind: 'refused', words: refusedWords(started, now()), why: started.kind === 'no-answer' ? 'network' : 'server-refused' }
     const browseRunId = (started.value as { runId?: unknown } | null)?.runId
     if (typeof browseRunId !== 'string' || !BROWSER_RUN_ID_RE.test(browseRunId)) return { kind: 'refused', words: W.failed, why: 'server-refused' }
+    if (o.ran) o.ran.runId = browseRunId
     // The run's budget is the server's choice (a Skill's approved work gets more room); an older server's answer: standard.
     // It operates no longer than the budget allows and the server said (never past the frames run's end).
     const answered = started.value as { budget?: unknown; operateMs?: unknown } | null
@@ -485,7 +535,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.records() ?? [], locked: () => writer?.locked() ?? false,
-        cut: o.cut, budget, deadline, current: o.current, whyNot: o.whyNot, log,
+        cut: o.cut, trail: o.trail, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })
       if (got.kind === 'end') {
         outcome = got.end.kind === 'unknown' ? 'failed' : 'stopped'
@@ -673,7 +723,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const e = mine(deps.userId(), companyId, runId)
       return e ? { conversationId: e.conversationId } : null
     },
-    clear: () => entries.clear(),
+    /** A stopped preview's card (a `bo_` id; the inspection card's IPC asks it after the read runs' cards). */
+    previewCard(userId: string, companyId: string, runId: string): BrowserInspectionView | undefined {
+      return previews.get(key(userId, companyId, runId))
+    },
+    clear: () => { entries.clear(); previews.clear() },
   }
 }
 

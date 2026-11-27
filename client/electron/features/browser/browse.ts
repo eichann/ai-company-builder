@@ -15,6 +15,7 @@ import {
   type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot,
 } from '../../../shared/browser-browse'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
+import { createOperatorTrail } from '../../../shared/browser-operator-trail'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome } from '../../../../shared/core/browser-run-log'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
@@ -146,6 +147,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       const history: BrowserBrowseHistoryEntry[] = []
       // The operator's own working memory between its fresh, tool-less steps (never the chat AI's).
       let notes = ''
+      // Its trail for the member's card only (outside text: never the chat AI's words or the server's log).
+      const trail = createOperatorTrail('browse')
       for (let round = 1; round <= L.rounds; round++) {
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         // No frame the write gate does not see (a login check left in the page): stop, as a run does.
@@ -168,7 +171,9 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         if ('problem' in parsed) { reason = 'bad-answer'; return refused(W.failed) }
         const answer = parsed.answer
         if (parsed.notes !== undefined) notes = parsed.notes
+        trail.notes(parsed.notes)
         if (answer.do === 'done' || answer.do === 'stop') {
+          trail.end(answer.do, parsed.reason)
           const end = answer.do === 'done' ? { kind: 'done' as const, result: answer.result } : { kind: 'stopped' as const, why: answer.why as BrowserBrowseStop }
           outcome = answer.do === 'done' ? 'done' : 'stopped'
           if (answer.do === 'stop') reason = answer.why
@@ -176,12 +181,14 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
           if (deps.userId() !== userId) { outcome = 'stopped'; reason = 'context-changed'; return refused(W.interrupted) }
           keep(key(userId, companyId, runId), {
             card: browseCard({ host, items: input.items, outcome: end, unread: answer.unread }),
-            readAt: new Date(now()).toISOString(), siteLabel: host,
+            readAt: new Date(now()).toISOString(), siteLabel: host, trail: [trail.view()],
           })
           return { kind: 'card', runId, words: browseWordsForAi(end.kind === 'done' ? { kind: 'done' } : { kind: 'stopped', why: end.why }, input.items, answer.unread) }
         }
         const action: BrowserBrowseAction = answer
-        if (steps.length < BROWSER_RUN_LIMITS.steps) steps.push(browseLogStep(action, page, host))
+        const logStep = browseLogStep(action, page, host)
+        if (steps.length < BROWSER_RUN_LIMITS.steps) steps.push(logStep)
+        trail.step(logStep, parsed.reason)
         const done = await win.act(action, cut.signal)
         history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
       }

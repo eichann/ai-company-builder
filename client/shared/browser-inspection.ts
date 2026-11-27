@@ -11,6 +11,7 @@
 import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardCheckedBy, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
 import { BROWSER_RUN_ID_RE } from '../../shared/core/browser-run-log'
+import { readBrowserOperatorTrail, type BrowserOperatorTrail } from './browser-operator-trail'
 
 /** The consultation AI's inspection tool (`mcp__acb_browser__browser_inspect`; electron/browser-request/inspect-tool.ts). */
 export const BROWSER_INSPECT_TOOL = 'browser_inspect'
@@ -63,6 +64,8 @@ export interface BrowserInspectionView {
   readAt: string
   /** The site's name as its reviewed declaration says it (「Lステップ」). */
   siteLabel: string
+  /** An operator run's own trail (outside text, the person's card only; agent-browser.md "The operator's trail on the card"). */
+  trail?: BrowserOperatorTrail
 }
 
 export type BrowserInspectionGetResult = { ok: true; view: BrowserInspectionView } | { ok: false; message: string }
@@ -152,7 +155,10 @@ export function readBrowserCard(v: unknown): BrowserCard | null {
 export function readBrowserInspectionView(v: unknown): BrowserInspectionView | null {
   if (!isMap(v) || !isStr(v.readAt, 40) || !isStr(v.siteLabel, 200)) return null
   const card = readBrowserCard(v.card)
-  return card ? { card, readAt: v.readAt, siteLabel: v.siteLabel } : null
+  if (!card) return null
+  // A trail not in its shape or past its caps is left off (the card itself still shows).
+  const trail = v.trail === undefined ? null : readBrowserOperatorTrail(v.trail)
+  return { card, readAt: v.readAt, siteLabel: v.siteLabel, ...(trail ? { trail } : {}) }
 }
 
 /**

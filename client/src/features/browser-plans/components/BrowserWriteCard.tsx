@@ -10,6 +10,7 @@ import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getB
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
 import { writeCardRefreshMs } from '../model'
+import { OperatorTrail } from './OperatorTrail'
 
 
 // Confirming and awaiting ［任せる］ are amber (the member's turn), a run in doubt is amber too (they check the site),
@@ -166,6 +167,8 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
           <p className="mt-2 text-small text-text-muted">{W.noResend}</p>
         </div>
       )}
+
+      {view.trail && <OperatorTrail trail={view.trail} />}
 
       {(view.message || message) && (
         <Callout tone="warning" className="mt-2"><span className="inline-flex items-start gap-1"><WarningCircle size={14} weight="fill" aria-hidden className="mt-0.5" />{view.message ?? message}</span></Callout>
