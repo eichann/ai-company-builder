@@ -121,7 +121,7 @@ export interface TaskCardData {
   /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
   canSetTags: boolean
   /**
-   * 「件名・目的を直す」 in place (task version 16: `retitle`, `set_purpose`): what the member may correct now — the
+   * 件名 and 目的 corrected in place on the card (task version 16: `retitle`, `set_purpose`): what the member may correct now — the
    * requester or the assignee of an open task. Both false on an older server's type (no such actions).
    */
   canEdit: { title: boolean; purpose: boolean }
@@ -168,7 +168,7 @@ export type TaskCardResult =
 
 /** Actions that are the AI's own or need a chooser the card does not have. */
 const NOT_ON_CARD = new Set(['finish_prep', 'hand_over', 'set_bundle', 'set_tags', 'set_wait_until',
-  // 「件名・目的を直す」 edits the title and 目的 in place (`canEdit`), not from 「…」.
+  // The title and 目的 are corrected where they are shown (`canEdit`), not from 「…」.
   'retitle', 'set_purpose',
   // 「別のもの」 answers 「似ている案があります」 on the meeting's list of proposals (MinutesReview), not here.
   'keep_apart'])

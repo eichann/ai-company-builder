@@ -267,18 +267,27 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    cannot be made 「あなただけ」 again, and `tasks:share` → `POST …/share { folder, expectedVersion }`
    (`records.md` "Owner-only records"; main sends only a `fileLinkPath`-checked company folder; the
    server checks the owner and the folder). A task already shared offers nothing.
-   **「件名・目的を直す」** (task version 16, owner decision 2026-11-27; `TaskTextEdit.tsx`): under the 目的 line, for the
+   **件名 and 目的 are corrected where they are shown** (task version 16; owner 2026-11-27: the separate
+   「件名・目的を直す」 box under 期限 was 「最悪の UX」 and is gone, with its link and its ［保存］［やめる］). For the
    requester or the assignee of an open task (`card.canEdit` from the type's `retitle` / `set_purpose` and the member's
-   place; the two actions are not in 「…」, `NOT_ON_CARD`). Pressed, the title (one line, ≤ 200, line breaks turned into
-   spaces; checked with the core's `normalizeRecordTitle` only when the title is sent, so 目的 alone saves under a title
-   stored before the rule) and 目的 are edited in place; the assignee of a request still 引き受け待ち reads 「保存すると、
-   このやることを引き受けたことになります。」 in the form (`accepts`) — ［保存］ (Enter in
-   the title, never while an IME converts) / ［やめる］ (Esc). Only what changed is sent (`editSteps`: `retitle`, then
-   `set_purpose`, each at the version the previous one moved to; nothing changed sends nothing); the card says
-   「件名と目的を直しました」 with one ［取り消す］ that undoes every entry of the press, newest first. A refusal stays in the
-   form; someone else's change first is the usual conflict notice. An older server's type offers nothing. 経緯 says
-   「件名を直しました（「前」→「後」）」 (`historyLines`). Tests: `client/tests/task-card.test.ts`,
-   `src/features/tasks/cardActions.test.ts`, `tests/ui/task-card.spec.ts` 「件名・目的を直す…」.
+   place; the two actions are not in 「…」, `NOT_ON_CARD`): **the title** is RecordPage's `titleEdit` — hover shows a
+   quiet pencil; press the title (from the keyboard: the pencil button 「件名を直す」, Enter / Space — the heading's text
+   stays the title alone) and it becomes a one-line field in the same place and
+   size, focused with the text selected; Enter saves (never while an IME converts), leaving the field saves, Esc puts it
+   back (focus back on the pencil). Line breaks are turned into spaces, ≤ 200. **目的** is its own line right under the
+   title (`TaskPurpose`, in RecordPage's `from` before where it came from); empty, a quiet 「目的を書く」 there. Pressed,
+   a several-line field in the same place: ⌘Enter / Ctrl+Enter or leaving saves, Enter is a new line, Esc puts it back.
+   The generic part is `src/shared/ui/InlineText.tsx` (opens, keeps the draft, closes; no rule). **One place decides
+   what is sent** (`TaskTextEdit.tsx` `saveTaskText`): only a changed value (`editSteps`: `retitle` / `set_purpose`,
+   compared trimmed; nothing changed sends nothing), the title checked with the core's `normalizeRecordTitle` only when
+   the title is sent (so 目的 alone saves under a title stored before the rule); the assignee of a request still
+   引き受け待ち reads 「保存すると、このやることを引き受けたことになります。」 under the field (`accepts`). The card says
+   「件名を直しました」 / 「目的を直しました」 with ［取り消す］. A refusal stays under the field with the draft; someone
+   else's change first is the usual conflict notice. A card left (another task, another tab) before a leave-save is
+   answered keeps nothing of a refused draft — as before, when leaving the form always dropped it (Codex review: accepted). A member who may not correct them sees plain text, no control.
+   An older server's type offers nothing. 経緯 says 「件名を直しました（「前」→「後」）」 (`historyLines`). Tests:
+   `client/tests/task-card.test.ts`, `src/features/tasks/cardActions.test.ts`, `tests/ui/task-card.spec.ts` 「件名: …」,
+   「目的: …」, 「a title stored before the rule…」, and the done card (plain text).
 2. **AI が用意したもの** (a business plugin step's やること is also shown at the top of its record's —
    the deal's — card, with its files: `StepDeliverables`, `plugin-steps.md` "What the step made";
    one an automatic run made also gets 「続きをする」 above the card, `ContinueStepButton`):

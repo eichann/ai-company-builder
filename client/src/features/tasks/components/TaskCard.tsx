@@ -23,8 +23,8 @@ import { unlinkTypedFile } from '../../../shared/ipc/drive-links'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
-import { editDoneWords, whenDoneLine, type TextEditSteps } from '../cardActions'
-import { TaskTextEdit } from './TaskTextEdit'
+import { editDoneWords, taskTitleEdit, whenDoneLine, type TextEditSteps } from '../cardActions'
+import { TaskPurpose } from './TaskTextEdit'
 import { companyNow } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
@@ -195,7 +195,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     setNotice({ kind: 'done', text: '取り消しました', undo: null })
     return null
   })
-  // 「件名・目的を直す」 (task version 16): one entry per value changed, 取り消す reverses them all.
+  // 件名 / 目的 corrected in place (task version 16): one entry per value changed, 取り消す reverses them.
   const editText = (steps: TextEditSteps) => change(async () => {
     let at = version
     const made: number[] = []
@@ -357,7 +357,7 @@ interface BodyProps {
   jobPart?: ReactNode
   /** The linked meeting's name beside the date-only title (display only). */
   meetingTitle?: string | null
-  /** 「件名・目的を直す」: what changed is sent; a refusal's words or null. */
+  /** 件名 / 目的 corrected in place: what changed is sent; a refusal's words or null. */
   onEditText: (steps: TextEditSteps) => Promise<string | null>
   team: boolean
   rootPath: string
@@ -461,8 +461,13 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
   const postpone = card.actions.find(a => a.action === 'set_due')
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
+  const textNow = { title: record.title, purpose: card.purpose }
+  // The assignee's every action accepts a request still 引き受け待ち (records.md "Acceptance"): said before saving.
+  const accepts = card.roles.assignee && record.state === 'awaiting_acceptance'
   return (
-    <RecordPage testId="task-card" kind="task" name="やること" title={record.title} titleNote={meetingTitle ? `（${meetingTitle}）` : null} top={top}
+    <RecordPage testId="task-card" kind="task" name="やること" title={record.title}
+      titleEdit={taskTitleEdit(textNow, card.canEdit.title, busy, accepts, onEditText)}
+      titleNote={meetingTitle ? `（${meetingTitle}）` : null} top={top}
       chips={<>
         {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
         {turn && <Chip>{turn}</Chip>}
@@ -473,7 +478,12 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
       actions={<>
         <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} today={now.date} onRun={onRun} />
       </>}
-      from={card.origin && <OriginLine origin={card.origin} />}
+      from={<>
+        {/* 目的 right under the title, corrected in place (task version 16). Not keyed by version: a reload (someone
+            else's change, a press half done) keeps the draft and the refusal in the field. */}
+        <TaskPurpose now={textNow} may={card.canEdit.purpose} busy={busy} accepts={accepts} onSave={onEditText} />
+        {card.origin && <OriginLine origin={card.origin} />}
+      </>}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
       seenBy={card.viewers ? <SeenBy who={card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
@@ -539,10 +549,6 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
-      {/* 目的, and 「件名・目的を直す」 for the requester / the assignee (task version 16). Not keyed by version: a reload
-          (someone else's change, a press half done) keeps the draft and the refusal in the form. */}
-      <TaskTextEdit key={record.id} title={record.title} purpose={card.purpose} canEdit={card.canEdit} busy={busy}
-        accepts={card.roles.assignee && record.state === 'awaiting_acceptance'} onSave={onEditText} />
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>
