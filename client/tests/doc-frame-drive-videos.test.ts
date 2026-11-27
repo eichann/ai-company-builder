@@ -350,3 +350,30 @@ test('a blocked Drive embed of one of the document\'s own videos is not counted 
   w.flush()
   assert.equal(blockedCounts().at(-1), 1, 'after the read: the video the edit added is not counted, another Drive file is')
 })
+
+test('Chromium reports a refused Drive frame by its origin alone: not counted when the document embeds Drive videos — also when it arrives before main has read the document — and counted when it embeds none', async () => {
+  const blockedCounts = (w: ReturnType<typeof world>) => w.events.filter(([, e]) => e.kind === 'blocked').map(([, e]) => (e as { count: number }).count)
+  // Measured (Electron 45): an <iframe src=".../file/d/<id>/preview"> refused by the CSP arrives as
+  // `https://drive.google.com`, while the page's answer is parsed — before main has read the bytes.
+  const w = world()
+  const serve = w.frames.serve.bind(w.frames)
+  let early = true
+  w.frames.serve = async request => {
+    if (early) { early = false; for (const [id, hooks] of w.hooksOf) hooks.onBlocked(id, 'https://drive.google.com') }
+    return serve(request)
+  }
+  const viewId = await w.open()
+  w.hooksOf.get(viewId)!.onBlocked(viewId, 'https://drive.google.com/')
+  w.flush()
+  assert.deepEqual(blockedCounts(w), [], 'the document\'s own embed is ACB\'s player\'s, before and after the read')
+  w.hooksOf.get(viewId)!.onBlocked(viewId, 'https://cdn.example/lib.js')
+  w.flush()
+  assert.equal(blockedCounts(w).at(-1), 1, 'another host still counts')
+
+  const none = world()
+  none.write('営業/report.html', '<p>動画なし</p>')
+  const plain = await none.open()
+  none.hooksOf.get(plain)!.onBlocked(plain, 'https://drive.google.com')
+  none.flush()
+  assert.equal(blockedCounts(none).at(-1), 1, 'a document with no Drive video: a Drive frame is a missing part')
+})

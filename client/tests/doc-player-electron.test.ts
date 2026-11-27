@@ -30,6 +30,7 @@ interface Result {
   placedScrolled: Bounds[]
   placedAtZoom15: Bounds[]
   placedCut: Bounds[]
+  blockedTold: Array<{ count: number; hosts: string[] }>
   playerCount: number
   playerUrls: string[]
   hiddenWithDocument: boolean[]
@@ -103,6 +104,14 @@ test('a player goes exactly over each Drive embed main read, following the docum
   assert.deepEqual(result.placedCut, [{ x: 120, y: 230, width: 320, height: 100 }], 'the area 300 px high: only the part inside it')
   assert.equal(result.playerCount, 2, 'none over the iframe the document\'s script made (an id main never read)')
   assert.deepEqual(result.playerUrls, ['acb-drive-video://<token>/?v=1', 'acb-drive-video://<token>/?v=1'])
+})
+
+test('the band counts none of the document\'s Drive embeds (Chromium reports a refused frame as `https://drive.google.com` alone, before main has read the document); another host still counts', { skip }, () => {
+  // Refused by the CSP: the page's own embeds (A, B's <source>, C), the script's iframe (another id: Chromium's
+  // report cannot tell it from the others) and an image from cdn.example — only the image is a missing part.
+  const told = result.blockedTold
+  assert.deepEqual(told.at(-1), { count: 1, hosts: ['cdn.example'] }, JSON.stringify(told))
+  assert.ok(told.every(t => !t.hosts.includes('drive.google.com')), `never Drive on the way either: ${JSON.stringify(told)}`)
 })
 
 test('the players hide with the document (an overlay of the app)', { skip }, () => {

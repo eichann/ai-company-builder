@@ -335,9 +335,15 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **A Drive embed ACB plays is not a missing part** (owner FB 2026-11-27: the band still warned about the
   document's own Drive video): a blocked address on exactly `drive.google.com` whose file id (`driveFileIdFromLink`)
   is one of the document's own videos (`seen`, from main's read of the served bytes) is not counted — ACB's player
-  shows it. While the document is still being read (`reading`) such an address is held and decided when the read
-  ends; any other Drive file and every other host are counted as before. Test: `doc-frame-drive-videos.test.ts`
-  「a blocked Drive embed of one of the document's own videos…」 (the skip and the hold each fail it when removed).
+  shows it. **Chromium reports a refused frame by its origin alone** (measured, Electron 45: Drive's 「埋め込む」
+  iframe arrives as `https://drive.google.com`, no path — the first fix, matching ids only, left the owner's band
+  warning): a bare Drive origin counts as the document's own when the document embeds any Drive video, and as a
+  missing part when it embeds none (a script's iframe of another id is then not told apart). The report comes while
+  the page's answer is parsed, **before** main has read the document (and again while an edited one is re-read):
+  such an address is held and decided when the read ends; every other host is counted as before. Tests:
+  `doc-frame-drive-videos.test.ts` 「a blocked Drive embed of one of the document's own videos…」 and 「Chromium reports a
+  refused Drive frame by its origin alone…」 (the skip, the bare origin and the hold before the read each fail one
+  when removed); `doc-player-electron.test.ts` 「the band counts none of the document's Drive embeds…」 (real Electron).
 - **Hosts only** (`views.ts` `onBlocked`, `blockedWebHost` in `client/shared/doc-frame.ts`): only
   `http` / `https` / `ws` / `wss`; the host lower case, punycode, no port, user name, path or query
   (an address can carry what the page holds); `file:` / `data:` / other schemes are not internet

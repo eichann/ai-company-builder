@@ -122,6 +122,7 @@ async function run() {
 <iframe id="a" src="${drive(A)}" style="position:absolute;left:100px;top:200px;width:320px;height:180px;border:0"></iframe>
 <video id="b" style="position:absolute;left:460px;top:400px;width:240px;height:135px"><source src="${drive(B, '/view')}"></video>
 <iframe id="c" src="${drive(C)}" style="position:absolute;left:100px;top:1500px;width:320px;height:180px;border:0"></iframe>
+<img src="https://cdn.example/part.png" alt="" style="position:absolute;left:0;top:2900px;width:1px;height:1px">
 <div style="height:3000px"></div>
 <script>const big = document.createElement('video'); big.setAttribute('src', 'https://example.invalid/' + 'x'.repeat(50 * 1024 * 1024)); big.style.cssText = 'position:absolute;left:0;top:0;width:50px;height:50px'; document.body.appendChild(big)
 const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIPTED))}; d.style.cssText = 'position:absolute;left:500px;top:20px;width:200px;height:120px;border:0'; document.body.appendChild(d)</script>
@@ -148,7 +149,12 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
     pick: async (_companyId, fileId) => { picks.push(fileId); fake.pick(); return { ok: true, kept: true } },
     openExternal: async () => {},
   })
-  const views = createDocViews({ frames: docFrames, shell: createDocViewShell({ serve: r => docFrames.serve(r), log: { warn: () => {} } }), players })
+  // The band's tallies, as the window hears them (the document's own Drive embeds are the players', not missing parts).
+  const blockedTold: Array<{ count: number; hosts: string[] }> = []
+  const views = createDocViews({
+    frames: docFrames, shell: createDocViewShell({ serve: r => docFrames.serve(r), log: { warn: () => {} } }), players,
+    notify: (_windowId, event) => { if (event.kind === 'blocked') blockedTold.push({ count: event.count, hosts: event.hosts }) },
+  })
   const win = new BrowserWindow({ show: true, width: 1000, height: 760, webPreferences: { contextIsolation: true, sandbox: true } })
   await win.loadURL('data:text/html,<p>app</p>')
   // Shown and focused: the keyboard focus is measured (a hidden window has none).
@@ -162,6 +168,7 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   const doc = allWebContents.fromId(viewId)!
   for (let i = 0; i < 50 && (doc.isLoading() || !doc.getURL()); i++) await wait(100)
   await wait(300)
+  result.blockedTold = [...blockedTold]
   const area = { x: 20, y: 30, width: 800, height: 600 }
   views.place(viewId, win.webContents.id, area)
   /** The players' views in the window, by the page they show. */
