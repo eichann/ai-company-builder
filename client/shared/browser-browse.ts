@@ -209,6 +209,8 @@ export interface BrowserBrowseSurface {
   aim?(action: BrowserBrowseAction): Promise<BrowserAim>
   /** One action, then the page settles; `failed` when it could not be done (gone element, refused address…). */
   act(action: BrowserBrowseAction, signal: AbortSignal): Promise<'ok' | 'failed'>
+  /** The page settles again (the same rule as after an action: a moment, then until it stops loading, ≤ `settleMs`). */
+  settled?(signal: AbortSignal): Promise<void>
   /** No frame the write gate does not see (as a run's `pageClean`). */
   pageClean(): boolean
   closed(): boolean

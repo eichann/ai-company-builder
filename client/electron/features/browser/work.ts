@@ -17,8 +17,8 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  WORK_WRITE_SENDING, topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
-  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason, type WorkWriteState,
+  topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
+  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason, type WorkWriteSeen,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { browserSkillRef } from '../../../../shared/core/browser-skill'
@@ -218,8 +218,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     steps: string | null
     adhoc: boolean
     frames: () => WorkFrame[] | null
-    writes: () => WorkWriteState[]
+    writes: () => WorkWriteSeen[]
     locked: () => boolean
+    /** Counts the operator's actions (its history's numbering), so a held write says which one it followed. */
+    actions?: { n: number }
     /**
      * Before the page is looked at again: every write the page held is decided (and, right after an action that may make
      * one, a moment for the page's script to start it). False: the wait ran out and the writes still held were given up.
@@ -297,15 +299,28 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const action: BrowserBrowseAction = answer
       // A press by position or a typing without a ref: what the window's hit-test finds there now; refused → nothing done.
       const aimed = aimedAction(action) ? (await o.win.aim?.(action)) ?? { ok: false as const, why: 'nothing' as const } : undefined
-      if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); continue }
+      if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); if (o.actions) o.actions.n = history.length; continue }
       const logStep = browseLogStep(action, page, o.host, aimed)
       if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(logStep)
       o.trail.step(logStep, parsed.reason)
+      // Counted before the action, so a write its press makes says it followed this one.
+      if (o.actions) o.actions.n = history.length + 1
       const done = await o.win.act(action, o.cut.signal)
       acted = action.do !== 'wait' && action.do !== 'go'
       history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
     }
     return { kind: 'end', reason: 'rounds', end: stopped('rounds') }
+  }
+
+  /** Until every write the writer holds is recorded, or `ms` passed (false). */
+  async function idleWithin(writer: FrameWriter, ms: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const idle = await Promise.race([
+      writer.idle().then(() => true),
+      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), Math.max(0, ms)) }),
+    ])
+    clearTimeout(timer)
+    return idle
   }
 
   /**
@@ -314,30 +329,45 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
    * out, never sent again (independent review of #856).
    */
   async function idleOrGiveUp(writer: FrameWriter): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const idle = await Promise.race([
-      writer.idle().then(() => true),
-      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), deps.idleMaxMs ?? IDLE_MAX_MS) }),
-    ])
-    clearTimeout(timer)
+    const idle = await idleWithin(writer, deps.idleMaxMs ?? IDLE_MAX_MS)
     if (!idle) writer.abandon('timeout')
     return idle
   }
 
-  /**
-   * Between an operator's action and its next look at the page (agent-browser.md "Writes within frames, in the app"):
-   * right after an action that may make the page write, a moment (`writeStartMs`, one value for every site) for the
-   * page's script to start it; then every held write decided (`idleOrGiveUp`). A cut run does not wait for the moment.
-   */
-  async function settleWrites(writer: FrameWriter, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
-    if (afterAction) {
-      const until = performance.now() + (deps.writeStartMs ?? L.writeStartMs)
-      while (writer.sending() === 0 && !signal.aborted && performance.now() < until) {
-        await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))))
-      }
+  /** Watches up to `ms` for a write the page holds (returns early once one is held or the run is cut). */
+  async function watchForWrite(writer: FrameWriter, ms: number, signal: AbortSignal): Promise<void> {
+    const until = performance.now() + ms
+    while (writer.sending() === 0 && !signal.aborted && performance.now() < until) {
+      await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))))
     }
-    if (writer.sending() === 0) return true
-    return idleOrGiveUp(writer)
+  }
+
+  /**
+   * Between an operator's action and its next look at the page (agent-browser.md "Writes within frames, in the app"), all
+   * within one limit (`idleMaxMs`, the end's 45 s): right after an action that may make the page write, a moment
+   * (`writeStartMs`, one value for every site) for the page's script to start it; every held write recorded; after the
+   * page got its answers, the same moment again for a write it makes next (and its record), as long as it goes on; then
+   * the page settles (the window's rule after an action). Past the limit: a write still on its way is given up (unknown,
+   * the run locked: false); none on its way → the operator looks at the page as it is.
+   */
+  async function settleWrites(writer: FrameWriter, win: BrowserBrowseSurface, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
+    const limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS)
+    const left = () => limit - performance.now()
+    const moment = deps.writeStartMs ?? L.writeStartMs
+    let watch = afterAction
+    let answered = false
+    while (!signal.aborted) {
+      if (watch) await watchForWrite(writer, Math.min(moment, left()), signal)
+      if (writer.sending() === 0) break
+      if (!(await idleWithin(writer, left()))) {
+        if (writer.sending() > 0) { writer.abandon('timeout'); return false }
+        break
+      }
+      answered = true
+      watch = left() > 0
+    }
+    if (answered && !signal.aborted) await win.settled?.(signal)
+    return true
   }
 
   /** The consultation AI's write task. Off: nothing asked, started or sent. Its words only: never the page's text. */
@@ -490,9 +520,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (a !== null && !befores.has(p)) befores.set(p, await readTop(a))
       }
       const workLog: BrowserRunLogStep[] = []
+      const actions = { n: 0 }
       const writer = createFrameWriter({
         companyId, runId: run.runId, host, frames: workFrames(run.frames), api: deps.api,
-        going: current, stepsSoFar: () => workLog.length, now, ...(deps.monoMs ? { monoMs: deps.monoMs } : {}),
+        going: current, stepsSoFar: () => workLog.length, actionsSoFar: () => actions.n, now, ...(deps.monoMs ? { monoMs: deps.monoMs } : {}),
         // A pattern after-read address the held write fits is read right before it (its "before").
         readBefore: async (heldPath) => {
           for (const p of afterReads) {
@@ -505,7 +536,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const worked = await runOperator({
         phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
         adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
-        neverReadFits, writer, log: workLog, trail: workTrail,
+        neverReadFits, writer, log: workLog, trail: workTrail, actions,
       })
       const records = writer.records()
       // The after-read: each declared address, `{created}` from the answers, read again through the read session.
@@ -588,6 +619,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     neverReadFits: (pathAndQuery: string) => boolean
     writer: FrameWriter | null
     log?: BrowserRunLogStep[]
+    actions?: { n: number }
     trail: OperatorTrailRecorder
     /** Set to whether the server took the run's finish (its log and the lock released), awaited before returning. */
     finished?: { ok: boolean }
@@ -632,9 +664,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         phase: o.phase, companyId: o.companyId, browseRunId, host: o.host, win: o.win, operator: o.operator, cli: o.cli, parentEnv: deps.parentEnv(),
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
-        writes: () => (writer ? [...writer.records().map(r => r.outcome), ...Array<WorkWriteState>(writer.sending()).fill(WORK_WRITE_SENDING)] : []),
-        locked: () => writer?.locked() ?? false,
-        settleWrites: (afterAction: boolean) => (writer ? settleWrites(writer, afterAction, o.cut.signal) : Promise.resolve(true)),
+        writes: () => writer?.seen() ?? [], locked: () => writer?.locked() ?? false, ...(o.actions ? { actions: o.actions } : {}),
+        settleWrites: (afterAction: boolean) => (writer ? settleWrites(writer, o.win, afterAction, o.cut.signal) : Promise.resolve(true)),
         cut: o.cut, trail: o.trail, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })
       if (got.kind === 'end') {

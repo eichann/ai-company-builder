@@ -521,7 +521,8 @@ export const BROWSER_OPERATOR_WORK_PROMPT = [
   WORK_STOP_LINE,
   '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）。',
   'writes に「分からない」が出たら、それ以上は書かず stop（blocked）にしてください。',
-  'writes に「送っている途中」があるときは、同じ保存を押し直さず wait で待ってください（答えが来ると次の回で結果に変わります）。',
+  'writes に「送っている途中」（sending）があるときは、同じ保存を押し直さず wait で待ってください（答えが来ると次の回で結果に変わります）。',
+  'writes の各項目には、合った枠（frame。合わなかったときは null）、どの操作のあとに出た書き込みか（afterAction：history の number）、送らなかった理由（why）が付きます。',
   '書き終えたら、手順の「確かめること」をページで確かめ、checks に書いてから done にしてください。checks は人のカードにだけ出ます（AI が確かめた、と表示されます）。',
   ...COMMON_LINES,
 ].join('\n')
@@ -531,7 +532,7 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
   done: '送りました（サイトが答えました）',
   'not-sent': '送っていません',
   unknown: '分からない（届いたか分かりません。もう書かないでください）',
-  refused: '枠に合わないので止めました（送っていません）',
+  refused: 'アプリが止めました（送っていません。理由は why）',
   'site-refused': 'サイトが受け付けませんでした（エラーで、保存されていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
 }
 
@@ -542,6 +543,27 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
 export const WORK_WRITE_SENDING = 'sending' as const
 export const WORK_WRITE_SENDING_WORDS = '送っている途中です（サイトの答えを待っています。同じ保存をもう一度押さないでください）'
 export type WorkWriteState = BrowserRunWriteOutcome | typeof WORK_WRITE_SENDING
+
+/** Why a held write was not sent, as the operator is told it (the app's own reasons; never the site's or the page's words). */
+export const WORK_WRITE_WHY_WORDS = {
+  'outside-frames': '計画の枠のどれにも合わない書き込みでした',
+  'used-up': '合う枠の回数を使い切っていました',
+  'not-made-here': 'この作業で作ったもの以外への書き込みでした',
+  file: 'ファイルを送る書き込みでした（送れません）',
+  unreadable: '中身を読めない書き込みでした',
+  'other-host': '操作するサイトの外への書き込みでした',
+  'run-over': '作業が終わったか止められていたので送っていません',
+  'no-permit': '許可が出なかったか、作業が止まったので送っていません',
+  'stopped-before-send': '送る直前の確かめで止めました（送っていません）',
+} as const
+export type WorkWriteWhy = keyof typeof WORK_WRITE_WHY_WORDS
+
+/**
+ * One held write as the operator is told of it: its state (kept outcome or `sending`), the frame it fitted (null: none
+ * or not matched yet), after which of the operator's actions (its history's number; 0 = before any) it was held, and a
+ * refusal's or a not-sent write's fixed reason. Nothing the page or the site sent.
+ */
+export interface WorkWriteSeen { state: WorkWriteState; frame: number | null; afterAction: number; why: WorkWriteWhy | null }
 
 /**
  * The material of one step of a write run. **The page** (address, title, text, element names and values), the item
@@ -560,8 +582,8 @@ export function workMaterial(input: {
   frames: readonly WorkFrame[] | null
   page: BrowserPageSnapshot
   history: readonly BrowserBrowseHistoryEntry[]
-  /** Each held write so far: its kept outcome, then the ones still being sent (`sending`). */
-  writes: readonly WorkWriteState[]
+  /** Each held write so far: the kept ones, then the ones still being sent (`sending`). */
+  writes: readonly WorkWriteSeen[]
   notes: string
   round: number
   /** The run's budget of steps (the server's answer: browser-run-budget.ts). */
@@ -589,8 +611,13 @@ export function workMaterial(input: {
       ...(p.omitted ? { elementsLeftOut: p.omitted } : {}),
       ...(p.screen ? { screen: { width: p.screen[0], height: p.screen[1] } } : {}),
     },
-    history: input.history.map(h => ({ ...h })),
-    writes: input.writes.map((w, i) => ({ number: i + 1, result: w === WORK_WRITE_SENDING ? WORK_WRITE_SENDING_WORDS : WORK_WRITE_WORDS[w] })),
+    history: input.history.map((h, i) => ({ number: i + 1, ...h })),
+    writes: input.writes.map((w, i) => ({
+      number: i + 1, frame: w.frame, afterAction: w.afterAction,
+      result: w.state === WORK_WRITE_SENDING ? WORK_WRITE_SENDING_WORDS : WORK_WRITE_WORDS[w.state],
+      ...(w.state === WORK_WRITE_SENDING ? { sending: true } : {}),
+      ...(w.why ? { why: WORK_WRITE_WHY_WORDS[w.why] } : {}),
+    })),
     notes: o(input.notes),
     round: input.round,
     roundsLeft: input.rounds - input.round,

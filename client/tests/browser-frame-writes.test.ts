@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
+  WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -490,6 +490,10 @@ interface WorkWorld {
   siteDelayMs?: number
   /** The page saves by itself (a timer) right as it is looked at for this snapshot (1-based), after main's wait. */
   saveOnSnapshot?: number
+  /** After the site's answer reaches the page, the page makes one more write (outside the frames) this long after. */
+  followUpMs?: number
+  /** After a press the page keeps making a write outside the frames every this many ms (a runaway autosave). */
+  autosaveEveryMs?: number
   frameConfirm: () => Promise<BrowserLinesAnswer>
   frameGet: () => Promise<BrowserLinesAnswer>
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
@@ -525,6 +529,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
   let permits = 0
   let shots = 0
   let snapshots = 0
+  let stopAutosave = false
   let hooks: Parameters<BrowserBrowseSurface['enter']>[1]
   const surface: BrowserBrowseSurface = {
     async enter(_stopped, work) { hooks = work; w.calls.push('enter'); return true },
@@ -544,12 +549,20 @@ function workWorld(over: Partial<WorkWorld> = {}) {
         const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, '{"title":"冬のクーポン","_token":"csrf-9"}',
           w.sendHangs ? () => new Promise<void>(() => {}) : w.siteDelayMs ? () => new Promise<void>(r => setTimeout(r, w.siteDelayMs)) : undefined)
         const pageHooks = hooks
+        if (w.autosaveEveryMs !== undefined) {
+          const timer = setInterval(() => { if (stopAutosave) clearInterval(timer); else void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.autosaveEveryMs)
+        }
+        if (w.followUpMs !== undefined) {
+          void pageHooks.holdWrite(page).then(() => setTimeout(() => { void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.followUpMs))
+          return 'ok'
+        }
         if (w.writeDelayMs !== undefined) { setTimeout(() => { void pageHooks.holdWrite(page) }, w.writeDelayMs); return 'ok' }
         const holding = hooks.holdWrite(page)
         if (!w.pressDoesNotWait) await holding
       }
       return 'ok'
     },
+    async settled() { w.calls.push('settled') },
     pageClean: () => true,
     closed: () => false,
   }
@@ -594,7 +607,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     companyId: COMPANY, conversationId: 'conv-1', companyRoot: w.skillSteps ? '/company' : null, site: input.site, task: input.task, skill: input.skill, items: input.items,
     signal: new AbortController().signal, onCard: id => cards.push(id),
   }), [HOST])
-  return { w, wiring, tool, cards }
+  return { w, wiring, tool, cards, stopAutosave: () => { stopAutosave = true } }
 }
 
 function started(o: { needsApproval: boolean; adhoc?: boolean; afterRead?: string[] }) {
@@ -738,9 +751,46 @@ test('a held write not yet decided is told to the operator as being sent (its pe
   assert.deepEqual(writer.records().map(r => r.outcome), ['done', 'done'])
   const material = workMaterial({
     phase: 'work', task: 't', items: [], steps: null, frames: [frame()], page: snapshot(), history: [],
-    writes: ['done', WORK_WRITE_SENDING], notes: '', round: 2, rounds: 20,
-  }) as { writes: Array<{ number: number; result: string }> }
-  assert.deepEqual(material.writes, [{ number: 1, result: '送りました（サイトが答えました）' }, { number: 2, result: WORK_WRITE_SENDING_WORDS }])
+    writes: [{ state: 'done', frame: 1, afterAction: 1, why: null }, { state: 'refused', frame: null, afterAction: 2, why: 'file' }, { state: WORK_WRITE_SENDING, frame: 1, afterAction: 3, why: null }],
+    notes: '', round: 2, rounds: 20,
+  }) as { writes: unknown[] }
+  assert.deepEqual(material.writes, [
+    { number: 1, frame: 1, afterAction: 1, result: '送りました（サイトが答えました）' },
+    { number: 2, frame: null, afterAction: 2, result: WORK_WRITE_WORDS.refused, why: WORK_WRITE_WHY_WORDS.file },
+    { number: 3, frame: 1, afterAction: 3, result: WORK_WRITE_SENDING_WORDS, sending: true },
+  ])
+})
+
+test('the page goes on after the site\'s answer: a write it makes next is waited for too, the page settles, and the operator is told which frame and which action each write came from', async () => {
+  const { w, tool } = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], writeStartMs: 1000, followUpMs: 150,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  const writes = (w.materials[1] as { writes: unknown[] }).writes
+  assert.deepEqual(writes, [
+    { number: 1, frame: 1, afterAction: 1, result: WORK_WRITE_WORDS.done },
+    { number: 2, frame: null, afterAction: 1, result: WORK_WRITE_WORDS.refused, why: WORK_WRITE_WHY_WORDS['outside-frames'] },
+  ], JSON.stringify(writes))
+  // The page settled (the window's rule) after its answers, before the operator looked again.
+  const i = w.calls.indexOf('act click')
+  assert.deepEqual(w.calls.slice(i + 1).filter(c => c === 'settled' || c.startsWith('step')).slice(0, 2), ['settled', 'step work'])
+  // The history the operator reads is numbered the same way.
+  assert.equal(((w.materials[1] as { history: Array<{ number: number }> }).history[0]).number, 1)
+})
+
+test('a page that keeps writing (outside the frames) does not hold the operator past the limit; with nothing on its way it looks at the page as it is', async () => {
+  const world = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], writeStartMs: 1000, autosaveEveryMs: 60, idleMaxMs: 500,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const said = await world.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  world.stopAutosave()
+  assert.equal(world.w.materials.length, 2, 'the operator looks again')
+  assert.notEqual(said, workWordsForAi({ kind: 'unknown' }, [], []))
+  // The press's own save went once; the autosaves were refused, never asked for.
+  assert.equal(world.w.calls.filter(c => c === 'framePermit').length, 1)
+  assert.equal(world.w.site.requests.length, 1)
 })
 
 test('a write the page makes as the operator looks again is shown to it as being sent, never left out', async () => {

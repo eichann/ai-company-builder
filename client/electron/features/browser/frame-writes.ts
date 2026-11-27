@@ -20,7 +20,7 @@
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
   createdIdOf, pickFrame, readHeldWrite, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
-  type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame,
+  type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame, type WorkWriteSeen, type WorkWriteWhy,
 } from '../../../shared/browser-frame-writes'
 import { browserMadeFrom } from '../../../../shared/core/browser-skill'
 import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
@@ -49,6 +49,10 @@ export interface FrameWriteRecord {
   /** The server's write (its permit) and when it was permitted, when one was given (the card's answer about a write in doubt). */
   write?: number | null
   permittedAt?: string | null
+  /** The frame it fitted (null: none), after which operator action it was held, and why it was not sent (fixed words). */
+  frame: number | null
+  afterAction: number
+  why: WorkWriteWhy | null
 }
 
 export interface FrameWriterDeps {
@@ -62,6 +66,8 @@ export interface FrameWriterDeps {
   going(): boolean
   /** How many operator steps were logged so far (where a write step sits in the run log). */
   stepsSoFar(): number
+  /** How many actions the operator took so far (its history's numbering: which action a write followed). Default 0. */
+  actionsSoFar?(): number
   /** An after-read address to read before the first write that fits it (its "before"), awaited before the permit. */
   readBefore?(heldPath: string): Promise<void>
   now?: () => number
@@ -106,14 +112,15 @@ export function createFrameWriter(deps: FrameWriterDeps) {
 
   /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
   /** `write` / `permittedAt`: its permit once given, so a write given up as unknown can still be answered about on the card. */
-  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null }
+  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null; afterAction: number }
+  type Kept = Omit<FrameWriteRecord, 'frame' | 'afterAction' | 'why'> & { why?: WorkWriteWhy }
   const pending = new Set<Held>()
 
-  const keepRecord = (h: Held, r: FrameWriteRecord, outcome: BrowserRunWriteOutcome) => {
+  const keepRecord = (h: Held, r: Kept, outcome: BrowserRunWriteOutcome) => {
     pending.delete(h)
     if (h.recorded) return
     h.recorded = true
-    records.push(r)
+    records.push({ ...r, frame: h.frame, afterAction: h.afterAction, why: r.why ?? null })
     if (log.length < 60) log.push(workWriteLogStep({ after: deps.stepsSoFar(), frame: h.frame, method: h.method, path: h.path, host: deps.host, outcome }))
   }
 
@@ -129,16 +136,17 @@ export function createFrameWriter(deps: FrameWriterDeps) {
 
   async function decide(held: HeldPageWrite, h: Held): Promise<HeldPageWriteAnswer> {
     const fail: HeldPageWriteAnswer = { kind: 'fail' }
-    const keep = (r: FrameWriteRecord, outcome: BrowserRunWriteOutcome) => keepRecord(h, r, outcome)
+    const keep = (r: Kept, outcome: BrowserRunWriteOutcome) => keepRecord(h, r, outcome)
     const shapeOf = readHeldWrite({ method: held.method, url: held.url, host: deps.host, contentType: held.contentType, body: held.body })
     // Stopped, locked, over, abandoned: nothing is sent (the page sees a failure).
     if (closed || locked || over || !deps.going()) {
-      keep({ line: h.line, outcome: originalMayHaveGone ? 'unknown' : 'not-sent', status: null, sent: null, path: null, answerText: null }, originalMayHaveGone ? 'unknown' : 'not-sent')
+      keep({ line: h.line, outcome: originalMayHaveGone ? 'unknown' : 'not-sent', status: null, sent: null, path: null, answerText: null, why: 'run-over' }, originalMayHaveGone ? 'unknown' : 'not-sent')
       return fail
     }
     // A file, an unreadable body, another host, `_method` twice: refused, never asked for.
     if (!shapeOf.ok) {
-      keep({ line: h.line, outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
+      const why: WorkWriteWhy = shapeOf.problem === 'host' ? 'other-host' : shapeOf.problem === 'file' ? 'file' : 'unreadable'
+      keep({ line: h.line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why }, 'refused')
       return fail
     }
     const shape = shapeOf.shape
@@ -147,7 +155,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // Outside every frame (an autosave, another target, a frame used up): refused, never asked for.
     const picked = pickFrame(deps.frames, shape, made)
     if ('mismatch' in picked) {
-      keep({ line: workRefusedWriteLine(shape.method, held.url, deps.host), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
+      const why: WorkWriteWhy = picked.mismatch === 'used-up' ? 'used-up' : picked.mismatch === 'made' ? 'not-made-here' : 'outside-frames'
+      keep({ line: workRefusedWriteLine(shape.method, held.url, deps.host), outcome: 'refused', status: null, sent: null, path: null, answerText: null, why }, 'refused')
       return fail
     }
     const { frame, request } = picked
@@ -194,7 +203,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
         return fail
       }
       if (permitted && !(await report(permitted.write, 'not_sent', 'permit-late'))) locked = true
-      keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, 'not-sent')
+      keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null, why: permitted ? 'stopped-before-send' : 'no-permit' }, 'not-sent')
       return fail
     }
     const write = (permitted as BrowserFramePermit | null)?.write ?? 0
@@ -237,7 +246,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     hold(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
       let path = '/'
       try { path = new URL(held.url).pathname } catch { /* kept as / */ }
-      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null }
+      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null, afterAction: deps.actionsSoFar?.() ?? 0 }
       pending.add(h)
       const next = chain.then(() => decide(held, h), () => decide(held, h))
       chain = next.catch(() => undefined)
@@ -275,6 +284,14 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     },
     /** Writes held and not yet kept (on their way, or queued behind one): the operator is told they are being sent. */
     sending: () => pending.size,
+    /**
+     * Every write held so far as the operator is told of it: the kept ones in order, then the ones being sent — the frame
+     * (once matched), the action it followed, the outcome or `sending`, a refusal's fixed reason. No value, path or text.
+     */
+    seen: (): WorkWriteSeen[] => [
+      ...records.map(r => ({ state: r.outcome, frame: r.frame, afterAction: r.afterAction, why: r.why })),
+      ...[...pending].map(h => ({ state: 'sending' as const, frame: h.frame, afterAction: h.afterAction, why: null })),
+    ],
     gaveUp: () => gaveUp,
     locked: () => locked,
     records: () => records.slice(),
