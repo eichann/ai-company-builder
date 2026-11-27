@@ -15,7 +15,7 @@ import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames } from '../electron/features/doc-frames/protocol'
 import { createDocViews, type DocViewHandle, type DocViewHooks, type DocViewPort } from '../electron/features/doc-frames/views'
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
-import { createDrivePlayers, type DrivePlayerHooks, type DriveViewPickResult, type EmbedBox } from '../electron/features/doc-frames/players'
+import { ACTION_GUARD_MS, createDrivePlayers, type DrivePlayerHooks, type DriveViewPickResult } from '../electron/features/doc-frames/players'
 import { drivePlayerPage, PLAYER_PAGE_CSP } from '../electron/features/doc-frames/player-page'
 import { embedPlacement, overlayPlacement, parseByteRange, parseContentRange, parseDrivePlayerUrl, drivePlayerRefusal, type DrivePlayerPlacement } from '../shared/doc-drive-player'
 import type { DocViewBounds, DocViewEvent } from '../shared/doc-frame'
@@ -78,7 +78,20 @@ test('the server\'s refusal is said in its own words; a file that is not a video
 /** A clip the fake stream route serves, at most `chunk` bytes per answer (the real route's ceiling). */
 const CLIP = Buffer.from(Array.from({ length: 2500 }, (_, i) => i % 251))
 
-function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (start: number) => number } = {}) {
+/** An element of the document's page as its DOM has it: what its `src` says, where it is laid out. */
+type PageElement = { src: string; box: DocViewBounds }
+
+function world(options: {
+  chunk?: number
+  picked?: Set<string>
+  wrongStart?: (start: number) => number
+  /** The server's answer for this range is cut after `bytes` (its deadline, a lost connection). */
+  cutAnswer?: (range: string | null) => number | null
+  /** The server answers more than the range it says (`extra` bytes past it). */
+  extra?: number
+  /** The document's page never answers where its embeds are (its main thread busy). */
+  busyPage?: boolean
+} = {}) {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-player-')))
   const root = path.join(base, 'company')
   fs.mkdirSync(path.join(root, '営業'), { recursive: true })
@@ -91,7 +104,20 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
   const hooksOf = new Map<number, DocViewHooks>()
   const shownUrl = new Map<number, string>()
   /** What each document view's page lays out (the document's own DOM: it may lie). */
-  const embeds = new Map<number, EmbedBox[]>()
+  const embeds = new Map<number, PageElement[]>()
+  /** The ids main asked the page about, each read. */
+  const asked: string[][] = []
+  /** The shell's selector, played on the fake page: the first element naming Drive and the id. */
+  const readEmbeds = (id: number) => async (ids: readonly string[]) => {
+    asked.push([...ids])
+    if (options.busyPage) return new Promise<never>(() => {})
+    return ids.flatMap(want => {
+      const found = (embeds.get(id) ?? []).find(e => /drive\.google\.com/i.test(e.src) && e.src.includes(want))
+      return found ? [{ id: want, box: found.box }] : []
+    })
+  }
+  /** Time as the players see it (presses are judged by it). */
+  let clock = 1_000_000
   const areas = new Map<number, DocViewBounds | null>()
   let next = 100
   const load = async (id: number, url: string) => {
@@ -117,12 +143,14 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
         inReviewWorld: async () => null,
         releaseKeyboard: () => {},
         placedArea: () => areas.get(id) ?? null,
-        readEmbeds: async () => embeds.get(id) ?? [],
+        readEmbeds: readEmbeds(id),
       }
     },
   }
   // The players' shell: views that record where they are and what they load.
-  const playerViews = new Map<number, { hooks: DrivePlayerHooks; loads: string[]; placed: DrivePlayerPlacement | null; destroyed: boolean }>()
+  const playerViews = new Map<number, { hooks: DrivePlayerHooks; loads: string[]; placed: DrivePlayerPlacement | null; destroyed: boolean; suspended: number }>()
+  /** The order the players' views are stacked in the window (the last on top). */
+  const stack: number[] = []
   let nextPlayer = 500
   const streams: Array<{ companyId: string; fileId: string; range: string | null; signal: AbortSignal }> = []
   const picked = options.picked ?? new Set<string>()
@@ -139,9 +167,17 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
       return {
         async create(_windowId, hooks) {
           const id = nextPlayer++
-          const view = { hooks, loads: [] as string[], placed: null as DrivePlayerPlacement | null, destroyed: false }
+          const view = { hooks, loads: [] as string[], placed: null as DrivePlayerPlacement | null, destroyed: false, suspended: 0 }
           playerViews.set(id, view)
-          return { id, load: url => { view.loads.push(url) }, place: placement => { view.placed = placement }, destroy: () => { view.destroyed = true } }
+          stack.push(id)
+          return {
+            id,
+            load: url => { view.loads.push(url) },
+            place: placement => { view.placed = placement },
+            raise: () => { stack.splice(stack.indexOf(id), 1); stack.push(id) },
+            suspend: async () => { view.suspended++; return 12.5 },
+            destroy: () => { view.destroyed = true },
+          }
         },
       }
     },
@@ -151,12 +187,21 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
       const r = parseByteRange(range)!
       const end = Math.min(r.end ?? CLIP.length - 1, CLIP.length - 1, r.start + chunk - 1)
       const said = options.wrongStart?.(r.start) ?? r.start
-      return new Response(CLIP.subarray(r.start, end + 1), { status: 206, headers: { 'Content-Type': 'video/mp4', 'Content-Range': `bytes ${said}-${end}/${CLIP.length}`, 'Content-Length': String(end - r.start + 1) } })
+      const cut = options.cutAnswer?.(range) ?? null
+      // `extra`: bytes past the range said that are not the file's (never passed on).
+      const bytes = Buffer.concat([CLIP.subarray(r.start, end + 1), Buffer.alloc(options.extra ?? 0, 0xee)])
+      const body = cut === null ? bytes : new ReadableStream<Uint8Array>({
+        // The bytes before the cut are read, then the answer fails.
+        start(out) { if (cut > 0) out.enqueue(bytes.subarray(0, cut)) },
+        pull(out) { out.error(new Error('the answer was cut')) },
+      })
+      return new Response(body, { status: 206, headers: { 'Content-Type': 'video/mp4', 'Content-Range': `bytes ${said}-${end}/${CLIP.length}`, 'Content-Length': String(end - r.start + 1) } })
     },
     pick: async (_companyId, fileId) => { picks.push(fileId); return pickAnswer(fileId) },
     openExternal: async url => { opened.push(url) },
     notify: (windowId, event) => events.push([windowId, event]),
     later: (fn, ms) => { if (ms === 0) queued.push(fn); return () => {} },
+    now: () => clock,
   })
   const views = createDocViews({
     frames,
@@ -177,13 +222,15 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
     return result.viewId
   }
   /** The document shown over the area with its embeds laid out where the page says. */
-  const show = async (viewId: number, laidOut: EmbedBox[]) => {
+  const show = async (viewId: number, laidOut: PageElement[]) => {
     embeds.set(viewId, laidOut)
     await handlers.get('docView:setBounds')!(ev(true), viewId, AREA)
     await settle()
   }
   const playersOf = () => [...playerViews.entries()].filter(([, v]) => !v.destroyed)
-  const press = async (playerId: number, action: Parameters<DrivePlayerHooks['onAction']>[1]) => {
+  /** The member's press, settled (past the guard against a player that just appeared or moved). */
+  const press = async (playerId: number, action: Parameters<DrivePlayerHooks['onAction']>[1], after = ACTION_GUARD_MS + 1) => {
+    clock += after
     playerViews.get(playerId)!.hooks.onAction(playerId, action)
     await settle()
   }
@@ -193,7 +240,9 @@ function world(options: { chunk?: number; picked?: Set<string>; wrongStart?: (st
   }
   const tokenOf = (playerId: number) => parseDrivePlayerUrl(playerViews.get(playerId)!.loads.at(-1))!.token
   return {
-    root, views, players, handlers, ev, open, show, settle, playersOf, playerViews, press, page, tokenOf, streams, picks, opened, events, picked, load, shownUrl, hooksOf,
+    root, views, players, handlers, ev, open, show, settle, playersOf, playerViews, press, page, tokenOf, streams, picks, opened, events, picked, load, shownUrl, hooksOf, asked, stack, embeds,
+    /** Time passes (presses are judged by it). */
+    pass: (ms: number) => { clock += ms },
     server: () => server!,
     setPick: (fn: typeof pickAnswer) => { pickAnswer = fn },
   }
@@ -394,4 +443,124 @@ test('another page of the folder closes the player over the area too (the band\'
   await w.load(viewId, `${own.slice(0, own.lastIndexOf('/'))}/other.html`)
   await w.settle()
   assert.equal(w.playersOf().length, 0)
+})
+
+test('main asks the page only about the ids it read (never reading what an element names); a read the page does not answer is not followed by another', async () => {
+  const w = world()
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  assert.ok(w.asked.length > 0)
+  assert.ok(w.asked.every(ids => JSON.stringify(ids) === JSON.stringify([A, B])), JSON.stringify(w.asked))
+  const busy = world({ busyPage: true })
+  const busyView = await busy.open()
+  await busy.show(busyView, [{ src: drive(A), box: box(0, 0) }])
+  // Placed again and again, its page reloaded, while the first read hangs: no second read.
+  for (let i = 0; i < 5; i++) {
+    await busy.handlers.get('docView:setBounds')!(busy.ev(true), busyView, { ...AREA, x: AREA.x + i + 1 })
+    busy.hooksOf.get(busyView)!.onPageStart(busyView, busy.shownUrl.get(busyView)!)
+    await busy.settle()
+  }
+  assert.equal(busy.asked.length, 1)
+})
+
+test('a press is not taken while the player is hidden or within ACTION_GUARD_MS of appearing, moving or being raised (clickjacking)', async () => {
+  const w = world({ picked: new Set([A]) })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id]] = w.playersOf()
+  await w.press(id, 'play', 10)
+  assert.equal(w.streams.length, 0, 'just appeared')
+  await w.press(id, 'play', ACTION_GUARD_MS + 1)
+  assert.ok(w.streams.length > 0, 'settled: taken')
+  // Moved by the page's layout (the next read): a press right after is not taken.
+  const before = w.opened.length
+  w.embeds.set(viewId, [{ src: drive(A), box: box(40, 40) }])
+  await w.handlers.get('docView:setBounds')!(w.ev(true), viewId, { ...AREA, y: AREA.y + 1 })
+  await w.settle()
+  await w.press(id, 'browser', 10)
+  assert.equal(w.opened.length, before)
+  await w.handlers.get('docView:setBounds')!(w.ev(true), viewId, null)
+  await w.settle()
+  await w.press(id, 'browser')
+  assert.equal(w.opened.length, before, 'hidden: nothing')
+})
+
+test('a player over the area stays above the embeds\' players made after it (raised, and its presses wait again)', async () => {
+  const w = world({ picked: new Set([A, B]) })
+  const viewId = await w.open()
+  await w.handlers.get('docView:setBounds')!(w.ev(true), viewId, AREA)
+  await w.settle()
+  await w.handlers.get('docView:playDriveVideo')!(w.ev(true), viewId, 1)
+  await w.settle()
+  const [[overlay]] = w.playersOf()
+  w.pass(ACTION_GUARD_MS * 4)
+  // The page lays out an embed now (read again after its reload): the area does not move.
+  w.embeds.set(viewId, [{ src: drive(A), box: box(0, 0) }])
+  w.hooksOf.get(viewId)!.onPageStart(viewId, w.shownUrl.get(viewId)!)
+  await w.settle()
+  assert.equal(w.playersOf().length, 2, 'an embed\'s player made after it')
+  assert.equal(w.stack.at(-1), overlay, 'the player over the area is on top')
+  await w.press(overlay, 'play', 10)
+  assert.equal(w.streams.length, 0, 'raised: a press right after is not taken')
+})
+
+test('hidden while playing (an overlay, scrolled out): paused, its streams aborted, ［続きから再生］ goes on from there', async () => {
+  const w = world({ picked: new Set([A]), chunk: 100 })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id, view]] = w.playersOf()
+  await w.press(id, 'play')
+  const answer = await w.server().serve({ url: `acb-drive-video://${w.tokenOf(id)}/video`, method: 'GET', range: 'bytes=0-' })
+  await answer.body!.getReader().read()
+  const live = w.streams.at(-1)!
+  await w.handlers.get('docView:setBounds')!(w.ev(true), viewId, null)
+  await w.settle()
+  assert.equal(view.suspended, 1, 'its video paused')
+  assert.equal(live.signal.aborted, true, 'its stream aborted')
+  assert.match(await w.page(id), /続きから再生/)
+  assert.doesNotMatch(await w.page(id), /<video/, 'nothing plays unseen')
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  await w.press(id, 'play')
+  assert.match(await w.page(id), /src="video#t=12\.5"/)
+})
+
+test('a server answer cut in the middle is asked again from the byte not yet passed on; a longer one is cut to its range', async () => {
+  const cutOnce = new Set<string>()
+  const w = world({ picked: new Set([A]), chunk: 1000, cutAnswer: range => (range === 'bytes=1000-2499' && !cutOnce.has(range) ? (cutOnce.add(range), 300) : null) })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id]] = w.playersOf()
+  await w.press(id, 'play')
+  w.streams.length = 0
+  const answer = await w.server().serve({ url: `acb-drive-video://${w.tokenOf(id)}/video`, method: 'GET', range: 'bytes=0-' })
+  assert.deepEqual(Buffer.from(await answer.arrayBuffer()), CLIP)
+  assert.deepEqual(w.streams.map(s => s.range), ['bytes=0-', 'bytes=1000-2499', 'bytes=1300-2499', 'bytes=2300-2499'])
+  const longer = world({ picked: new Set([A]), chunk: 1000, extra: 50 })
+  const lv = await longer.open()
+  await longer.show(lv, [{ src: drive(A), box: box(0, 0) }])
+  const [[lid]] = longer.playersOf()
+  await longer.press(lid, 'play')
+  const cutAnswer = await longer.server().serve({ url: `acb-drive-video://${longer.tokenOf(lid)}/video`, method: 'GET', range: 'bytes=0-' })
+  assert.deepEqual(Buffer.from(await cutAnswer.arrayBuffer()), CLIP, 'exactly the bytes asked, in order')
+})
+
+test('a server answer cut again and again ends with an error (asked again at most REASK_MAX times in a row)', async () => {
+  const w = world({ picked: new Set([A]), chunk: 1000, cutAnswer: range => (range?.startsWith('bytes=1000-') ? 0 : null) })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id]] = w.playersOf()
+  await w.press(id, 'play')
+  const answer = await w.server().serve({ url: `acb-drive-video://${w.tokenOf(id)}/video`, method: 'GET', range: 'bytes=0-' })
+  await assert.rejects(answer.arrayBuffer())
+})
+
+test('HEAD on the video starts no server stream', async () => {
+  const w = world({ picked: new Set([A]) })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id]] = w.playersOf()
+  await w.press(id, 'play')
+  const before = w.streams.length
+  assert.equal((await w.server().serve({ url: `acb-drive-video://${w.tokenOf(id)}/video`, method: 'HEAD', range: 'bytes=0-' })).status, 404)
+  assert.equal(w.streams.length, before)
 })

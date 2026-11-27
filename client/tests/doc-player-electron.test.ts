@@ -34,12 +34,26 @@ interface Result {
   playerUrls: string[]
   hiddenWithDocument: boolean[]
   keyboardBeforePress: { app: boolean; player: boolean; doc: boolean; windowFocused: boolean }
+  keyboardAfterLoads: { app: boolean; player: boolean; windowFocused: boolean }
   picks: string[]
   played: { ok: boolean; duration?: number; at?: number; page?: string }
   streamRequests: Array<{ range: string | null; status: number; cookie: string | null }>
   otherPlayerReach: string
   otherPlayerServerRequests: number
   bStreamingBeforeClose: boolean
+  whileHidden: { video: boolean; text: string }
+  resumed: { src: string; at: number }
+  navigationStayed: boolean
+  popup: string
+  windowsAfterPopup: number
+  permission: string
+  redirectFollowed: boolean
+  sessionFetch: string
+  sessionFetchReached: number
+  schemeServedOn: { player: boolean; document: boolean; app: boolean }
+  overlayOnTop: boolean
+  bRanges: string[]
+  bAfterCuts: { error?: number | null; buffered?: number; page?: string }
   bClosedEarly: boolean
   playersAfterClose: number
   countsAfterClose: { players: number; streams: number }
@@ -96,10 +110,11 @@ test('the players hide with the document (an overlay of the app)', { skip }, () 
 })
 
 test('loading the players never takes the keyboard from the app', { skip }, t => {
-  // The window must hold the system's focus to measure this: on a computer where another app took it back
-  // (a developer's busy desktop), say so rather than pass without measuring. CI's runner keeps it.
-  if (!result.keyboardBeforePress.windowFocused) { t.skip('the window did not keep the focus on this computer'); return }
+  // The window must hold the system's focus to measure this: on a developer's computer where another app
+  // took it back, say so rather than pass without measuring. On CI it must be measured.
+  if (!(result.keyboardBeforePress.windowFocused && result.keyboardAfterLoads.windowFocused) && !process.env.CI) { t.skip('the window did not keep the focus on this computer'); return }
   assert.deepEqual(result.keyboardBeforePress, { app: true, player: false, doc: false, windowFocused: true })
+  assert.deepEqual(result.keyboardAfterLoads, { app: true, player: false, windowFocused: true }, 'its pages loaded again while shown took nothing either')
 })
 
 test('［ここで再生］: not picked → the Picker, then the video plays and seeks through the scheme, 206 by 206 with the member\'s session', { skip }, () => {
@@ -129,4 +144,31 @@ test('closing the document closes its players and aborts a stream on the server'
 test('without the scheme\'s `standard` privilege the video never gets past its first range', { skip }, () => {
   assert.equal(withoutStandard.played.ok, false)
   assert.equal(result.played.ok, true, 'control')
+})
+
+test('hidden while it plays: paused and stopped (nothing plays unseen); ［続きから再生］ goes on from where it was', { skip }, () => {
+  assert.equal(result.whileHidden.video, false)
+  assert.match(result.whileHidden.text, /一時停止しました/)
+  assert.equal(result.resumed.src, 'video#t=0.5')
+  assert.ok(Math.abs(result.resumed.at - 0.5) < 0.1, JSON.stringify(result.resumed))
+})
+
+test('the player\'s own guards: only its own page, no popup, no redirect, no permission; its session lets out nothing else and alone serves the scheme', { skip }, () => {
+  assert.equal(result.navigationStayed, true, 'another player\'s page, the web, data:, a local address')
+  assert.deepEqual([result.popup, result.windowsAfterPopup], ['null', 0])
+  assert.equal(result.redirectFollowed, false)
+  assert.equal(result.permission, 'denied')
+  assert.deepEqual([result.sessionFetch, result.sessionFetchReached], ['refused', 0])
+  assert.deepEqual(result.schemeServedOn, { player: true, document: false, app: false })
+})
+
+test('a player over the area stays above an embed\'s player made after it', { skip }, () => {
+  assert.equal(result.overlayOnTop, true)
+})
+
+test('the server cutting its answers at its deadline (the player reading slowly): main asks again from where they stopped and the video goes on', { skip }, () => {
+  const starts = result.bRanges.map(r => Number(/^bytes=(\d+)/.exec(r)?.[1]))
+  assert.ok(starts.some(start => start > 0 && start % (512 * 1024) !== 0), `asked again mid-chunk: ${JSON.stringify(result.bRanges)}`)
+  assert.equal(result.bAfterCuts.error ?? null, null, JSON.stringify(result.bAfterCuts))
+  assert.ok((result.bAfterCuts.buffered ?? 0) > 0)
 })

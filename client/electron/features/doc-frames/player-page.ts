@@ -73,8 +73,15 @@ export function drivePlayerPage(view: DrivePlayerView, overlay: boolean): string
     case 'picking':
       body = `<main><p class="error">ブラウザに Google Drive の画面を開きました。この動画で間違いなければ［選択］を押してください。</p><div class="actions">${button('cancel', 'やめる')}</div></main>`
       break
-    case 'playing':
-      body = `<main class="playing"><video controls autoplay playsinline src="video"></video></main><script>${SCRIPT}</script>`
+    case 'playing': {
+      // `#t=` (a media fragment): from where it was paused. Full screen and picture-in-picture are not
+      // offered: the player stays ACB's view over the document, with ACB's mark.
+      const from = view.at && Number.isFinite(view.at) && view.at > 0 ? `#t=${Math.floor(view.at * 10) / 10}` : ''
+      body = `<main class="playing"><video controls controlslist="nofullscreen nodownload noremoteplayback" disablepictureinpicture disableremoteplayback autoplay playsinline src="video${from}"></video></main><script>${SCRIPT}</script>`
+      break
+    }
+    case 'paused':
+      body = `<main><p class="error">プレイヤーが隠れたので、一時停止しました。</p><div class="actions">${button('play', '続きから再生', true)}${button('browser', 'ブラウザで開く')}</div></main>`
       break
     case 'error':
       body = `<main><p class="error" role="alert">${escapeHtml(view.message)}</p><div class="actions">${view.retry ? button('play', 'もう一度', true) : ''}${view.browser ? button('browser', 'ブラウザで開く') : ''}</div></main>`

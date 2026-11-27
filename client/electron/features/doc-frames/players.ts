@@ -25,8 +25,11 @@ import type { DocViewBounds, DocViewEvent } from '../../../shared/doc-frame'
 import type { KeyInput } from '../../../shared/commands/define'
 import { drivePlayerPage, PLAYER_BAR, PLAYER_PAGE_CSP } from './player-page'
 
-/** An element of the document that may embed a video, as the shell read it: its `src` and its box (the view's own DIP). */
-export interface EmbedBox { src: string; box: DocViewBounds }
+/**
+ * Where the document lays out its first element embedding a Drive id main asked about (the view's own DIP).
+ * The shell finds it by the id (a selector main builds), never by reading the page's attributes.
+ */
+export interface EmbedBox { id: string; box: DocViewBounds }
 
 export interface DrivePlayerHandle {
   /** The player page's own id (its webContents id): requests of other pages never reach its token. */
@@ -34,6 +37,10 @@ export interface DrivePlayerHandle {
   load(url: string): void
   /** Place over `placement.bounds` (window DIP) with the video at `placement.stage`, or hide (muted). */
   place(placement: DrivePlayerPlacement | null): void
+  /** Above every other view of its window (a player over the area stays above the embeds' players). */
+  raise(): void
+  /** Pause its video and say where it was (seconds), or null (no video, no answer). */
+  suspend(): Promise<number | null>
   destroy(): void
 }
 
@@ -73,6 +80,7 @@ export interface DrivePlayersDeps {
   notify?(windowId: number, event: DocViewEvent): void
   newToken?: () => string
   later?: (fn: () => void, ms: number) => () => void
+  now?: () => number
   log?: Pick<Console, 'warn'>
 }
 
@@ -80,6 +88,16 @@ export interface DrivePlayersDeps {
 export const EMBED_POLL_MS = 80
 /** Links the member pressed that ［ACB で再生］ may still name, per view (one confirmation at a time). */
 const LINKS_KEPT = 4
+/**
+ * A press in a player this soon after it appeared, moved or was raised is not taken (clickjacking: a
+ * document cannot slide a player under the member's pointer at the moment they click), as a link counts
+ * only within `LINK_INPUT_WINDOW_MS` of the member's input in the document's view.
+ */
+export const ACTION_GUARD_MS = 500
+/** A server answer cut in the middle (its deadline, a lost connection) is asked again from there at most this many times in a row. */
+export const REASK_MAX = 3
+/** The member's presses (the page's own script events — the video failing — are not presses). */
+const PRESSES: ReadonlySet<DrivePlayerAction> = new Set(['play', 'browser', 'close'])
 
 interface Player {
   token: string
@@ -96,6 +114,10 @@ interface Player {
   streams: Set<AbortController>
   /** The Picker flow under way, if any. */
   picking: AbortController | null
+  /** When it last appeared, moved or was raised (`ACTION_GUARD_MS`). */
+  placedAt: number
+  /** Where its video was when it was hidden while playing (seconds): ［続きから再生］ starts there. */
+  resumeAt: number
 }
 
 interface ViewPlayers {
@@ -105,7 +127,7 @@ interface ViewPlayers {
   ids: string[]
   /** Where the document's view is on screen (window DIP), or null while it is hidden. */
   area: DocViewBounds | null
-  readEmbeds: (() => Promise<EmbedBox[]>) | null
+  readEmbeds: ((ids: readonly string[]) => Promise<EmbedBox[]>) | null
   /** Where each id's first embed was last read (the view's own DIP). */
   boxes: Map<string, DocViewBounds>
   embeds: Map<string, Player>
@@ -119,6 +141,7 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   const newToken = deps.newToken ?? (() => randomBytes(16).toString('hex'))
   const later = deps.later ?? ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer) })
   const log = deps.log ?? console
+  const now = deps.now ?? Date.now
   const views = new Map<number, ViewPlayers>()
   /** Token → its player (the scheme's requests). */
   const byToken = new Map<string, Player>()
@@ -150,16 +173,39 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
     if (v?.embeds.get(p.fileId) === p) v.embeds.delete(p.fileId)
   }
 
+  /**
+   * Hidden while playing (an overlay of the app, the document hidden, its embed scrolled out): the video is
+   * paused, its streams aborted (the server releases their slots), and the player waits for the member's
+   * ［続きから再生］ from where it was — it never plays unseen.
+   */
+  const suspend = (p: Player) => {
+    if (p.view.kind !== 'playing') return
+    const asked = p.handle ? p.handle.suspend().catch(() => null) : Promise.resolve(null)
+    void asked.then(at => {
+      if (p.closed || p.view.kind !== 'playing') return
+      p.resumeAt = typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : 0
+      show(p, { kind: 'paused' })
+      for (const stream of p.streams) stream.abort()
+      p.streams.clear()
+    })
+  }
+
   const place = (p: Player, placement: DrivePlayerPlacement | null) => {
-    const same = JSON.stringify(placement) === JSON.stringify(p.placement)
+    if (JSON.stringify(placement) === JSON.stringify(p.placement)) return
+    const wasShown = p.placement !== null
     p.placement = placement
-    if (!same) p.handle?.place(placement)
+    if (placement) p.placedAt = now()
+    if (!p.handle) return
+    p.handle.place(placement)
+    if (!placement && wasShown) suspend(p)
   }
 
   const hooks: DrivePlayerHooks = {
     onAction(playerId, action) {
       const p = byPage.get(playerId)
       if (!p || p.closed) return
+      // A press only on a player the member can see, settled where it is (clickjacking).
+      if (PRESSES.has(action) && (p.placement === null || now() - p.placedAt < ACTION_GUARD_MS)) return
       switch (action) {
         case 'play':
           void start(p)
@@ -210,7 +256,8 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': PLAYER_PAGE_CSP, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' },
         })
       }
-      if (target.kind === 'video') return relay(p, request.range)
+      // HEAD starts no server stream (a `<video>` asks with GET).
+      if (target.kind === 'video' && request.method === 'GET') return relay(p, request.range)
       return notFound()
     },
   }
@@ -218,7 +265,7 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   const make = (viewId: number, fileId: string, overlay: boolean): Player | null => {
     const v = views.get(viewId)
     if (!v) return null
-    const p: Player = { token: newToken(), viewId, fileId, overlay, handle: null, closed: false, view: { kind: 'poster' }, version: 0, placement: null, streams: new Set(), picking: null }
+    const p: Player = { token: newToken(), viewId, fileId, overlay, handle: null, closed: false, view: { kind: 'poster' }, version: 0, placement: null, streams: new Set(), picking: null, placedAt: now(), resumeAt: 0 }
     byToken.set(p.token, p)
     void (shell ??= deps.shell(server)).create(v.windowId, hooks).then(handle => {
       if (!handle) { close(p); return }
@@ -229,6 +276,12 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
       const placement = p.placement
       p.placement = null
       place(p, placement)
+      // A view added later is drawn above the ones before: the player over the area stays on top.
+      const over = views.get(viewId)?.overlay
+      if (!overlay && over?.handle && !over.closed) {
+        over.handle.raise()
+        over.placedAt = now()
+      }
     }, () => close(p))
     return p
   }
@@ -255,17 +308,16 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   const poll = (viewId: number) => {
     const v = views.get(viewId)
     if (!v || v.polling || v.reading || !v.area || v.ids.length === 0 || !v.readEmbeds || v.companyId === null) return
+    // One read at a time, however long it takes: a page whose main thread is busy answers late, and no
+    // further command is sent meanwhile (no pile of DevTools commands behind it).
     v.reading = true
-    v.readEmbeds().then(read => {
+    v.readEmbeds(v.ids).then(read => {
       if (views.get(viewId) !== v) return
       v.reading = false
       const boxes = new Map<string, DocViewBounds>()
-      // An element's `src` names an id only if main read that id from the document itself: the page's
-      // DOM (which its scripts can change) only says where.
-      for (const { src, box } of read) {
-        const id = driveAddressVideoId(src)
-        if (id && v.ids.includes(id) && !boxes.has(id)) boxes.set(id, box)
-      }
+      // Only the ids main read from the document itself are asked for; the page's DOM (which its scripts
+      // can change) only says where.
+      for (const { id, box } of read) if (v.ids.includes(id) && !boxes.has(id)) boxes.set(id, box)
       v.boxes = boxes
       layout(viewId)
       v.polling = later(() => { v.polling = null; poll(viewId) }, EMBED_POLL_MS)
@@ -306,7 +358,7 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   /** ［ここで再生］ / ［もう一度］: play at once when the member may; else the Picker first, then play. */
   async function start(p: Player) {
     const v = views.get(p.viewId)
-    if (!v || p.closed || p.view.kind === 'checking' || p.view.kind === 'picking') return
+    if (!v || p.closed || p.view.kind === 'checking' || p.view.kind === 'picking' || p.view.kind === 'playing') return
     const companyId = v.companyId
     if (companyId === null) { show(p, { kind: 'error', message: DRIVE_PLAYER_WORDS.noCompany, retry: false, browser: true }); return }
     show(p, { kind: 'checking' })
@@ -332,7 +384,11 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
       first = await probe(p, companyId)
       if (p.closed) return
     }
-    if (first.ok) show(p, { kind: 'playing' })
+    if (first.ok) {
+      const at = p.resumeAt
+      p.resumeAt = 0
+      show(p, at > 0 ? { kind: 'playing', at } : { kind: 'playing' })
+    }
     else if (first.status === 0) show(p, { kind: 'error', message: DRIVE_PLAYER_WORDS.offline, retry: true, browser: true })
     else show(p, drivePlayerRefusal(first.status, first.body))
   }
@@ -411,24 +467,59 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
       status = first.status
     }
     let reader = first.body!.getReader()
-    let next = got ? got.end + 1 : 0
+    /** The server part being read ends here (null: a 200 or 416, passed on as it is). */
+    let partEnd: number | null = first.status === 206 && got ? got.end : null
+    /** The next byte owed to the player. */
+    let at = got ? got.start : 0
+    const last = wantedEnd ?? partEnd
+    let tries = 0
+    /** Ask the server for `bytes=<at>-<last>`: a 206 starting exactly there, ending inside, or the answer ends with an error. */
+    const askFrom = async () => {
+      const more = await ask(p, companyId, `bytes=${at}-${last}`, controller)
+      const part = more && more.status === 206 ? parseContentRange(more.headers.get('content-range')) : null
+      if (!more || !part || part.start !== at || last === null || part.end > last) {
+        if (more && !part) streamFailed(p, { kind: 'error', message: DRIVE_PLAYER_WORDS.failed, retry: true, browser: true })
+        await more?.body?.cancel().catch(() => {})
+        throw new Error('the video stopped')
+      }
+      reader = more.body!.getReader()
+      partEnd = part.end
+    }
     const body = new ReadableStream<Uint8Array>({
       async pull(out) {
         try {
           for (;;) {
-            const { done, value } = await reader.read()
-            if (!done) { out.enqueue(value); return }
-            if (wantedEnd === null || next > wantedEnd) { release(); out.close(); return }
-            // The server's answer ended where it said: ask for the rest, from exactly there.
-            const more = await ask(p, companyId, `bytes=${next}-${wantedEnd}`, controller)
-            const part = more && more.status === 206 ? parseContentRange(more.headers.get('content-range')) : null
-            if (!more || !part || part.start !== next || part.end > wantedEnd) {
-              if (more && !part) streamFailed(p, { kind: 'error', message: DRIVE_PLAYER_WORDS.failed, retry: true, browser: true })
-              await more?.body?.cancel().catch(() => {})
-              throw new Error('the video stopped')
+            let chunk: ReadableStreamReadResult<Uint8Array>
+            try {
+              chunk = await reader.read()
+            } catch (error) {
+              // The server's answer was cut in the middle (its own deadline while the player read slowly, a
+              // lost connection): asked again from the byte not yet passed on, a few times in a row at most.
+              if (controller.signal.aborted || partEnd === null || last === null || tries >= REASK_MAX) throw error
+              tries++
+              await askFrom()
+              continue
             }
-            reader = more.body!.getReader()
-            next = part.end + 1
+            if (!chunk.done) {
+              let value = chunk.value
+              // Never more than the part said (a longer answer is cut; bytes are counted per part).
+              if (partEnd !== null && value.byteLength > partEnd - at + 1) {
+                value = value.subarray(0, Math.max(0, partEnd - at + 1))
+                reader.cancel().catch(() => {})
+              }
+              if (value.byteLength === 0) continue
+              at += value.byteLength
+              tries = 0
+              out.enqueue(value)
+              return
+            }
+            if (partEnd === null || last === null || at > last) { release(); out.close(); return }
+            // The part ended (where it said, or short: asked again from there), and more was asked for.
+            if (at <= partEnd) {
+              if (tries >= REASK_MAX) throw new Error('the video stopped')
+              tries++
+            }
+            await askFrom()
           }
         } catch (error) {
           release()
@@ -494,7 +585,7 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
     },
 
     /** The view is on screen at `area` (window DIP), or hidden (null): its players follow, or hide. */
-    placed(viewId: number, area: DocViewBounds | null, readEmbeds?: () => Promise<EmbedBox[]>) {
+    placed(viewId: number, area: DocViewBounds | null, readEmbeds?: (ids: readonly string[]) => Promise<EmbedBox[]>) {
       const v = views.get(viewId)
       if (!v) return
       v.area = area

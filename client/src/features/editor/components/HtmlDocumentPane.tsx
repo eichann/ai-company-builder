@@ -140,7 +140,8 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
           parts={blocked}
           driveVideos={driveVideos}
           onOpenDriveVideo={index => session.openDriveVideo(index)}
-          onPlayDriveVideo={index => session.playDriveVideo(index)}
+          // Main plays a document's videos only for a company (its session): no button without one.
+          onPlayDriveVideo={companyId ? index => session.playDriveVideo(index) : undefined}
           onDismiss={() => session.dismissBand()}
           onAskAi={canAskAi ? () => void runCommand('chat.insertText', { text: rebuildRequestOf(filePath, rootPath) }) : undefined}
         />

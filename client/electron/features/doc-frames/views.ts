@@ -59,11 +59,11 @@ export interface DocViewHandle {
   /** Where the view is on screen now (window DIP, after the app page's zoom and the window's edges), or null while hidden. */
   placedArea?(): DocViewBounds | null
   /**
-   * The elements of the document that may embed a video, with their `src` and where they are laid out (the
-   * view's own DIP), read without running anything in the page (`doc-view.ts`: the view's DevTools
-   * protocol). Untrusted: the page's scripts own its DOM; only main's own ids are ever played.
+   * Where the document lays out its first element embedding each of `ids` (the view's own DIP), found by
+   * the id without running anything in the page or reading its attributes (`doc-view.ts`: the view's
+   * DevTools protocol). Untrusted positions: the page's scripts own its DOM; only main's own ids play.
    */
-  readEmbeds?(): Promise<EmbedBox[]>
+  readEmbeds?(ids: readonly string[]): Promise<EmbedBox[]>
 }
 
 /** What the shell tells the registry about one view. */
@@ -480,7 +480,7 @@ export function createDocViews(deps: DocViewsDeps) {
       if (!view) return
       view.handle.place(bounds === null ? null : docViewBounds(bounds))
       // Its players follow it (hidden with it: an overlay of the app, another tab).
-      deps.players?.placed(viewId as number, view.handle.placedArea?.() ?? null, view.handle.readEmbeds && (() => view.handle.readEmbeds!()))
+      deps.players?.placed(viewId as number, view.handle.placedArea?.() ?? null, view.handle.readEmbeds && (ids => view.handle.readEmbeds!(ids)))
     },
 
     /** The document's zoom, within the steps' range; only its own window may. */

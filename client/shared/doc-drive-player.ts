@@ -130,7 +130,10 @@ export type DrivePlayerView =
   | { kind: 'poster' }
   | { kind: 'checking' }
   | { kind: 'picking' }
-  | { kind: 'playing' }
+  /** `at`: from where it was when it was hidden (seconds). */
+  | { kind: 'playing'; at?: number }
+  /** Hidden while it played: paused, its streams stopped; ［続きから再生］ goes on. */
+  | { kind: 'paused' }
   | { kind: 'error'; message: string; retry: boolean; browser: boolean }
 
 /** The server's stream route refuses a file the member has not picked for viewing (or picked under another account): pick it, then play. */

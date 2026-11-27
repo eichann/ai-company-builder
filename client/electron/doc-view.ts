@@ -84,43 +84,39 @@ function watchCspRefusals(contents: WebContents, report: (url: string) => void, 
   return true
 }
 
-/** The elements that may embed a Drive video (ACB's player goes over them): read through the DevTools protocol only. */
-const EMBED_SELECTORS = ['iframe[src*="drive.google.com" i]', 'video']
-/** At most this many elements are looked at per read (a page of thousands costs no more). */
-const EMBED_NODES_MAX = 40
-/** A read of where the embeds are waits at most this long (a page spinning its CPU never answers). */
-const EMBED_READ_MS = 1000
+/** Per id, at most this many elements naming it are tried for a box (the first laid out one counts). */
+const EMBED_TRIES_PER_ID = 3
+/** An id as main holds it (Drive's characters only): safe inside a CSS string. */
+const SAFE_ID = /^[A-Za-z0-9_-]{10,128}$/
 
 /**
- * Where a document lays out the elements that may embed a Drive video — each one's `src` (a `<video>`'s
- * own, else its first `<source src>`) and its border box in the view's own DIP — read with the view's
- * debugger in main (DOM.querySelectorAll, DOM.getAttributes, DOM.getBoxModel): nothing runs in the
- * page's context and the page cannot call or see it. The page owns its DOM, so this says only where;
- * the registry plays only ids main read from the served bytes. An element with no box (hidden) is left out.
+ * The selector of the elements embedding Drive file `id` (an id main read from the document): an
+ * `<iframe>` or `<video>` whose `src` names Drive and the id, or a `<video>` with such a `<source>`.
+ * Positions only: what an element names is never read back from the page.
  */
-async function readEmbedBoxes(contents: WebContents): Promise<Array<{ src: string; box: DocViewBounds }>> {
+export function embedSelector(id: string): string {
+  const named = `[src*="drive.google.com" i][src*="${id}"]`
+  return `iframe${named}, video${named}, video:has(> source${named})`
+}
+
+/**
+ * Where a document lays out its first element embedding each of `ids` (ids main read from the served
+ * bytes) — its border box in the view's own DIP — read with the view's debugger in main
+ * (DOM.querySelectorAll with `embedSelector`, DOM.getBoxModel): nothing runs in the page's context, the
+ * page cannot call or see it, and **no attribute of the page is read** (a page can make an attribute of
+ * any size). An element with no box (hidden) is left out.
+ */
+async function readEmbedBoxes(contents: WebContents, ids: readonly string[]): Promise<Array<{ id: string; box: DocViewBounds }>> {
   type Send = (method: string, params?: Record<string, unknown>) => Promise<any> // eslint-disable-line @typescript-eslint/no-explicit-any
   const send: Send = (method, params) => contents.debugger.sendCommand(method, params)
-  const attribute = (list: unknown, name: string) => {
-    if (!Array.isArray(list)) return null
-    for (let i = 0; i + 1 < list.length; i += 2) if (String(list[i]).toLowerCase() === name) return typeof list[i + 1] === 'string' ? list[i + 1] as string : null
-    return null
-  }
   const { root } = await send('DOM.getDocument', { depth: 0 })
   // CSS px of the page → the view's DIP (the document's own zoom).
   const scale = contents.getZoomFactor()
-  const out: Array<{ src: string; box: DocViewBounds }> = []
-  let looked = 0
-  for (const selector of EMBED_SELECTORS) {
-    const { nodeIds } = await send('DOM.querySelectorAll', { nodeId: root.nodeId, selector }) as { nodeIds: number[] }
-    for (const nodeId of nodeIds) {
-      if (++looked > EMBED_NODES_MAX) return out
-      let src = attribute((await send('DOM.getAttributes', { nodeId })).attributes, 'src')
-      if (src === null && selector === 'video') {
-        const { nodeId: source } = await send('DOM.querySelector', { nodeId, selector: 'source[src]' }) as { nodeId: number }
-        if (source) src = attribute((await send('DOM.getAttributes', { nodeId: source })).attributes, 'src')
-      }
-      if (src === null || !/drive\.google\.com/i.test(src)) continue
+  const out: Array<{ id: string; box: DocViewBounds }> = []
+  for (const id of ids) {
+    if (!SAFE_ID.test(id)) continue
+    const { nodeIds } = await send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: embedSelector(id) }) as { nodeIds: number[] }
+    for (const nodeId of nodeIds.slice(0, EMBED_TRIES_PER_ID)) {
       let quad: number[]
       try {
         quad = (await send('DOM.getBoxModel', { nodeId })).model.border as number[]
@@ -131,7 +127,8 @@ async function readEmbedBoxes(contents: WebContents): Promise<Array<{ src: strin
       const xs = [quad[0], quad[2], quad[4], quad[6]]
       const ys = [quad[1], quad[3], quad[5], quad[7]]
       // The box model is relative to the viewport (scrolled), in the page's CSS px.
-      out.push({ src, box: { x: Math.min(...xs) * scale, y: Math.min(...ys) * scale, width: (Math.max(...xs) - Math.min(...xs)) * scale, height: (Math.max(...ys) - Math.min(...ys)) * scale } })
+      out.push({ id, box: { x: Math.min(...xs) * scale, y: Math.min(...ys) * scale, width: (Math.max(...xs) - Math.min(...xs)) * scale, height: (Math.max(...ys) - Math.min(...ys)) * scale } })
+      break
     }
   }
   return out
@@ -436,11 +433,11 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
           if (!gone && !contents.isDestroyed() && contents.isFocused()) focusApp()
         },
         placedArea: () => (gone ? null : area),
-        readEmbeds() {
+        // No time limit: the registry sends no other read until this one settled (a busy page answers late;
+        // nothing piles up behind it). A view closed meanwhile rejects it (its debugger goes).
+        readEmbeds(ids) {
           if (gone || !debuggerOn || contents.isDestroyed()) return Promise.resolve([])
-          let timer: ReturnType<typeof setTimeout> | undefined
-          const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), EMBED_READ_MS) })
-          return Promise.race([readEmbedBoxes(contents), limit]).finally(() => clearTimeout(timer))
+          return readEmbedBoxes(contents, ids)
         },
         reload() {
           if (gone || !token) return
@@ -475,6 +472,9 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
 }
 
 
+/** Pause a player's video and answer where it was (seconds): ACB's own page, no document in it. */
+const SUSPEND_CODE = `(() => { const v = document.querySelector('video'); if (!v) return null; v.pause(); return v.currentTime })()`
+
 /** In memory (no `persist:`): ACB's players over a document's Drive videos have a session of their own. */
 export const PLAYER_PARTITION = 'acb-player'
 
@@ -483,6 +483,8 @@ export interface DrivePlayerShellOptions {
   serve: (request: { url: string; method: string; range: string | null }) => Promise<Response>
   /** Whether a request of the page `pageId` may reach `url` (its own player's token only). */
   owns: (pageId: number, url: string) => boolean
+  /** The refusing proxy's port (default: the shell's one, as for documents). */
+  refusingProxy?: () => Promise<number>
   mac?: boolean
   log?: Pick<Console, 'warn'>
 }
@@ -501,10 +503,24 @@ export interface DrivePlayerShellOptions {
 export function createDrivePlayerShell(options: DrivePlayerShellOptions): DrivePlayerPort {
   const log = options.log ?? console
   const mac = options.mac ?? process.platform === 'darwin'
-  let prepared: Session | null = null
-  const prepare = () => {
-    if (prepared) return prepared
+  let prepared: Promise<Session> | null = null
+  let schemeServed = false
+  /** Windows whose page is full screen through the HTML API (the viewer's 「全画面」): Escape in a player leaves it. */
+  const htmlFullScreen = new Set<number>()
+  const watched = new Set<number>()
+  const watchFullScreen = (windowId: number, owner: WebContents) => {
+    if (watched.has(windowId)) return
+    watched.add(windowId)
+    owner.on('enter-html-full-screen', () => htmlFullScreen.add(windowId))
+    owner.on('leave-html-full-screen', () => htmlFullScreen.delete(windowId))
+    owner.once('destroyed', () => { watched.delete(windowId); htmlFullScreen.delete(windowId) })
+  }
+  /** The players' session with its guards, once (again after a failure): the proxy first, the scheme last. */
+  const prepare = async (): Promise<Session> => {
     const ses = session.fromPartition(PLAYER_PARTITION)
+    // Every connection to the refusing proxy, as for documents (a player's page asks the network for nothing).
+    const port = await (options.refusingProxy ?? startRefusingProxy)()
+    await ses.setProxy({ mode: 'pac_script', pacScript: `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(docProxyScript(port)).toString('base64')}` })
     // The session's one request hook: only a player page's own address (its page, its video).
     ses.webRequest.onBeforeRequest((details, callback) => {
       const allowed = typeof details.webContentsId === 'number' && options.owns(details.webContentsId, details.url)
@@ -516,9 +532,11 @@ export function createDrivePlayerShell(options: DrivePlayerShellOptions): DriveP
     ses.setDevicePermissionHandler(() => false)
     ses.on('will-download', event => event.preventDefault())
     ses.setSpellCheckerEnabled(false)
-    ses.protocol.handle('file', NOT_FOUND)
-    ses.protocol.handle(DRIVE_PLAYER_SCHEME, request => options.serve({ url: request.url, method: request.method, range: request.headers.get('range') }))
-    prepared = ses
+    if (!schemeServed) {
+      ses.protocol.handle('file', NOT_FOUND)
+      ses.protocol.handle(DRIVE_PLAYER_SCHEME, request => options.serve({ url: request.url, method: request.method, range: request.headers.get('range') }))
+      schemeServed = true
+    }
     return ses
   }
 
@@ -526,8 +544,16 @@ export function createDrivePlayerShell(options: DrivePlayerShellOptions): DriveP
     async create(windowId, hooks: DrivePlayerHooks): Promise<DrivePlayerHandle | null> {
       const owner = allWebContents.fromId(windowId)
       const win = owner ? BrowserWindow.fromWebContents(owner) : null
-      if (!win || win.isDestroyed()) return null
-      prepare()
+      if (!win || win.isDestroyed() || !owner) return null
+      prepared ??= prepare()
+      try {
+        await prepared
+      } catch {
+        prepared = null
+        return null
+      }
+      if (win.isDestroyed()) return null
+      watchFullScreen(windowId, owner)
       const view = new WebContentsView({
         webPreferences: {
           partition: PLAYER_PARTITION,
@@ -590,7 +616,14 @@ export function createDrivePlayerShell(options: DrivePlayerShellOptions): DriveP
         }, FOCUS_CHECK_DELAY_MS)
       })
       contents.on('before-input-event', (event, input) => {
-        if (input.type !== 'keyDown') return
+        if (input.type !== 'keyDown' || win.isDestroyed()) return
+        // Escape while the viewer is full screen leaves it (as in the document's view).
+        if (input.key === 'Escape' && htmlFullScreen.has(windowId)) {
+          event.preventDefault()
+          focusApp()
+          win.setFullScreen(false)
+          return
+        }
         const key = { key: input.key, metaKey: input.meta, ctrlKey: input.control, shiftKey: input.shift, altKey: input.alt }
         if (!docViewShortcutOf(key, mac)) return
         event.preventDefault()
@@ -631,6 +664,16 @@ export function createDrivePlayerShell(options: DrivePlayerShellOptions): DriveP
           shown = true
           stage = stageCode(placement.stage)
           putStage()
+        },
+        raise() {
+          if (!gone && !win.isDestroyed()) win.contentView.addChildView(view)
+        },
+        suspend() {
+          if (gone || contents.isDestroyed()) return Promise.resolve(null)
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const limit = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), SCROLL_READ_MS) })
+          const read = contents.executeJavaScript(SUSPEND_CODE).then(v => (typeof v === 'number' && Number.isFinite(v) ? v : null), () => null)
+          return Promise.race([read, limit]).finally(() => clearTimeout(timer))
         },
         destroy: finish,
       }
