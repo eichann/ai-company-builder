@@ -4,14 +4,14 @@
 // folder name the member may not use (a private folder they cannot read) and
 // on a skill file they may not change, and a new file, rename, move or copy never replaces what is already there.
 //   dialog:selectDirectory, fs:* (fs:startDrag is a send; fs:openVideo hands a video to the OS's app), fs:watch /
-//   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite
+//   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite, editor:backupEdits
 
 import fs from 'fs'
 import path from 'path'
 import type { DirectoryTreeNode, FileOpResult } from '../../../shared/ipc-contract'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
-import { keepCurrentVersion } from '../backups/keep-current'
+import { keepCurrentVersion, keepGivenVersion } from '../backups/keep-current'
 import type { DesktopShell, PathGuard, WindowPort } from '../ports'
 import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
 import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-guards'
@@ -183,6 +183,20 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       return await keepCurrentVersion(paths, root, safePath, 'editor_overwrite')
     } catch (error) {
       console.error('[editor] backup before overwrite failed:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
+  // Before the editor drops a tab's unsaved edits for the version that arrived
+  // (［届いた版を採用］): keep the edits, which were never on disk, as a version of the file.
+  ipc.handle('editor:backupEdits', async (_, rootPath: string, filePath: string, content: string) => {
+    try {
+      const root = paths.validate(rootPath)
+      const safePath = paths.validate(filePath)
+      if (typeof content !== 'string') return { success: false, error: 'No text to keep' }
+      return await keepGivenVersion(paths, root, safePath, Buffer.from(content, 'utf-8'), 'editor_edits')
+    } catch (error) {
+      console.error('[editor] backup of the edits failed:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   })

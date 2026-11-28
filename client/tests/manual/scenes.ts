@@ -2309,7 +2309,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'editor-changed-outside',
-    about: 'An open file with unsaved edits changed on disk: the band, 差分を見る and 自分の編集を残す.',
+    about: 'An open file with unsaved edits changed on disk: the band and its one ［比べて選ぶ］.',
     page: 'editor-tabs',
     query: { view: 'external' },
     steps: [
@@ -2319,9 +2319,22 @@ export const scenes: Scene[] = [
     crop: { region: { x: 0, y: 112, width: 1280, height: 150 } },
     annotations: [
       { marker: { target: 'text=このファイルは外部で変更されました。あなたの編集はまだ保存していません', label: '1', at: 'below' } },
-      { box: 'role=button[name="ディスクの内容を読み込む"]' }, { marker: { target: 'role=button[name="ディスクの内容を読み込む"]', label: '2', at: 'below' } },
-      { box: 'role=button[name="差分を見る"]' }, { marker: { target: 'role=button[name="差分を見る"]', label: '3', at: 'below' } },
-      { box: 'role=button[name="自分の編集を残す"]' }, { marker: { target: 'role=button[name="自分の編集を残す"]', label: '4', at: 'below' } },
+      { box: 'role=button[name="比べて選ぶ"]' }, { marker: { target: 'role=button[name="比べて選ぶ"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'editor-compare-versions',
+    about: 'The compare view: the version that arrived vs. the edits, ［届いた版を採用］ and ［自分の版を保存］.',
+    page: 'editor-tabs',
+    query: { view: 'external' },
+    steps: [
+      { click: 'role=tab[name="提案書.md"]' }, { typeAtEnd: '.cm-content', text: '\n見積は来週お送りします。' },
+      { run: 'window.__acbExternalEdit("/Users/demo/会社/営業部/提案書.md")' }, { waitFor: 'role=alert' },
+      { click: 'role=button[name="比べて選ぶ"]' }, { waitFor: 'role=button[name="自分の版を保存"]' },
+    ],
+    annotations: [
+      { box: 'role=button[name="届いた版を採用"]' }, { marker: { target: 'role=button[name="届いた版を採用"]', label: '1', at: 'above' } },
+      { box: 'role=button[name="自分の版を保存"]' }, { marker: { target: 'role=button[name="自分の版を保存"]', label: '2', at: 'above' } },
     ],
   },
 

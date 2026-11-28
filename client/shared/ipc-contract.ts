@@ -564,6 +564,8 @@ export interface IpcInvokeChannels {
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
   'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
+  /** Keep a tab's unsaved edits of `filePath` (the text given) before ［届いた版を採用］ drops them. */
+  'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string]; result: EditorBackupResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
   'fs:delete': { args: [path: string]; result: FileOpResult }
@@ -1125,6 +1127,8 @@ export interface ElectronAPI {
   createFile: Invoke<'fs:createFile'>
   /** Keep the disk version before the editor overwrites a file changed elsewhere (.backups/<ts>_editor_overwrite/). */
   backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
+  /** Keep the tab's unsaved edits before they are dropped for the version that arrived (.backups/<ts>_editor_edits/). */
+  backupEdits: Invoke<'editor:backupEdits'>
   createDirectory: Invoke<'fs:createDirectory'>
   exists: Invoke<'fs:exists'>
 

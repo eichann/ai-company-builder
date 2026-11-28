@@ -98,6 +98,8 @@ const failWrites = new Set<string>()
 const closeAnswers: string[] = []
 let requestClose: (() => void) | null = null
 const pinned: string[] = []
+const backups: Array<{ reason: string; path: string; content: string | undefined }> = []
+const failBackups = { on: false }
 let emitChanges: ((changes: { type: string; path: string }[]) => void) | null = null
 Object.assign(window, {
   electronAPI: {
@@ -113,7 +115,18 @@ Object.assign(window, {
     onCloseRequested: (cb: () => void) => { requestClose = cb; return () => { requestClose = null } },
     answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
     createDirectory: async () => true,
-    backupBeforeOverwrite: async () => ({ success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }),
+    // Each keep is listed in __acbBackups (what was kept: the disk then, or the edits given); a
+    // spec sets __acbFailBackups to have them fail.
+    backupBeforeOverwrite: async (_root: string, p: string) => {
+      if (failBackups.on) return { success: false, error: 'EACCES' }
+      backups.push({ reason: 'editor_overwrite', path: p, content: files[p] })
+      return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }
+    },
+    backupEdits: async (_root: string, p: string, content: string) => {
+      if (failBackups.on) return { success: false, error: 'EACCES' }
+      backups.push({ reason: 'editor_edits', path: p, content })
+      return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_edits` }
+    },
     // The review's sidecars live next to the document (?view=html: its review, doc-frame.md "Review in the document view").
     readDirectory: async (dir: string) => Object.keys(files)
       .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
@@ -171,7 +184,7 @@ function externalDelete(p: string) {
   emitChanges?.([{ type: 'unlink', path: p }])
 }
 Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits,
-  __acbFailWrites: failWrites, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened, __acbInserted: inserted,
+  __acbFailWrites: failWrites, __acbBackups: backups, __acbFailBackups: failBackups, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened, __acbInserted: inserted,
   __acbFileChange: (p: string) => emitChanges?.([{ type: 'change', path: p }]), __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
 
 export function Preview() {

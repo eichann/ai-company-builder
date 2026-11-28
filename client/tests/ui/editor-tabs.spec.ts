@@ -1,8 +1,8 @@
 // TabbedEditorPanel when the open file changes on disk (the AI, a sync pull):
 // tests/editor-tabs-ui.tsx?view=external. The decisions (follow the disk,
-// banner, save asks, recreate) are pinned by tests/editor-disk-state.test.ts;
-// here: the watcher event reaching the tab, the banner's buttons, the confirm
-// dialog, the backup notice and what ends up on "disk".
+// banner, the compare choice, recreate) are pinned by tests/editor-disk-state.test.ts;
+// here: the watcher event reaching the tab, the banner's ［比べて選ぶ］, the compare
+// view's two one-press choices, what is kept in the backups first and what ends up on "disk".
 import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
@@ -36,7 +36,11 @@ test('a clean tab whose file is deleted keeps its content and says so', async ({
   await expect(editor(page)).toContainText('第12回の構成案です。')
 })
 
-test('edits + a change on disk: banner, autosave paused, diff, keep mine, then save asks and backs the disk version up', async ({ page }) => {
+type Kept = { reason: string; path: string; content: string | undefined }
+const backups = (page: Page) => page.evaluate(() => (window as unknown as { __acbBackups: Kept[] }).__acbBackups)
+const compare = (page: Page) => page.getByTestId('external-compare')
+
+test('edits + a change on disk: banner, autosave paused, one ［比べて選ぶ］ that opens the compare view', async ({ page }) => {
   await openWithEdits(page)
   await page.getByTestId('external-edit').click()
   await expect(banner(page)).toContainText('このファイルは外部で変更されました。あなたの編集はまだ保存していません')
@@ -47,27 +51,92 @@ test('edits + a change on disk: banner, autosave paused, diff, keep mine, then s
   expect(await disk(page)).toContain(AI_PARAGRAPH)
   expect(await disk(page)).not.toContain('私の追記')
 
-  const diff = banner(page).getByRole('button', { name: '差分を見る' })
-  await diff.click()
-  await expect(banner(page).getByRole('button', { name: '差分を閉じる' })).toHaveAttribute('aria-pressed', 'true')
-
-  await banner(page).getByRole('button', { name: '自分の編集を残す' }).click()
-  await expect(banner(page)).toContainText('編集を続けられます（自動保存は止めています）')
-  await banner(page).getByRole('button', { name: '保存…' }).click()
-  await page.getByRole('button', { name: '外部の変更を上書きして保存' }).click()
-  await expect(page.getByText('外部で変更された内容をバックアップしてから上書きしました（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
-  await expect(banner(page)).toHaveCount(0)
-  expect(await disk(page)).toContain('私の追記')
+  await expect(banner(page).getByRole('button')).toHaveText(['比べて選ぶ'])
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await expect(compare(page)).toContainText('届いた版／')
+  await expect(compare(page).getByRole('button', { name: '自分の版を保存' })).toBeVisible()
+  await expect(compare(page).getByRole('button', { name: '届いた版を採用' })).toBeVisible()
+  await banner(page).getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(compare(page)).toHaveCount(0)
+  await expect(editor(page)).toContainText('私の追記')
 })
 
-test('edits + a change on disk: 「ディスクの内容を読み込む」 drops the edits after a confirm', async ({ page }) => {
+test('［自分の版を保存］ saves in one press, after keeping the version that arrived in the backups', async ({ page }) => {
   await openWithEdits(page)
   await page.getByTestId('external-edit').click()
-  await banner(page).getByRole('button', { name: 'ディスクの内容を読み込む' }).click()
-  await page.getByRole('button', { name: '編集を破棄して読み込む' }).click()
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(page.getByText('あなたの版を保存しました。届いた版はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(banner(page)).toHaveCount(0)
+  expect(await disk(page)).toContain('私の追記')
+  const kept = await backups(page)
+  expect(kept).toHaveLength(1)
+  expect(kept[0].reason).toBe('editor_overwrite')
+  expect(kept[0].content).toContain(AI_PARAGRAPH)
+  expect(kept[0].content).not.toContain('私の追記')
+})
+
+test('［届いた版を採用］ takes it in one press, no confirm, after keeping the edits in the backups', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(page.getByText('届いた版にしました。あなたの編集はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(banner(page)).toHaveCount(0)
   await expect(editor(page)).toContainText(AI_PARAGRAPH)
   await expect(editor(page)).not.toContainText('私の追記')
+  expect(await disk(page)).not.toContain('私の追記')
+  const kept = await backups(page)
+  expect(kept).toHaveLength(1)
+  expect(kept[0].reason).toBe('editor_edits')
+  expect(kept[0].content).toContain('私の追記')
+})
+
+test('a backup that cannot be written replaces nothing, either way, and says so', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await page.evaluate(() => { (window as unknown as { __acbFailBackups: { on: boolean } }).__acbFailBackups.on = true })
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+
+  await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(page.getByText('届いた版をバックアップに残せなかったため、保存していません。あなたの編集はこのタブにそのまま残っています。')).toBeVisible()
+  expect(await disk(page)).toContain(AI_PARAGRAPH)
+  expect(await disk(page)).not.toContain('私の追記')
+
+  await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(page.getByText('あなたの編集をバックアップに残せなかったため、届いた版にしていません。あなたの編集はこのタブにそのまま残っています。')).toBeVisible()
+  await expect(compare(page)).toBeVisible()
+  await expect(banner(page)).toBeVisible()
+  await banner(page).getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(editor(page)).toContainText('私の追記')
+})
+
+test('the file changed again while comparing: nothing is saved or replaced, compare again', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  // Changed on disk before the watcher tells the tab: the press itself must notice.
+  await page.evaluate(path => { const f = (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles; f[path] += '\n\nAI がもう一度直しました。' }, FILE)
+  await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(compare(page)).toContainText('比べている間に、ファイルがまた変わりました。新しい内容で比べ直したので、もう一度選んでください。')
+  expect(await disk(page)).toContain('AI がもう一度直しました。')
+  expect(await disk(page)).not.toContain('私の追記')
+  await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(editor(page)).toContainText('AI がもう一度直しました。')
+  const kept = await backups(page)
+  expect(kept.map(k => k.reason)).toEqual(['editor_edits'])
+})
+
+test('⌘S on a file changed elsewhere opens the compare view instead of overwriting', async ({ page }) => {
+  await openWithEdits(page)
+  await page.evaluate(path => { const f = (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles; f[path] += '\n\nAI が追記した段落です。' }, FILE)
+  await editor(page).click()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(compare(page)).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await disk(page)).not.toContain('私の追記')
 })
 
 test('edits + the file deleted on disk: 「保存して作り直す」 writes it back', async ({ page }) => {

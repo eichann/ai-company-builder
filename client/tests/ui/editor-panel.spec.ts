@@ -105,6 +105,21 @@ test('closing a tab with edits saves them first; a clean tab just closes', async
   expect(await writes(page)).toHaveLength(1)
 })
 
+test('closing a tab whose file changed elsewhere keeps it open and shows the compare view: nothing written, nothing dropped', async ({ page }) => {
+  await open(page)
+  await typeAtEnd(page, '\n閉じる前の追記')
+  // Changed on disk before the watcher tells the tab: the save on closing finds it.
+  await page.evaluate(p => { (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles[p] += '\nAI の追記' }, SCRIPT)
+  await closeButton(page, SCRIPT).click()
+  await expect(page.getByTestId('external-compare')).toBeVisible()
+  await expect(tab(page, SCRIPT)).toHaveCount(1)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await writes(page)).toEqual([])
+  await expect(editor(page)).toHaveCount(0)
+  await page.getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(editor(page)).toContainText('閉じる前の追記')
+})
+
 test('a preview tab is kept (pinned) when it is double-clicked', async ({ page }) => {
   await open(page)
   await tab(page, `${ROOT}/README.md`).dblclick()

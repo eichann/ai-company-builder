@@ -119,6 +119,8 @@ const api: ElectronAPI = {
   createFile: (path: string, content: string) => invoke('fs:createFile', path, content),
   backupBeforeOverwrite: (rootPath: string, filePath: string) =>
     invoke('editor:backupBeforeOverwrite', rootPath, filePath),
+  backupEdits: (rootPath: string, filePath: string, content: string) =>
+    invoke('editor:backupEdits', rootPath, filePath, content),
   createDirectory: (path: string) => invoke('fs:createDirectory', path),
   exists: (path: string) => invoke('fs:exists', path),
 

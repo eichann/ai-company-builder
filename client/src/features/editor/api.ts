@@ -6,10 +6,11 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 /** Reading an open file on this computer: its text, its bytes (PDF), whether it still exists. */
 export type EditorReads = ElectronPort<'readFile' | 'readFileBinary' | 'exists'>
 /**
- * Saving on this computer: the file, its folder when it was deleted, and the
- * disk version kept in the backups before overwriting a change made elsewhere.
+ * Saving on this computer: the file, its folder when it was deleted, the
+ * disk version kept in the backups before overwriting a change made elsewhere,
+ * and the tab's edits kept there before taking the version that arrived.
  */
-export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backupBeforeOverwrite'>
+export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backupBeforeOverwrite' | 'backupEdits'>
 /** Why a save was refused, in a sentence for the member (a skill file they may not change, …). */
 export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 
@@ -86,6 +87,11 @@ export function createDirectory(dirPath: string, writes: EditorWrites = window.e
 /** Keeps the disk version (.backups/<ts>_editor_overwrite/, or the private backups). */
 export function backupBeforeOverwrite(rootPath: string, filePath: string, writes: EditorWrites = window.electronAPI) {
   return writes.backupBeforeOverwrite(rootPath, filePath)
+}
+
+/** Keeps the tab's unsaved edits (.backups/<ts>_editor_edits/, or the private backups). */
+export function backupEdits(rootPath: string, filePath: string, content: string, writes: EditorWrites = window.electronAPI) {
+  return writes.backupEdits(rootPath, filePath, content)
 }
 
 /** Whether a record a tidied tab points to can still be read (「片づけたタブ」 marks it 「見つかりません」). */
