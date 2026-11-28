@@ -65,10 +65,12 @@ contract.invoke browser:sites
 contract.invoke browserDevice:get
 contract.invoke browserDevice:register
 contract.invoke browserDevice:withdraw
+contract.invoke browserLines:allowWrite
 contract.invoke browserLines:cancelWrite
 contract.invoke browserLines:card
 contract.invoke browserLines:confirmValue
 contract.invoke browserLines:confirmWrite
+contract.invoke browserLines:decide
 contract.invoke browserLines:runWrite
 contract.invoke browserLines:writeCard
 contract.invoke browserPlans:cancel
@@ -420,6 +422,7 @@ contract.type ElectronAPI.acceptJob = acceptJob: Invoke<'jobs:accept'>
 contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
 contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
+contract.type ElectronAPI.allowBrowserWrite = allowBrowserWrite: Invoke<'browserLines:allowWrite'>
 contract.type ElectronAPI.answerAppCommand = answerAppCommand: Invoke<'appCommand:respond'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
 contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
@@ -453,6 +456,7 @@ contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
 contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
 contract.type ElectronAPI.createSetWatchCandidate = createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
 contract.type ElectronAPI.createTask = createTask: Invoke<'tasks:create'>
+contract.type ElectronAPI.decideBrowserStop = decideBrowserStop: Invoke<'browserLines:decide'>
 contract.type ElectronAPI.decideDriveOverwrite = decideDriveOverwrite: Invoke<'google:decideDriveOverwrite'>
 contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'minutes:noBundle'>
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
@@ -901,10 +905,12 @@ contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [comp
 contract.type IpcInvokeChannels.'browserDevice:get' = 'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
 contract.type IpcInvokeChannels.'browserDevice:register' = 'browserDevice:register': { args: [companyId: string, label: string]; result: BrowserPcResult }
 contract.type IpcInvokeChannels.'browserDevice:withdraw' = 'browserDevice:withdraw': { args: [companyId: string]; result: BrowserPcResult }
+contract.type IpcInvokeChannels.'browserLines:allowWrite' = 'browserLines:allowWrite': { args: [companyId: string, cardId: string, allow: boolean]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:cancelWrite' = 'browserLines:cancelWrite': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:card' = 'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmValue' = 'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmWrite' = 'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
+contract.type IpcInvokeChannels.'browserLines:decide' = 'browserLines:decide': { args: [companyId: string, cardId: string, choice: 'proceed' | 'stop']; result: { ok: true } | { ok: false; message: string } }
 contract.type IpcInvokeChannels.'browserLines:runWrite' = 'browserLines:runWrite': { args: [companyId: string, cardId: string, contentHash: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:writeCard' = 'browserLines:writeCard': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserPlans:cancel' = 'browserPlans:cancel': { args: [companyId: string, planId: string]; result: BrowserPlanActAnswer }
@@ -1275,10 +1281,12 @@ main.handle browser:sites @ features/browser/ipc.ts (companyId)
 main.handle browserDevice:get @ features/browser/device-ipc.ts (companyId)
 main.handle browserDevice:register @ features/browser/device-ipc.ts (companyId, label)
 main.handle browserDevice:withdraw @ features/browser/device-ipc.ts (companyId)
+main.handle browserLines:allowWrite @ features/browser/write-lines.ts (companyId, cardId, allow)
 main.handle browserLines:cancelWrite @ features/browser/write-lines.ts (companyId, cardId)
 main.handle browserLines:card @ features/browser/inspect.ts (companyId, planId)
 main.handle browserLines:confirmValue @ features/browser/write-lines.ts (companyId, cardId, name)
 main.handle browserLines:confirmWrite @ features/browser/write-lines.ts (companyId, cardId, result)
+main.handle browserLines:decide @ features/browser/write-lines.ts (companyId, cardId, choice)
 main.handle browserLines:runWrite @ features/browser/write-lines.ts (companyId, cardId, contentHash)
 main.handle browserLines:writeCard @ features/browser/write-lines.ts (companyId, cardId)
 main.handle browserPlans:cancel @ features/browser/plans-ipc.ts (companyId, planId)
@@ -1562,6 +1570,8 @@ preload addAbsence -> invoke absences:add($0, $1)
 preload addAbsence : (companyId: string, input: AbsenceAddInput) => Promise<AbsenceAddResult>
 preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
 preload addOutboundMailRecipient : (companyId: string, messageId: string, email: string, name?: string | undefined) => Promise<OutboundMailResult>
+preload allowBrowserWrite -> invoke browserLines:allowWrite($0, $1, $2)
+preload allowBrowserWrite : (companyId: string, cardId: string, allow: boolean) => Promise<BrowserWriteGetResult>
 preload answerAppCommand -> invoke appCommand:respond($0, $1)
 preload answerAppCommand : (requestId: string, answer: AppCommandAnswer) => Promise<void>
 preload answerCloseRequest -> invoke app:closeResponse($0)
@@ -1628,6 +1638,8 @@ preload createSetWatchCandidate -> invoke jobProposals:createSetWatch($0, $1)
 preload createSetWatchCandidate : (companyId: string, choice: SetWatchChoice) => Promise<SetWatchCandidateResult>
 preload createTask -> invoke tasks:create($0, $1)
 preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
+preload decideBrowserStop -> invoke browserLines:decide($0, $1, $2)
+preload decideBrowserStop : (companyId: string, cardId: string, choice: "proceed" | "stop") => Promise<{ ok: true; } | { ok: false; message: string; }>
 preload decideDriveOverwrite -> invoke google:decideDriveOverwrite($0, $1, $2, $3)
 preload decideDriveOverwrite : (companyId: string, confirmationId: string, action: "confirm" | "decline", trust?: boolean | undefined) => Promise<DriveOverwriteDecisionResult>
 preload declineMinutesBundle -> invoke minutes:noBundle($0, $1)

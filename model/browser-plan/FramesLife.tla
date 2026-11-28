@@ -22,6 +22,10 @@
 \* the site removed or lowered, the Skill's approval revoked or its declaration changed, another PC, the run's hour).
 \* Either way the server refuses every later permit and ends the run; a permit already given stays good for its 5 s
 \* under "closed" (the app cannot know), never under "stopped". What is left out: README "What FramesLife leaves out".
+\* The run's promise (agent-browser.md "The run's promise"): a held write is either within the promise ("ask_a", "ask_b") or
+\* not in it yet ("out_a": a field, target or value nobody approved — on frame "a", and only as the run's first write: more of
+\* them repeat the same moves and would take the graph past the checker's ceiling). The server never permits one outside it
+\* (`permit`'s `browserPromiseVerdict`); the person may add it on the card (`promiseAdd`: it is then within) or say no.
 EXTENDS Naturals, FiniteSets
 
 Frames == {"a", "b"}
@@ -33,8 +37,8 @@ PERMIT == 1         \* a permit's 5 s (BROWSER_PLAN_TIMES.permit)
 GRACE == 1          \* the 30 s grace after it
 CAP == PERMIT + GRACE
 Min(x, y) == IF x < y THEN x ELSE y
-Asking == {"ask_a", "ask_b"}
-FrameOf(p) == IF p = "ask_a" THEN "a" ELSE "b"
+Asking == {"ask_a", "ask_b", "out_a"}
+FrameOf(p) == IF p = "ask_b" THEN "b" ELSE "a"
 
 VARIABLES
     \* ---- server (browser_frame_runs, browser_frames, browser_frame_writes) ----
@@ -54,6 +58,7 @@ VARIABLES
     badPermit,    \* a permit given before the plan was approved, or after the run ended (its frames gone)
     badSend,      \* a send without a live permit for that write
     stopSend,     \* a send after the AI was stopped
+    outPermit,    \* a permit given to a held write outside the run's promise
     \* ---- network ----
     rep,          \* per write: a report in flight: none, done, notsent, unknown, refused (may come again, late, or never)
     \* ---- app (main process): the worker that handles the held page writes one by one ----
@@ -62,15 +67,15 @@ VARIABLES
     \* ---- the site ----
     sends         \* per write: how many times it reached the site (capped at 2)
 
-vars == <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
-srvVars == <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit>>
+vars == <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
+srvVars == <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, outPermit>>
 
 Init ==
     /\ approved \in BOOLEAN
     /\ exSt = IF approved THEN "open" ELSE "waiting"
     /\ n = 0 /\ fr = [k \in Ids |-> "-"] /\ st = [k \in Ids |-> "none"] /\ age = 0
     /\ lock = "none" /\ gate = "open"
-    /\ everUnknown = FALSE /\ afterUnknown = FALSE /\ badPermit = FALSE /\ badSend = FALSE /\ stopSend = FALSE
+    /\ everUnknown = FALSE /\ afterUnknown = FALSE /\ badPermit = FALSE /\ badSend = FALSE /\ stopSend = FALSE /\ outPermit = FALSE
     /\ rep = [k \in Ids |-> "none"]
     /\ ph = [w \in Workers |-> "idle"]
     /\ sends = [k \in Ids |-> 0]
@@ -79,6 +84,8 @@ Used(f) == Cardinality({k \in Ids : fr[k] = f})
 Past == age >= CAP
 \* What `permit` requires of the run and the frame (one transaction)
 MayPermit(f) == exSt = "open" /\ gate = "open" /\ lock = "none" /\ Used(f) < MaxOf(f) /\ n < N
+\* ... and of the held write: within the run's promise (`browserPromiseVerdict` kept)
+Kept(p) == p # "out_a"
 
 \* =========================== server (browser-frames.ts) ===========================
 
@@ -86,13 +93,13 @@ MayPermit(f) == exSt = "open" /\ gate = "open" /\ lock = "none" /\ Used(f) < Max
 PersonApproves ==
     /\ exSt = "waiting" /\ gate = "open"
     /\ exSt' = "open" /\ approved' = TRUE
-    /\ UNCHANGED <<n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* `approve` with the gate closed (the AI stopped, the level lowered, another PC, the approval revoked …): the run ends.
 PersonApproveRefused ==
     /\ exSt = "waiting" /\ gate # "open"
     /\ exSt' = "ended"
-    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* `memberLeft` (inside the removal's transaction): the run ends, and a write still permitted becomes unknown at once —
 \* also one of a run already ended (nobody will report it).
@@ -102,7 +109,7 @@ MemberLeaves ==
     /\ IF n > 0 /\ st[n] = "permitted"
          THEN st' = [st EXCEPT ![n] = "unknown"] /\ lock' = "none" /\ everUnknown' = TRUE
          ELSE UNCHANGED <<st, lock, everUnknown>>
-    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* `permit` (one transaction): the run open (approved, not locked, not ended), the gate open, nothing in flight, the
 \* frame's units not used up — then a write row `permitted`, one unit of the frame taken, the in-flight slot held. The
@@ -113,10 +120,11 @@ Permit(w) ==
     /\ lock' = "held"
     /\ afterUnknown' = (afterUnknown \/ everUnknown)
     /\ badPermit' = (badPermit \/ ~approved \/ exSt = "ended")
+    /\ outPermit' = (outPermit \/ ~Kept(ph[w]))
     /\ \/ ph' = [ph EXCEPT ![w] = "permitted"]
        \/ ph' = [ph EXCEPT ![w] = "gone"]
     /\ UNCHANGED <<exSt, approved, gate, everUnknown, badSend, stopSend, rep, sends>>
-ServerPermits(w) == ph[w] \in Asking /\ MayPermit(FrameOf(ph[w])) /\ Permit(w)
+ServerPermits(w) == ph[w] \in Asking /\ Kept(ph[w]) /\ MayPermit(FrameOf(ph[w])) /\ Permit(w)
 
 \* `permit` refused: not open (waiting: BROWSER_RUN_NOT_APPROVED; locked: BROWSER_RUN_AFTER_UNKNOWN; ended), a write in
 \* flight (BROWSER_RUN_WRITE_IN_FLIGHT: the second page write waits and asks again), the frame used up, or the gate
@@ -126,14 +134,32 @@ ServerRefuses(w) ==
     /\ exSt' = IF gate # "open" /\ exSt \in {"waiting", "open"} THEN "ended" ELSE exSt
     /\ \/ ph' = [ph EXCEPT ![w] = "idle"]
        \/ ph' = [ph EXCEPT ![w] = "gone"]
-    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, sends>>
+    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, outPermit, badSend, stopSend, rep, sends>>
+
+\* `permit` refused for the run's promise (`BROWSER_PROMISE_ASK` / `_BROKEN`): nothing taken; the app asks the person on the
+\* card (the app asks the same rule first, so it never reaches the server; either way nothing is permitted).
+ServerRefusesPromise(w) ==
+    /\ ph[w] = "out_a" /\ MayPermit("a")
+    /\ ph' = [ph EXCEPT ![w] = "idle"]
+    /\ UNCHANGED <<srvVars, badSend, stopSend, rep, sends>>
+
+\* `promiseAdd`: the person's 「書いてよい」 on the card while the page's write waits — exactly what the card showed is added;
+\* that write is within the promise now. Or 「書かない」 / the card's time / the run's stop: never sent (the page sees a failure).
+PersonAdds(w) ==
+    /\ ph[w] = "out_a" /\ exSt = "open"
+    /\ ph' = [ph EXCEPT ![w] = "ask_a"]
+    /\ UNCHANGED <<srvVars, badSend, stopSend, rep, sends>>
+PersonDeclines(w) ==
+    /\ ph[w] = "out_a"
+    /\ ph' = [ph EXCEPT ![w] = "idle"]
+    /\ UNCHANGED <<srvVars, badSend, stopSend, rep, sends>>
 
 \* `settle`: the write permitted and silent past permit + 5 s + 30 s (both clocks) -> unknown; the run locks for good.
 ServerSettlesUnknown ==
     /\ n > 0 /\ st[n] = "permitted" /\ Past
     /\ st' = [st EXCEPT ![n] = "unknown"] /\ lock' = "none" /\ everUnknown' = TRUE
     /\ exSt' = IF exSt = "open" THEN "locked" ELSE exSt
-    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* `report` (judged after the time-out): permitted + done / not_sent / unknown / refused -> that state, the slot free;
 \* unknown locks the run; refused (the site said no) leaves it open, its unit still used. unknown + done / refused -> that
@@ -157,7 +183,7 @@ ServerGetsReport(k) ==
             [] OTHER -> UNCHANGED <<st, lock, exSt, everUnknown>>
     /\ \/ rep' = [rep EXCEPT ![k] = "none"]
        \/ rep[k] # "refused" /\ UNCHANGED rep    \* the same report arrives again (a refused one: see RefusedOrNot)
-    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, outPermit, ph, sends>>
 
 ReportLost(k) ==
     /\ rep[k] \notin {"none", "refused"}
@@ -170,7 +196,7 @@ ReportLost(k) ==
 RunEnds ==
     /\ exSt \in {"waiting", "open", "locked"}
     /\ exSt' = "ended"
-    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* `confirm`: the person answers about the write in doubt from the card, once, only past its permit + 5 s + 30 s (both
 \* clocks), from the run's own PC (folded in). The person looks at the site, so the answer is true when given:
@@ -180,14 +206,14 @@ PersonConfirms(k) ==
     /\ k = n /\ st[k] = "unknown" /\ Past
     /\ \/ sends[k] = 0 /\ st' = [st EXCEPT ![k] = "cnotdone"]
        \/ sends[k] > 0 /\ st' = [st EXCEPT ![k] = "cdone"]
-    /\ UNCHANGED <<exSt, approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<exSt, approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* Time since the latest permit: counted while that write is on its way and while it is in doubt (the person's answer
 \* waits for permit + 5 s + 30 s).
 Tick ==
     /\ n > 0 /\ st[n] \in {"permitted", "unknown"} /\ age < CAP
     /\ age' = age + 1
-    /\ UNCHANGED <<exSt, approved, n, fr, st, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<exSt, approved, n, fr, st, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 \* =========================== app (step ⑤b) ===========================
 
@@ -195,7 +221,7 @@ Tick ==
 \* never asked for: not modelled). The worker asks the server for a permit for that frame (frame-writes.ts `ready`).
 AppAsks(w) ==
     /\ ph[w] = "idle"
-    /\ \E p \in Asking : ph' = [ph EXCEPT ![w] = p]
+    /\ \E p \in (IF n = 0 THEN Asking ELSE Asking \ {"out_a"}) : ph' = [ph EXCEPT ![w] = p]
     /\ UNCHANGED <<srvVars, badSend, stopSend, rep, sends>>
 
 \* The last check right before the request leaves: the permit live (both clocks) and the AI not stopped; then the page's
@@ -211,7 +237,7 @@ SendNow(w) ==
     /\ \/ UNCHANGED sends
        \/ sends' = [sends EXCEPT ![n] = Min(sends[n] + 1, 2)]
     /\ ph' = [ph EXCEPT ![w] = "sent"]
-    /\ UNCHANGED <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, badPermit, rep>>
+    /\ UNCHANGED <<exSt, approved, n, fr, st, age, lock, gate, everUnknown, badPermit, outPermit, rep>>
 AppSends(w) == ph[w] = "permitted" /\ age < PERMIT /\ gate # "stopped" /\ SendNow(w)
 
 \* Permitted, but the last check says no (the permit late, stopped, the window gone): never sent -> not_sent.
@@ -251,7 +277,7 @@ AppCrashes(w) ==
 GateCloses ==
     /\ gate = "open"
     /\ gate' \in {"stopped", "closed"}
-    /\ UNCHANGED <<exSt, approved, n, fr, st, age, lock, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<exSt, approved, n, fr, st, age, lock, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 Done ==
     /\ exSt = "ended" /\ lock = "none"
@@ -261,7 +287,7 @@ Done ==
 
 ServerNext ==
     \/ PersonApproves \/ PersonApproveRefused \/ MemberLeaves \/ RunEnds \/ Tick \/ ServerSettlesUnknown
-    \/ \E w \in Workers : ServerPermits(w) \/ ServerRefuses(w)
+    \/ \E w \in Workers : ServerPermits(w) \/ ServerRefuses(w) \/ ServerRefusesPromise(w) \/ PersonAdds(w) \/ PersonDeclines(w)
     \/ \E k \in Ids : ServerGetsReport(k) \/ ReportLost(k) \/ PersonConfirms(k)
 
 AppNext ==
@@ -279,9 +305,9 @@ TypeOK ==
     /\ exSt \in {"waiting", "open", "locked", "ended"} /\ approved \in BOOLEAN
     /\ n \in 0..N /\ fr \in [Ids -> Frames \cup {"-"}] /\ st \in [Ids -> {"none", "permitted", "done", "notsent", "unknown", "refused", "cdone", "cnotdone"}]
     /\ age \in 0..CAP /\ lock \in {"none", "held"} /\ gate \in {"open", "stopped", "closed"}
-    /\ everUnknown \in BOOLEAN /\ afterUnknown \in BOOLEAN /\ badPermit \in BOOLEAN /\ badSend \in BOOLEAN /\ stopSend \in BOOLEAN
+    /\ everUnknown \in BOOLEAN /\ afterUnknown \in BOOLEAN /\ badPermit \in BOOLEAN /\ badSend \in BOOLEAN /\ stopSend \in BOOLEAN /\ outPermit \in BOOLEAN
     /\ rep \in [Ids -> {"none", "done", "notsent", "unknown", "refused"}]
-    /\ ph \in [Workers -> {"idle", "ask_a", "ask_b", "permitted", "sent", "gone"}]
+    /\ ph \in [Workers -> {"idle", "ask_a", "ask_b", "out_a", "permitted", "sent", "gone"}]
     /\ sends \in [Ids -> 0..2]
 
 \* R1 Each write reaches the site at most once (never resent automatically)
@@ -306,6 +332,10 @@ R15_OneWriteAtATime == Cardinality({k \in Ids : st[k] = "permitted"}) <= 1
 
 \* R16 Nothing is sent after the AI was stopped (the causes only the server sees stop every later permit: R2)
 R16_NoSendAfterStop == ~stopSend
+
+\* R19 Nothing outside the run's promise is permitted: a held write with a field, target or value nobody approved is
+\*     permitted only once the person added it on the card (agent-browser.md "The run's promise")
+R19_WithinPromise == ~outPermit
 
 \* R5 A write the person answered されていなかった about did not reach the site later either (the answer waits for the
 \*    write's window: it can no longer be on its way)

@@ -18,6 +18,7 @@ import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
 import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, type BrowserFrameMismatch, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
 import { browserSkillDeclarationFrom, browserSkillQueryWords, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { isSensitiveFieldName } from '../../shared/core/browser-recording'
+import { BROWSER_PROMISE_LIMITS, browserOpenSegments, browserPathSegments, browserPromiseImplicitField, type BrowserPermitCheck } from '../../shared/core/browser-run-promise'
 import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOutcome, type BrowserRunWriteStep } from '../../shared/core/browser-run-log'
 import { BROWSER_CARD_CHECKED_BY_WORDS, type BrowserCard, type BrowserCardCheck, type BrowserCardRow, type BrowserCardSection, type BrowserCardValue } from '../../shared/core/browser-card'
 import type { BrowserFrameView } from '../../shared/types/browser-frames'
@@ -205,7 +206,7 @@ export function readHeldWrite(input: { method: string; url: string; host: string
 }
 
 /** One frame of the run as the app holds it: the server's view (its fixed fields, how many units are left). */
-export type WorkFrame = Pick<BrowserFrameView, 'frame' | 'method' | 'path' | 'fields' | 'max' | 'left'> & {
+export type WorkFrame = Pick<BrowserFrameView, 'frame' | 'method' | 'path' | 'fields' | 'max' | 'left' | 'body' | 'bind'> & {
   /** The exact query (null: none; the server's view leaves it out then). Required here so no copy of a frame drops it. */
   query: string | null
 }
@@ -214,8 +215,33 @@ export type WorkFrame = Pick<BrowserFrameView, 'frame' | 'method' | 'path' | 'fi
 const frameWrite = (f: WorkFrame): BrowserSkillWrite => ({ method: f.method, path: f.path, query: f.query, max: f.max, fields: f.fields })
 
 /** The server's frame as the app holds it (`query` absent from the view = none). */
-export const workFrameOf = (f: BrowserFrameView): WorkFrame =>
-  ({ frame: f.frame, method: f.method, path: f.path, query: typeof f.query === 'string' ? f.query : null, fields: { ...f.fields }, max: f.max, left: f.left })
+export const workFrameOf = (f: BrowserFrameView): WorkFrame => ({
+  frame: f.frame, method: f.method, path: f.path, query: typeof f.query === 'string' ? f.query : null, fields: { ...f.fields }, max: f.max, left: f.left,
+  ...(Array.isArray(f.body) ? { body: [...f.body] } : {}), ...(f.bind && typeof f.bind === 'object' ? { bind: { ...f.bind } } : {}),
+})
+
+/**
+ * What a permit carries for the run's promise (agent-browser.md "The run's promise"; the core's `browserPromiseVerdict`
+ * reads it on both sides): every body field but `_method` and login / CSRF / session fields with the keyed digest of its
+ * value (a repeated field: of all its values together, so it never equals one promised value), and per path segment the
+ * digest of a segment the frame leaves open (`{n}` / `{x}`). Null when the body cannot be told whole (a field name too long
+ * or with a control character, too many fields): such a write is not sent.
+ */
+export function promiseCheckOf(frame: Pick<WorkFrame, 'path'>, shape: HeldWriteShape, digest: (value: string) => string): BrowserPermitCheck | null {
+  const fields: Record<string, string> = {}
+  for (const [k, values] of shape.fields) {
+    // Only `_method` and the frameworks' anti-forgery tokens stay out; a name that merely looks like a login field is checked
+    // (its value only as a keyed digest, like every other).
+    if (browserPromiseImplicitField(k)) continue
+    // eslint-disable-next-line no-control-regex
+    if (k.length === 0 || k.length > BROWSER_PROMISE_LIMITS.checkFieldName || /[\u0000-\u001f\u007f]/.test(k)) return null
+    fields[k] = digest(values.length === 1 ? values[0] : JSON.stringify(values))
+  }
+  if (Object.keys(fields).length > BROWSER_PROMISE_LIMITS.checkFields) return null
+  const segments = browserPathSegments(shape.path)
+  const open = new Set(browserOpenSegments(frame.path))
+  return { fields, segments: segments.map((seg, i) => (open.has(i) ? digest(seg) : null)) }
+}
 
 /**
  * The request a permit carries for this frame: the method, the path with its raw query (a frame without one never fits a
@@ -363,6 +389,21 @@ export function readBackLanded(sent: Readonly<Record<string, string>> | null, be
     return typeof x === 'string' ? x : typeof x === 'number' || typeof x === 'boolean' ? String(x) : null
   }
   return fields.every(([k, v]) => plain(now, k) === v) && fields.some(([k, v]) => { const b = plain(was, k); return b !== null && b !== v })
+}
+/**
+ * "Sent is not done": a refused write is known **not saved** only when its own address, read right before it and again
+ * now, is one JSON object holding **every** field the write sent as a top-level plain value, and the whole answer reads
+ * exactly as before (independent review of #907: a list page whose text did not move proves nothing about a create).
+ * Anything less — nothing sent, a field the read does not show, a changed text, not JSON — is not proof.
+ */
+export function readBackUnchanged(sent: Readonly<Record<string, string>> | null, before: string | null, after: string | null): boolean {
+  const was = jsonObject(before)
+  const now = jsonObject(after)
+  if (!sent || !was || !now || before !== after) return false
+  const fields = Object.keys(sent)
+  if (fields.length === 0) return false
+  const plain = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(o, k) && ['string', 'number', 'boolean'].includes(typeof o[k])
+  return fields.every(k => plain(was, k) && plain(now, k))
 }
 const jsonObject = (text: string | null): Record<string, unknown> | null => {
   if (text === null) return null
@@ -594,7 +635,7 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
   'not-sent': '送っていません',
   unknown: '分からない（届いたか分かりません。もう書かないでください）',
   refused: 'アプリが止めました（送っていません。理由は why）',
-  'site-refused': 'サイトが受け付けませんでした（エラーで、保存されていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
+  'site-refused': 'サイトがエラーを返しました（保存されたかは確かめていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
 }
 
 /**
@@ -618,6 +659,8 @@ export const WORK_WRITE_WHY_WORDS = {
   'run-over': '作業が終わったか止められていたので送っていません',
   'no-permit': '許可が出なかったか、作業が止まったので送っていません',
   'stopped-before-send': '送る直前の確かめで止めました（送っていません）',
+  'outside-promise': 'この作業で約束した値と違う書き込みでした（送っていません）',
+  'not-allowed': '約束にない書き込みを、本人が「書かない」と答えました（送っていません）',
 } as const
 export type WorkWriteWhy = keyof typeof WORK_WRITE_WHY_WORDS
 
@@ -628,8 +671,16 @@ export type WorkWriteWhy = keyof typeof WORK_WRITE_WHY_WORDS
  */
 export interface WorkWriteSeen { state: WorkWriteState; frame: number | null; afterAction: number; why: WorkWriteWhy | null }
 
-/** What the person said, as handed to the operator: their prohibitions and limits, and their values (each as said). */
-export interface WorkPerson { said: readonly string[]; values: ReadonlyArray<{ label: string; value: string }> }
+/**
+ * What the person said, as handed to the operator: their prohibitions and limits, their values (each as said), and — when
+ * this run continues one that stopped to ask — what they answered there (`decided`: the stopped operator's question, outside
+ * text, and the card's fixed answer; agent-browser.md "The stopped card's answer").
+ */
+export interface WorkPerson {
+  said: readonly string[]
+  values: ReadonlyArray<{ label: string; value: string }>
+  decided?: ReadonlyArray<{ question: string; answer: 'proceed' }>
+}
 
 /** The plan the person approved on the preview's card, for the work (its own words; null: no preview — a pre-approved Skill). */
 export type WorkApprovedPlan = { summary: string; affects: string; values: readonly WorkPlanValue[] }
@@ -673,7 +724,10 @@ export function workMaterial(input: {
   const p = input.page
   return {
     phase: input.phase,
-    person: { said: [...input.person.said], values: input.person.values.map(v => ({ label: v.label, value: v.value })) },
+    person: {
+      said: [...input.person.said], values: input.person.values.map(v => ({ label: v.label, value: v.value })),
+      ...(input.person.decided && input.person.decided.length > 0 ? { decided: input.person.decided.map(d => ({ question: o(d.question), answer: DECIDED_WORDS[d.answer] })) } : {}),
+    },
     steps: input.steps === null || input.steps === '' ? null : input.steps,
     ...(input.phase === 'work' ? { plan: input.plan ? { summary: input.plan.summary, affects: input.plan.affects, values: input.plan.values.map(v => ({ label: v.label, value: v.value })) } : null } : {}),
     request: input.skill ? null : input.request,
@@ -707,6 +761,9 @@ export function workMaterial(input: {
   }
 }
 
+/** The person's fixed answer as the next run's operator reads it. */
+const DECIDED_WORDS = { proceed: 'はい（そのまま進める）' } as const
+
 /** One page write of the run log (no value): the path as a pattern, the frame, the method, the outcome. */
 export function workWriteLogStep(input: { after: number; frame: number | null; method: string; path: string; host: string; outcome: BrowserRunWriteOutcome }): BrowserRunWriteStep {
   return {
@@ -736,8 +793,15 @@ export const WORK_STOP_REASONS = [
 ] as const
 export type WorkStopReason = typeof WORK_STOP_REASONS[number]
 
+/**
+ * What reading back says of a finished run (agent-browser.md "Sent is not done"): every write the site took read again and
+ * holding what the run promised and sent (`matched`), something read otherwise (`differs`), or not every one could be read
+ * and compared (`unconfirmed` — never a stop: the card says so). "The site answered success" alone is `unconfirmed`.
+ */
+export type WorkBusiness = 'matched' | 'differs' | 'unconfirmed'
+
 export type WorkEnd =
-  | { kind: 'done' }
+  | { kind: 'done'; business?: WorkBusiness }
   | { kind: 'unknown' }
   | { kind: 'stopped'; why: WorkStopReason }
 
@@ -759,7 +823,9 @@ export const BROWSER_WORK_WORDS = {
   skill: 'その Skill は、いまブラウザ操作に使えません（承認されていない・直されて承認待ち・見つからないなど）。ユーザーに管理者へ確かめてもらってください。',
   skillAmbiguous: 'その名前の Skill が、全社と部署（または複数の部署）にあります。どれのことか決められないので、何もしていません。skill に Skill のパス（全社のものは .claude/skills/<名前>、部署のものは <部署のフォルダ>/.claude/skills/<名前>）を入れて頼み直してください。どれか分からなければユーザーに聞いてください。',
   tooMany: 'この返事の中で頼める書く作業は1回までです。ユーザーに結果のカードを見てもらってから、次の返事でまた頼んでください。',
-  done: '済みました。したことと読み直した結果はカードとして相談に出しました。サイトの内容はカードにだけ出ていて、あなたには見えません。内容を推測して書かず、ユーザーにカードを見るよう伝えて、次の作業に進んでください。',
+  done: '済みました。読み直して、約束した値と送った値になっていることを確かめました。したことと読み直した結果はカードとして相談に出しました。サイトの内容はカードにだけ出ていて、あなたには見えません。内容を推測して書かず、ユーザーにカードを見るよう伝えて、次の作業に進んでください。',
+  doneUnconfirmed: '書き込みは送り、サイトは受け付けました。ただ、読み直して約束どおりになったかは確かめられませんでした（止まってはいません）。したことはカードとして相談に出しました。サイトの内容はカードにだけ出ていて、あなたには見えません。内容を推測して書かず、ユーザーにカードを見て、サイトの画面で確かめるよう伝えてください。',
+  doneDiffers: '書き込みは送り、サイトは受け付けましたが、読み直すと、約束した値や送った値と違う項目がありました。カードとして相談に出しました。サイトの内容はカードにだけ出ていて、あなたには見えません。内容を推測して書かず、ユーザーにカードを見て、サイトの画面で確かめるよう伝えてください。',
   unknown: '分からない書き込みがあります（送ったあと、サイトから答えが来ませんでした）。もう一度は送りません。ユーザーに、カードを見てサイトの画面で確かめてもらってください。',
   stoppedBy: {
     'not-found': '止まりました：頼まれたものがサイトで見つかりませんでした。',
@@ -790,7 +856,9 @@ export const BROWSER_WORK_WORDS = {
    * In place of the footer when the card asks the member to decide (its question is never in these words). Only said for a
    * run that wrote nothing (`workStopNext`): a new request starts that work over from the site's own state.
    */
-  askedFooter: 'この作業では、サイトにまだ何も書いていません。カードに、人に決めてほしいことと［そのまま進める］［やめる］を出しました。ユーザーの返事を待ってください。返事で進めてよいと言われたら、決まったことを said（本人の言葉）に書き足して、もう一度頼んでください。',
+  askedFooter: 'この作業では、サイトにまだ何も書いていません。カードに、人に決めてほしいことと［そのまま進める］［やめる］を出しました。ユーザーの返事を待ってください。ユーザーが［そのまま進める］を押すと、決まった言葉とカードの番号（bo_… か bf_…）が届きます。そのときは同じ頼みをもう一度、decision にそのカードの番号を入れて頼んでください。［やめる］なら、続けないでください。',
+  /** A `decision` that names no stopped card the member answered here (or one already used, or of another site or Skill). */
+  badDecision: 'decision のカードの番号は、ユーザーが［そのまま進める］を押したカードのものではありません（もう使った、別のサイトや Skill のもの、時間が過ぎたなど）。何もしていません。ユーザーにカードで答えてもらうか、新しく頼み直してください。',
   unread: (headings: readonly string[]) => `読めなかったもの：${headings.map(h => `「${h}」`).join('、')}`,
 } as const
 const WW = BROWSER_WORK_WORDS
@@ -802,7 +870,8 @@ const WW = BROWSER_WORK_WORDS
  */
 export function workWordsForAi(end: WorkEnd, items: readonly string[], unread: readonly number[], unreadAddresses: readonly string[] = [], asked = false): string {
   const headings = [...unread.map(n => items[n - 1]).filter((h): h is string => typeof h === 'string'), ...unreadAddresses]
-  const lines = end.kind === 'done' ? [WW.done] : end.kind === 'unknown' ? [WW.unknown] : [WW.stoppedBy[end.why], asked ? WW.askedFooter : WW.stoppedFooter]
+  const doneWords = end.kind === 'done' ? (end.business === 'matched' ? WW.done : end.business === 'differs' ? WW.doneDiffers : WW.doneUnconfirmed) : ''
+  const lines = end.kind === 'done' ? [doneWords] : end.kind === 'unknown' ? [WW.unknown] : [WW.stoppedBy[end.why], asked ? WW.askedFooter : WW.stoppedFooter]
   if (headings.length > 0) lines.push(WW.unread(headings))
   return lines.join('\n')
 }
@@ -831,9 +900,15 @@ export const BROWSER_WORK_CARD_WORDS = {
     'not-sent': '送っていません',
     unknown: `届いたか分かりません（${BROWSER_CARD_CHECKED_BY_WORDS.none}）`,
     refused: '計画の枠に合わないので止めました（送っていません）',
-    'site-refused': 'サイトが受け付けませんでした（保存されていません）',
+    'site-refused': 'サイトがエラーを返しました（保存されたかは確かめていません）',
   } satisfies Record<BrowserRunWriteOutcome, string>,
-  siteRefusedStatus: (status: number) => `サイトが「${status}」を返して受け付けませんでした（保存されていません）`,
+  /**
+   * A refused write: the site's error alone (`unconfirmed`), or read again and found unchanged (`unchanged`: only then "not
+   * saved"; agent-browser.md "Sent is not done").
+   */
+  siteRefusedStatus: (status: number, refusal: 'unchanged' | 'unconfirmed' = 'unconfirmed') => (refusal === 'unchanged'
+    ? `サイトが「${status}」を返しました。読み直して変わっていないことを確かめました（保存されていません）`
+    : `サイトが「${status}」を返しました。保存されたかどうかは確かめられていません`),
   failedStatus: (status: number) => `サイトが「${status}」を返しました。届いたかどうか、変わったかどうかは分かりません（${BROWSER_CARD_CHECKED_BY_WORDS.none}）`,
   reread: (address: string) => `読み直し：${address}`,
   created: 'なし（この作業で作ったもの）',
@@ -841,7 +916,20 @@ export const BROWSER_WORK_CARD_WORDS = {
   // (`BROWSER_INSPECTION_CARD_WORDS.checkedBy`): the headings no longer repeat it (owner 2026-11-27).
   aiChecks: 'ブラウザ操作の係の AI が確かめたこと',
   summary: 'ブラウザ操作の係の AI のまとめ（係の AI がページを読んで書いたもので、確かめた事実ではありません。相談の AI には渡していません）',
-  done: '済みました。読み直した結果を確かめてください。',
+  done: '済みました。読み直して、約束した値と送った値になっていることを確かめました。',
+  doneUnconfirmed: '送りました（サイトは受け付けました）。済んだかは、読み直して確かめられませんでした。サイトの画面で確かめてください。',
+  doneDiffers: '送りました（サイトは受け付けました）が、読み直すと違う項目があります。サイトの画面で確かめてください。',
+  /** The row of a value the run promised (the person's own, or approved on a card). */
+  promised: '約束した値',
+  promisedDiffers: '約束した値と、読み直した値が違う項目があります。サイトの画面で確かめてください。',
+  /** The card asks before a write outside the run's promise is sent (agent-browser.md "The run's promise"). */
+  askHeadline: 'この書き込みは、この作業の約束にないものを含みます。書いてよいか確かめてください（答えるまで送りません）。',
+  askField: (name: string) => `約束にない項目「${name}」も送ります`,
+  askTarget: (segment: string) => `書く先「${segment}」は、この作業で作ったものでも、頼みの値でもありません`,
+  askValue: (name: string, value: string) => `項目「${name}」に「${value}」を入れます（この作業で約束した値がありません）`,
+  askAllow: '書いてよい',
+  askDeny: '書かない',
+  askGone: '答えを受け取れませんでした（作業が終わったか、時間が過ぎました）。',
   unknown: '分からない書き込みがあります。もう一度は送りません。下の「手でやること」を見て、サイトの画面で確かめてください。',
   /** After a stop's fixed reason: what the card then shows (nothing sent at all, or the sent and not sent apart). */
   stoppedNothingSent: 'サイトには何も書いていません。',
@@ -913,32 +1001,68 @@ export interface AfterReadResult {
   before: Array<[string, string]> | null | 'created'
   after: Array<[string, string]> | null
   sent: Record<string, string> | null
+  /** The values the run promised for that write's bound fields (agent-browser.md "The run's promise"); null: none. */
+  promised?: Record<string, string> | null
+  /** Which done write (its place among them) the address came from; null / absent: none. */
+  from?: number | null
+}
+
+/**
+ * What reading back says of the run (agent-browser.md "Sent is not done"): `matched` only when every done write (`done`:
+ * how many) was read again at an address that came from it, every value compared there — promised, else sent — reads as
+ * it should, and nothing promised was missing; `differs` when anything compared reads otherwise; else `unconfirmed`
+ * (nothing written, nothing read, a write no address came from, a promised field not shown, nothing to compare).
+ */
+export function workBusinessOf(done: number, reads: readonly AfterReadResult[]): WorkBusiness {
+  let differs = false
+  let short = done === 0
+  for (let i = 0; i < done; i++) {
+    const mine = reads.filter(r => r.from === i && r.after)
+    if (mine.length === 0) { short = true; continue }
+    for (const r of mine) {
+      const s = afterReadSection(r)
+      if (s.differs.length > 0) differs = true
+      if (s.unconfirmed.length > 0 || s.compared === 0) short = true
+    }
+  }
+  return differs ? 'differs' : short ? 'unconfirmed' : 'matched'
 }
 
 const read = (text: string): BrowserCardValue => ({ status: 'read', text })
 const unreadable: BrowserCardValue = { status: 'unreadable' }
 
-/** An after-read section: each field before → after, checked by the machine when the write sent that very field (bug 1: both sides shown). */
-export function afterReadSection(r: AfterReadResult): { section: BrowserCardSection; differs: string[] } {
-  if (!r.after) return { section: { heading: CW.reread(r.pattern), rows: [{ label: r.pattern, value: unreadable }] }, differs: [] }
+/**
+ * An after-read section: each field before → after, checked by the machine against the value the run **promised** for it
+ * (a bound field) or else the value the write sent (bug 1: both sides shown). `differs`: fields read otherwise;
+ * `promisedDiffers`: of them, the promised ones; `unconfirmed`: a promised field the read did not show.
+ */
+export function afterReadSection(r: AfterReadResult): { section: BrowserCardSection; differs: string[]; promisedDiffers: string[]; unconfirmed: string[]; compared: number } {
+  if (!r.after) return { section: { heading: CW.reread(r.pattern), rows: [{ label: r.pattern, value: unreadable }] }, differs: [], promisedDiffers: [], unconfirmed: [], compared: 0 }
   const before = r.before === 'created' || r.before === null ? null : new Map(r.before)
   const differs: string[] = []
+  const promisedDiffers: string[] = []
+  let compared = 0
+  const has = (o: Record<string, string> | null | undefined, k: string): o is Record<string, string> => !!o && Object.prototype.hasOwnProperty.call(o, k)
   const rows: BrowserCardRow[] = r.after.map(([k, now]) => {
     const was: BrowserCardValue = r.before === 'created' ? read(CW.created) : before?.has(k) ? read(before.get(k) as string) : unreadable
-    if (r.sent && Object.prototype.hasOwnProperty.call(r.sent, k)) {
-      const ok = r.sent[k] === now
-      if (!ok) differs.push(k)
-      return { label: k, before: was, after: read(now), compared: read(r.sent[k]), by: 'machine', mark: ok ? 'ok' : 'ng' }
+    const want = has(r.promised, k) ? r.promised[k] : has(r.sent, k) ? r.sent[k] : null
+    if (want !== null) {
+      compared++
+      const ok = want === now
+      if (!ok) { differs.push(k); if (has(r.promised, k)) promisedDiffers.push(k) }
+      return { label: k, before: was, after: read(now), compared: read(want), by: 'machine', mark: ok ? 'ok' : 'ng' }
     }
     return { label: k, before: was, after: read(now), by: 'none' }
   })
-  return { section: { heading: CW.reread(r.pattern), rows }, differs }
+  const shown = new Set(r.after.map(([k]) => k))
+  const unconfirmed = Object.keys(r.promised ?? {}).filter(k => !shown.has(k))
+  return { section: { heading: CW.reread(r.pattern), rows }, differs, promisedDiffers, unconfirmed, compared }
 }
 
 export interface WorkCardInput {
   end: WorkEnd
   summary: string | null
-  writes: ReadonlyArray<{ line: string; outcome: BrowserRunWriteOutcome; status: number | null }>
+  writes: ReadonlyArray<{ line: string; outcome: BrowserRunWriteOutcome; status: number | null; refusal?: 'unchanged' | 'unconfirmed' }>
   afterReads: readonly AfterReadResult[]
   checks: readonly WorkCheck[]
   comparedName: string | null
@@ -959,16 +1083,19 @@ export function workResultCard(input: WorkCardInput): BrowserCard {
       rows: input.writes.map((w, i) => ({
         label: `${i + 1}. ${w.line}`,
         value: read(w.status === null ? CW.writeOutcome[w.outcome]
-          : w.outcome === 'unknown' ? CW.failedStatus(w.status) : w.outcome === 'site-refused' ? CW.siteRefusedStatus(w.status) : CW.writeOutcome[w.outcome]),
+          : w.outcome === 'unknown' ? CW.failedStatus(w.status) : w.outcome === 'site-refused' ? CW.siteRefusedStatus(w.status, w.refusal) : CW.writeOutcome[w.outcome]),
       })),
     })
   }
   const machineDiffers: string[] = []
+  const promisedDiffers: string[] = []
   for (const r of input.afterReads) {
-    const { section, differs } = afterReadSection(r)
-    sections.push(section)
-    machineDiffers.push(...differs)
+    const read = afterReadSection(r)
+    sections.push(read.section)
+    machineDiffers.push(...read.differs.filter(k => !read.promisedDiffers.includes(k)))
+    promisedDiffers.push(...read.promisedDiffers)
   }
+  if (promisedDiffers.length > 0) checks.push({ label: CW.promisedDiffers, mark: 'ng', fields: promisedDiffers })
   if (machineDiffers.length > 0) checks.push({ label: CW.sentDiffers, mark: 'ng', fields: machineDiffers })
   if (input.checks.length > 0) {
     sections.push({
@@ -985,13 +1112,15 @@ export function workResultCard(input: WorkCardInput): BrowserCard {
   // told the member nothing (owner 2026-11-27); a `done` without words still says it could not be read.
   if (input.summary !== null) sections.push({ heading: CW.summary, rows: [{ label: '', value: input.summary ? read(input.summary) : unreadable }] })
   const unknown = input.writes.filter(w => w.outcome === 'unknown')
-  const notRead = input.afterReads.some(r => !r.after)
-  const state: BrowserCard['state'] = input.end.kind !== 'done' || notRead ? 'not_read' : checks.length > 0 ? 'ng' : 'all_ok'
+  // "The site answered success" is not "done" (agent-browser.md "Sent is not done"): the card is all ✓ only when reading back
+  // matched what the run promised and sent; a run nothing could be compared for is not ✓ (Codex review point 8).
+  const business = input.end.kind === 'done' ? input.end.business ?? 'unconfirmed' : null
+  const state: BrowserCard['state'] = input.end.kind !== 'done' ? 'not_read' : checks.length > 0 || business === 'differs' ? 'ng' : business === 'matched' ? 'all_ok' : 'not_read'
   return {
     title: CW.resultTitle,
     state,
     // A stop: its fixed reason once, then whether anything was sent at all (no write held: nothing reached the site).
-    headline: input.end.kind === 'done' ? CW.done : input.end.kind === 'unknown' ? CW.unknown
+    headline: input.end.kind === 'done' ? (business === 'matched' ? CW.done : business === 'differs' ? CW.doneDiffers : CW.doneUnconfirmed) : input.end.kind === 'unknown' ? CW.unknown
       : `${WW.stoppedBy[input.end.why]}${input.writes.length === 0 ? CW.stoppedNothingSent : CW.stoppedSplit}`,
     sections,
     checks,

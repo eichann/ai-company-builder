@@ -47,6 +47,13 @@ export interface BrowserFrameView {
   used: number
   /** Units still usable now: 0 once the run is locked or ended. */
   left: number
+  /**
+   * The run's promise (agent-browser.md "The run's promise"): the other body fields this frame's writes may carry, and the
+   * body fields bound to a promised value by label — from the Skill's `browser.yaml`. Absent: not declared (also from an
+   * older server).
+   */
+  body?: string[]
+  bind?: Record<string, string>
 }
 
 export interface BrowserFrameWriteView {
@@ -59,6 +66,12 @@ export interface BrowserFrameWriteView {
   confirmableAt?: string | null
   /** The person's answer about it, who and when (null: none). Absent from an older server. */
   confirmed?: { answer: BrowserFrameConfirmAnswer; by: string; at: string } | null
+  /**
+   * A `refused` write the app read again and found unchanged (agent-browser.md "Sent is not done"): only then is it known
+   * not saved. False: the site's error alone — whether it saved anything is not known. Absent for other states and from an
+   * older server.
+   */
+  checked?: boolean
 }
 
 export interface BrowserFrameRunView {
@@ -131,6 +144,21 @@ export interface BrowserFramePermitRequest {
   path: string
   /** The frame's fixed fields as the body holds them, and `_method` when the body has one. */
   fields: Record<string, string>
+}
+
+/**
+ * Why a permit was refused for the run's promise (409, agent-browser.md "The run's promise"): `BROWSER_PROMISE_BROKEN` (a
+ * bound field holds another value or is missing: `reason`, `field`) or `BROWSER_PROMISE_ASK` (not in the promise yet: the
+ * body field names outside it, the path's open segments by place, the bound fields with no promised value) — the person is
+ * asked on the card, and their 「書いてよい」 adds exactly those (`POST …/promise-add`).
+ */
+export interface BrowserPromiseRefusal {
+  code: 'BROWSER_PROMISE_BROKEN' | 'BROWSER_PROMISE_ASK'
+  reason?: 'value' | 'missing'
+  field?: string
+  fields?: string[]
+  targets?: number[]
+  values?: string[]
 }
 
 /** The answer to a permit: send this one write once, within `validMs` of asking. */

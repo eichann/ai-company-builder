@@ -89,7 +89,11 @@ export const browserWorkSchema = z.object({
   said: z.array(z.string()).optional().describe('ユーザー本人がはっきり言った禁止・制約だけ、本人の言葉のまま（例：既存のものは変えない、登録の前で止めて）。10個まで、各300字まで。あなたの考えた手順や止まる条件は書かない。The prohibitions and limits the user said, in their words; never your own steps or stop conditions.'),
   values: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('ユーザー本人が言った値（名前・日付・番号など）。16個まで、label 40字・value 200字まで。The values the user gave.'),
   items: z.array(z.string()).optional().describe('読み取ってほしいものの見出し（10個まで、各40字まで）。読めなかったものは見出しで返る。'),
+  decision: z.string().optional().describe('ユーザーが止まったカードで［そのまま進める］を押したときだけ、そのカードの番号（bo_… / bf_…、ユーザーの返事にある）。同じ頼みの続きになる。The stopped card the user answered, to continue it.'),
 })
+
+/** A stopped card's id as `decision` names it: a write run's (`bf_`) or a stopped preview's (`bo_`). */
+const DECISION_RE = /^b[fo]_[0-9a-f]{32}$/
 
 /** The work tool's description for one turn: the shared words, then the domains this company registered. */
 export function browserWorkDescription(domains: readonly string[]): string {
@@ -107,7 +111,7 @@ ${domains.length > 0 ? domains.map(d => `- ${d}`).join('\n') : BROWSER_CATALOG_N
 
 /** `browser_work`'s tool: checks the input's shape, runs the write task (one per turn), puts the card's reference into the reply. */
 export function createBrowserWorkTool(
-  run: (input: { site: string; task: string; skill: string | null; said: string[]; values: Array<{ label: string; value: string }>; items: string[] }) => Promise<{ words: string }>,
+  run: (input: { site: string; task: string; skill: string | null; said: string[]; values: Array<{ label: string; value: string }>; items: string[]; decision: string | null }) => Promise<{ words: string }>,
   domains: readonly string[] = [],
 ): { description: string; execute(args: unknown): Promise<string> } {
   let calls = 0
@@ -130,9 +134,11 @@ export function createBrowserWorkTool(
       }
       const person = workPersonOf(a.said, a.values)
       if (!person) return KW.badInput
+      // A stopped card's id only (its answer is main's; agent-browser.md "The stopped card's answer").
+      if (a.decision !== undefined && (typeof a.decision !== 'string' || !DECISION_RE.test(a.decision))) return KW.badInput
       calls++
       try {
-        return (await run({ site: a.site, task: a.task, skill, said: person.said, values: person.values, items })).words
+        return (await run({ site: a.site, task: a.task, skill, said: person.said, values: person.values, items, decision: (a.decision as string | undefined) ?? null })).words
       } catch {
         return KW.failed
       }
@@ -164,7 +170,7 @@ export function workPersonOf(said: unknown, values: unknown): { said: string[]; 
 /** The work wiring's side the tool needs (features/browser/work.ts). */
 export interface BrowserWorkPlans {
   available(): boolean
-  work(input: { companyId: string; conversationId: string | null; companyRoot: string | null; site: string; task: string; skill: string | null; said: readonly string[]; values: ReadonlyArray<{ label: string; value: string }>; items: readonly string[]; signal: AbortSignal; onCard(runId: string): void }): Promise<{ words: string }>
+  work(input: { companyId: string; conversationId: string | null; companyRoot: string | null; site: string; task: string; skill: string | null; said: readonly string[]; values: ReadonlyArray<{ label: string; value: string }>; items: readonly string[]; decision?: string | null; signal: AbortSignal; onCard(runId: string): void }): Promise<{ words: string }>
 }
 
 export const browserBrowseSchema = z.object({
@@ -341,7 +347,7 @@ export function browserInspectForTurn(
   if (works && works.available() && browses) {
     tools.work = createBrowserWorkTool(input => works.work({
       companyId: turn.companyId, conversationId: turn.conversationId, companyRoot: turn.companyRoot ?? null, signal: turn.signal,
-      site: input.site, task: input.task, skill: input.skill, said: input.said, values: input.values, items: input.items, onCard: turn.onCard,
+      site: input.site, task: input.task, skill: input.skill, said: input.said, values: input.values, items: input.items, decision: input.decision, onCard: turn.onCard,
     }), browses.domains(turn.companyId))
     // The member's own Skill draft from their own recordings: beside the write task it is made for.
     if (drafts && drafts.available()) tools.draft = createBrowserSkillDraftTool(drafts, turn.companyId)

@@ -24,6 +24,8 @@ import { parsePluginManifest } from '../../../../shared/core/plugin-manifest'
 import type { BrowserLineRef } from '../../../../shared/types/browser-lines'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_FRAME_RUN_REF_RE, BROWSER_LINE_PLAN_ID_RE, BROWSER_WRITE_CARD_REF_RE } from '../../../shared/browser-inspection'
+import { BROWSER_RUN_ID_RE } from '../../../../shared/core/browser-run-log'
+
 import {
   BROWSER_WRITE_CARD_WORDS as CW, BROWSER_WRITE_WORDS as W, browserStoppedLists, browserWriteSentences, lineWriteMechanicsProblem, writerKey,
   type BrowserLineWriters, type BrowserWriteCardValue, type BrowserWriteGetResult, type BrowserWriteResultView, type BrowserWriteView,
@@ -43,6 +45,9 @@ import type { BrowserRunRecords } from './runner'
 import { createBrowserWriteRunner, type BrowserWritePrepared, type BrowserWriteRunResult, type BrowserWriteRunSite } from './write-line-runner'
 
 /** One site's map with its writers (client/connector-maps/<site>/, handed in by main.ts only). */
+/** A stopped card that may ask to decide: a write run's (`bf_`) or a stopped preview's (`bo_`). */
+const STOP_CARD_RE = { test: (id: string) => BROWSER_FRAME_RUN_REF_RE.test(id) || BROWSER_RUN_ID_RE.test(id) }
+
 export interface BrowserWriteSite extends BrowserInspectionSite {
   writers: BrowserLineWriters
 }
@@ -95,6 +100,16 @@ export interface BrowserWriteLinesDeps {
     placeOf(companyId: string, runId: string): { conversationId: string | null } | null
     /** ［済んでいた］／［されていなかった］ about its write in doubt (absent: the card offers no answer). */
     confirm?(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null>
+    /** ［書いてよい］／［書かない］ about a write outside the run's promise (absent: none asked). */
+    allow?(companyId: string, runId: string, allow: unknown): BrowserWriteGetResult | null
+  }
+  /**
+   * A stopped card's fixed answer (`bo_` / `bf_`, agent-browser.md "The stopped card's answer"): ［そのまま進める］ or ［やめる］,
+   * kept by the work wiring for the request that continues it. The same window rule as every card (its consultation's).
+   */
+  stopCards?: {
+    decide(companyId: string, cardId: string, choice: unknown): { ok: true } | { ok: false; message: string } | null
+    placeOf(companyId: string, cardId: string): { conversationId: string | null } | null
   }
 }
 
@@ -423,6 +438,24 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     const framed = frameCard(event, companyId, cardId)
     if (!framed) return { ok: false, message: MESSAGES.badInput }
     return 'message' in framed ? { ok: false, message: framed.message } : gone(deps.frameCards!.cancel(framed.companyId, framed.runId))
+  })
+
+  // ［書いてよい］［書かない］ on a write run's card: a write outside the run's promise waits for it (the page's request held).
+  ipc.handle('browserLines:allowWrite', async (event, companyId, cardId, allow): Promise<BrowserWriteGetResult> => {
+    const framed = frameCard(event, companyId, cardId)
+    if (!framed) return { ok: false, message: MESSAGES.badInput }
+    if ('message' in framed) return { ok: false, message: framed.message }
+    return deps.frameCards!.allow ? gone(deps.frameCards!.allow(framed.companyId, framed.runId, allow)) : { ok: false, message: MESSAGES.badInput }
+  })
+
+  // ［そのまま進める］［やめる］ on a stopped card that asks to decide (a `bo_` or `bf_` card): its fixed answer, from a window
+  // showing its consultation. Nothing reaches the site or an AI here; the member's message then says which card it was.
+  ipc.handle('browserLines:decide', async (event, companyId, cardId, choice): Promise<{ ok: true } | { ok: false; message: string }> => {
+    if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || typeof cardId !== 'string' || !STOP_CARD_RE.test(cardId) || !deps.stopCards) return { ok: false, message: MESSAGES.badInput }
+    const place = deps.stopCards.placeOf(companyId, cardId)
+    if (!place) return { ok: false, message: CW.gone }
+    if (!fromCardWindow(event, companyId, place.conversationId)) return { ok: false, message: MESSAGES.notMainWindow }
+    return deps.stopCards.decide(companyId, cardId, choice) ?? { ok: false, message: CW.gone }
   })
 
   // ［済んでいた］［されていなかった］: the write in doubt only, the person's answer to the server (it decides when).

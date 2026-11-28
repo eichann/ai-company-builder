@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
-  BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
+  BROWSER_WORK_CARD_WORDS as CW, WORK_NOT_PRESSED_WHILE_SENDING, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer, readBackUnchanged,
   WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readBackLanded, readHeldWrite, sentBodyWhole, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
@@ -31,6 +31,7 @@ import { readBrowserCard } from '../shared/browser-inspection'
 import { browserNeverReadFits, browserWriteAnswerKind } from '../../shared/core/browser-frame-match'
 import { browserRunWritesProblem } from '../../shared/core/browser-run-log'
 import { browserSkillDeclarationFrom } from '../../shared/core/browser-skill'
+import { browserPromiseState } from '../../shared/core/browser-run-promise'
 import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS } from '../../shared/core/browser-run-budget'
 import { createFrameWriter, type FrameWritesApi } from '../electron/features/browser/frame-writes'
 import { wireBrowserWork } from '../electron/features/browser/work'
@@ -524,13 +525,18 @@ interface WorkWorld {
   materials: unknown[]
   /** How often the server was asked before a step (`continue`). */
   continues: number
+  /** The server takes the run's promise (agent-browser.md "The run's promise"); absent: an older server (no route). */
+  promise?: boolean
+  /** The bodies sent to the promise routes and each permit's check, in order. */
+  promises: unknown[]
+  checks: unknown[]
 }
 
 const SCREEN_MARKER = 'ACB-SCREEN-4b9d'
 
 function workWorld(over: Partial<WorkWorld> = {}) {
   const w: WorkWorld = {
-    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {}, images: [], materials: [], continues: 0,
+    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {}, images: [], materials: [], continues: 0, promises: [], checks: [],
     frameStart: body => ({ kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000 } }),
     runFinish: async () => ({ kind: 'ok', value: {} }),
@@ -589,12 +595,16 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
-    async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); w.onPermit?.(hooks); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
+    ...(w.promise ? {
+      async framePromise(_c: string, _r: string, body: unknown) { w.calls.push('framePromise'); w.promises.push(body); return { kind: 'ok', value: { made: true } } as BrowserLinesAnswer },
+      async framePromiseAdd(_c: string, _r: string, body: unknown) { w.calls.push('framePromiseAdd'); w.promises.push(body); return { kind: 'ok', value: { added: 1 } } as BrowserLinesAnswer },
+    } : {}),
+    async framePermit(_c: string, _r: string, body: { frame: number; check?: unknown }) { w.calls.push('framePermit'); w.checks.push(body.check ?? null); w.onPermit?.(hooks); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
     // Another run than this task's (the write ledger: an earlier request's write) is named in the call.
     async frameGet(_c: string, r: string) { w.calls.push(`frameGet${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameGet() },
     async frameConfirm(_c: string, r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameConfirm() },
-    async frameReport(_c: string, _r: string, body: { result: string; reason?: string }) {
-      w.calls.push(`frameReport ${body.result}${body.reason === 'read-back' ? ' read-back' : ''}`)
+    async frameReport(_c: string, _r: string, body: { result: string; reason?: string; checked?: string }) {
+      w.calls.push(`frameReport ${body.result}${body.reason === 'read-back' ? ' read-back' : ''}${body.checked ? ` checked=${body.checked}` : ''}`)
       return (body.reason === 'read-back' && w.readBackTaken === false ? { kind: 'refused', code: 'BROWSER_REPORT_CONFLICT' } : { kind: 'ok', value: {} }) as BrowserLinesAnswer
     },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
@@ -630,6 +640,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     if (w.abortAfterMs !== undefined) setTimeout(() => turn.abort(), w.abortAfterMs)
     return wiring.work({
       companyId: COMPANY, conversationId: 'conv-1', companyRoot: w.skillSteps ? '/company' : null, site: input.site, task: input.task, skill: input.skill, items: input.items,
+      said: input.said, values: input.values, decision: input.decision,
       signal: turn.signal, onCard: id => cards.push(id),
     })
   }, [HOST])
@@ -984,7 +995,7 @@ test('［やめる］ on the card: nothing is permitted or sent, the run ends, t
 test('a pre-approved Skill runs without the card or a preview; one whose text changed shows the card once', async () => {
   const pre = workWorld({ answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }) })
   const said = await pre.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
-  assert.equal(said.startsWith(W.done), true)
+  assert.equal(said.startsWith(W.doneUnconfirmed), true)
   assert.equal(pre.w.calls.some(c => c === 'step work-preview' || c.startsWith('frameApprove')), false)
   assert.equal(pre.w.site.requests.length, 1)
   assert.equal(pre.wiring.card(COMPANY, FRAME_RUN)?.ok && (pre.wiring.card(COMPANY, FRAME_RUN) as { view: { phase: string } }).view.phase, 'finished')
@@ -995,7 +1006,7 @@ test('a pre-approved Skill runs without the card or a preview; one whose text ch
   assert.ok(changed.w.calls.includes('step work-preview'))
   assert.equal(changed.w.calls.some(c => c.startsWith('framePermit')), false)
   await changed.wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
-  assert.equal((await words).startsWith(W.done), true)
+  assert.equal((await words).startsWith(W.doneUnconfirmed), true)
 })
 
 test('a person at 見るだけ never starts a write task: refused before the operator, the window or the frames', async () => {
@@ -1070,7 +1081,7 @@ test('the work goes as far as the server\'s budget: a Skill\'s 60 steps when it 
     answers: [...answers], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000, budget: 'skill' } }),
   })
-  assert.equal((await asSkill.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.done), true)
+  assert.equal((await asSkill.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.doneUnconfirmed), true)
   assert.equal(workSteps(asSkill.w.calls), 31)
   for (const budget of [undefined, 'standard', 'huge']) {
     const plain = workWorld({
@@ -1212,7 +1223,7 @@ test('a write the site refused leaves the run going: the operator corrects and s
   assert.deepEqual(view.result?.done, ['POST /coupons'])
   assert.deepEqual(view.result?.notDone, ['POST /coupons'])
   assert.equal(view.result?.confirm, null)
-  assert.match(JSON.stringify(view.card), /サイトが「422」を返して受け付けませんでした/)
+  assert.match(JSON.stringify(view.card), /サイトが「422」を返しました。保存されたかどうかは確かめられていません/)
 })
 
 test('an older server (no `refused`): the refused report is not recorded → kept unknown and locked; a run log it refuses as bad is sent once more with those steps unknown', async () => {
@@ -1359,7 +1370,7 @@ test('a department Skill: the AI\'s name or path goes to the server as given, an
     frameStart: () => ({ kind: 'ok', value: { ...started({ needsApproval: false }), skill: DEPT_SKILL, steps: sealOf('# SKILL.md\n営業の手順') } }),
     skillSteps: skill => { read.push(skill); return '# SKILL.md\n営業の手順' },
   })
-  assert.equal((await dept.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.done), true)
+  assert.equal((await dept.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.doneUnconfirmed), true)
   assert.ok(dept.w.calls.includes('frameStart {"skill":"coupons","conversationId":"conv-1"}'), dept.w.calls.join('\n'))
   // Not the name the AI typed: the path the server's frames come from.
   assert.deepEqual(read, [DEPT_SKILL])
@@ -1447,7 +1458,7 @@ test('an earlier write in doubt is asked on the card before the operator works; 
   const answered = await world.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
   assert.equal(answered?.ok, true)
   assert.ok(world.w.calls.includes(`frameConfirm 3 not_done @${EARLIER_RUN}`))
-  assert.equal((await words).startsWith(W.done), true)
+  assert.equal((await words).startsWith(W.doneUnconfirmed), true)
   assert.equal(world.w.site.requests.length, 1)
   assert.deepEqual(world.cards, [FRAME_RUN], 'one card for the run')
 })
@@ -1493,13 +1504,13 @@ test('no answer within the card\'s time, or the turn stopped: nothing written; e
   await untilAsked(two)
   assert.equal(two.w.calls.some(c => c.startsWith('step ')), false, 'the second doubt is asked before the work')
   await two.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
-  assert.equal((await both).startsWith(W.done), true)
+  assert.equal((await both).startsWith(W.doneUnconfirmed), true)
   assert.ok(two.w.calls.includes(`frameConfirm 4 not_done @${EARLIER_RUN}`))
 })
 
 test('a run whose start names no doubt is not asked anything (the work as before)', async () => {
   const world = withDoubts([])
-  assert.equal((await world.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })).startsWith(W.done), true)
+  assert.equal((await world.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })).startsWith(W.doneUnconfirmed), true)
   assert.equal(world.w.calls.some(c => c.startsWith('frameConfirm') || c.startsWith('frameGet')), false)
 })
 
@@ -1583,4 +1594,261 @@ test('sentBodyWhole: only a body read whole (no repeated or nested field) may be
   assert.equal(sentBodyWhole(ok.shape), true)
   assert.equal(sentBodyWhole(nested.shape), false)
   assert.equal(sentBodyWhole(repeated.shape), false)
+})
+
+// ── The run's promise, sent is not done, the stopped card's answer (agent-browser.md "The run's promise", "Sent is not
+//    done", "The stopped card's answer"; Codex review points 3 / 4 / 6 / 7 / 8) ─────────────────────────────────────────
+
+const BOUND = (over: Partial<ReturnType<typeof started>['frames'][number]> & { bind?: Record<string, string>; body?: string[] } = {}) =>
+  ({ ...started({ needsApproval: false }), frames: [{ frame: 1, method: 'POST', path: '/coupons', fields: {}, max: 2, used: 0, left: 2, bind: { title: '名前' }, ...over }] })
+const PERSON = [{ label: '名前', value: '冬のクーポン' }]
+/** Waits until the card asks about a write outside the promise (or gives up). */
+async function untilPromiseAsk(wiring: ReturnType<typeof workWorld>['wiring']): Promise<BrowserWriteView | null> {
+  for (let i = 0; i < 400; i++) {
+    const v = viewOf(wiring)
+    if (v?.ask) return v
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return null
+}
+
+test('the run\'s promise is made before any permit, from what the person approved, as digests only — a pre-approved Skill\'s too', async () => {
+  const { w, tool } = workWorld({ promise: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: BOUND() }) })
+  await tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons', values: PERSON })
+  assert.ok(w.calls.indexOf('framePromise') < w.calls.indexOf('framePermit'), w.calls.join(' / '))
+  const promise = w.promises[0] as { values: Array<{ digest: string; source: string }>; binds: Array<{ frame: number; field: string; digest: string }>; decisions: string[] }
+  // No preview (pre-approved): only the person's own value; the bound field takes it by its label.
+  assert.deepEqual(promise.values.map(v => v.source), ['person'])
+  assert.deepEqual(promise.binds.map(b => [b.frame, b.field]), [[1, 'title']])
+  assert.equal(promise.binds[0].digest, promise.values[0].digest)
+  // The permit carries the write's check: the bound field's digest is the promised one; nothing of a value goes anywhere.
+  const check = w.checks[0] as { fields: Record<string, string>; segments: Array<string | null> }
+  assert.equal(check.fields.title, promise.values[0].digest)
+  assert.equal('_token' in check.fields, false)
+  for (const sent of [JSON.stringify(w.promises), JSON.stringify(w.checks)]) {
+    assert.equal(sent.includes('冬のクーポン') || sent.includes('csrf-9'), false, sent)
+  }
+  assert.equal(w.site.requests.length, 1)
+})
+
+test('a run with a card promises the preview\'s values the card shows; without a card nothing read from the screen is promised', async () => {
+  const withCard = workWorld({ promise: true, answers: [PLAN, CLICK_SAVE, DONE_PLAIN] })
+  const words = withCard.tool.execute({ site: HOST, task: 'クーポンを作って', values: PERSON })
+  for (let i = 0; i < 50 && withCard.cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  await withCard.wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
+  await words
+  assert.deepEqual((withCard.w.promises[0] as { values: Array<{ source: string }> }).values.map(v => v.source), ['person', 'preview'])
+  // The promise was made before the card could be approved.
+  assert.ok(withCard.w.calls.indexOf('framePromise') < withCard.w.calls.indexOf('frameApprove true'))
+})
+
+test('a bound field holding another value than the person\'s is never sent and never asked: the run says it is outside the promise', async () => {
+  const { w, tool, wiring } = workWorld({ promise: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: BOUND() }) })
+  await tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons', values: [{ label: '名前', value: '夏のクーポン' }] })
+  assert.equal(w.calls.includes('framePermit'), false)
+  assert.equal(w.site.requests.length, 0)
+  assert.equal(w.calls.includes('framePromiseAdd'), false)
+  const material = w.materials.at(-1) as { writes: Array<{ why?: string }> }
+  assert.equal(material.writes[0].why, WORK_WRITE_WHY_WORDS['outside-promise'])
+  assert.equal(viewOf(wiring)?.ask, undefined)
+})
+
+test('not in the promise yet is asked once on the card while the page waits: ［書かない］ sends nothing, ［書いてよい］ adds exactly that and sends', async () => {
+  // No value for the bound field, and a field outside the declared body.
+  const frames = () => ({ kind: 'ok' as const, value: BOUND({ body: ['title'] }) })
+  const deny = workWorld({ promise: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: frames, saveBody: '{"title":"冬のクーポン","memo":"x"}' })
+  const denied = deny.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  const asked = await untilPromiseAsk(deny.wiring)
+  assert.ok(asked?.ask, 'the card asks')
+  assert.deepEqual(asked.ask.items, [CW.askField('memo'), CW.askValue('title', '冬のクーポン')])
+  assert.equal(deny.w.calls.includes('framePermit'), false)
+  deny.wiring.allow(COMPANY, FRAME_RUN, false)
+  await denied
+  assert.equal(deny.w.calls.includes('framePermit'), false)
+  assert.equal(deny.w.site.requests.length, 0)
+  assert.equal((deny.w.materials.at(-1) as { writes: Array<{ why?: string }> }).writes[0].why, WORK_WRITE_WHY_WORDS['not-allowed'])
+
+  // The person answers after the run's give-up limit for a write on its way: the card's wait is not that limit.
+  const allow = workWorld({ promise: true, idleMaxMs: 40, pressDoesNotWait: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: frames, saveBody: '{"title":"冬のクーポン","memo":"x"}' })
+  const allowed = allow.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.ok((await untilPromiseAsk(allow.wiring))?.ask)
+  await new Promise(resolve => setTimeout(resolve, 200))
+  assert.ok(viewOf(allow.wiring)?.ask, 'still asking after the limit')
+  allow.wiring.allow(COMPANY, FRAME_RUN, true)
+  await allowed
+  assert.deepEqual(allow.w.calls.filter(c => c === 'framePromiseAdd' || c === 'framePermit'), ['framePromiseAdd', 'framePermit'])
+  const addition = allow.w.promises[1] as { frame: number; fields: string[]; binds: Array<{ field: string }> }
+  assert.deepEqual([addition.frame, addition.fields, addition.binds.map(b => b.field)], [1, ['memo'], ['title']])
+  assert.equal(JSON.stringify(addition).includes('冬のクーポン'), false)
+  assert.equal(allow.w.site.requests.length, 1)
+  // The wait was the card's: the write was never given up as unknown.
+  assert.equal(allow.w.calls.some(c => c.startsWith('frameReport unknown')), false)
+})
+
+test('targets: an open segment this run made, or one the person allowed, goes without a question; another is asked', async () => {
+  const digest = (v: string) => `hmac:${createHash('sha256').update(`k\0${v}`).digest('hex')}`
+  const asked: string[][] = []
+  const added: Parameters<typeof browserPromiseState>[1] = []
+  let allow = true
+  const site: Site = { requests: [], answer: n => (n === 1 ? { status: 201, body: '{"id":"55"}' } : ok201()) }
+  const permits: unknown[] = []
+  const api: FrameWritesApi = {
+    async framePermit(_c, _r, body) { permits.push(body); return { kind: 'ok', value: { write: permits.length, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } } },
+    async frameReport() { return { kind: 'ok', value: {} } },
+  }
+  const writer = createFrameWriter({
+    companyId: COMPANY, runId: FRAME_RUN, host: HOST, api, going: () => true, stepsSoFar: () => 0,
+    frames: [frame({ frame: 1, path: '/plans', max: 1, left: 1 }), frame({ frame: 2, path: '/plans/{n}/items', max: 4, left: 4 })],
+    promise: () => ({
+      state: () => browserPromiseState({ values: [], binds: [], decisions: [] }, added), digest,
+      ask: async (q) => { asked.push(q.items); if (allow) added.push(q.addition); return allow ? 'allowed' : 'denied' },
+    }),
+  })
+  await writer.hold(held(site, 'POST', '/plans', JSON_TYPE, '{}'))
+  // 55 was made by this run's own write: no question.
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/55/items', JSON_TYPE, '{}'))).kind, 'fulfill')
+  assert.deepEqual(asked, [])
+  // 77 nobody promised: asked, allowed, sent; the permit's check has its digest, never the number in a field.
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/77/items', JSON_TYPE, '{}'))).kind, 'fulfill')
+  assert.deepEqual(asked, [[CW.askTarget('77')]])
+  assert.equal((permits[2] as { check: { segments: Array<string | null> } }).check.segments[1], digest('77'))
+  // The same target again is not asked twice; another one is, and refused when the person says no.
+  await writer.hold(held(site, 'POST', '/plans/77/items', JSON_TYPE, '{}'))
+  allow = false
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/78/items', JSON_TYPE, '{}'))).kind, 'fail')
+  assert.deepEqual(asked, [[CW.askTarget('77')], [CW.askTarget('78')]])
+  assert.equal(permits.length, 4)
+})
+
+test('readBackUnchanged: "not saved" only when the read shows every sent field and reads exactly as before (independent review: a list page proves nothing)', () => {
+  const sent = { title: 'x' }
+  assert.equal(readBackUnchanged(sent, '{"title":"a","n":1}', '{"title":"a","n":1}'), true)
+  // The write's fields are not on the page read (a list, another shape): no proof.
+  assert.equal(readBackUnchanged(sent, '{"items":[]}', '{"items":[]}'), false)
+  assert.equal(readBackUnchanged(sent, '{"title":"a"}', '{"title":"b"}'), false)
+  assert.equal(readBackUnchanged({}, '{"title":"a"}', '{"title":"a"}'), false)
+  assert.equal(readBackUnchanged(null, '{"title":"a"}', '{"title":"a"}'), false)
+  assert.equal(readBackUnchanged(sent, '<html>', '<html>'), false)
+})
+
+test('sent is not done: a refused write is "not saved" only when its address, read right before, reads the same now; else not known', async () => {
+  for (const [readAgain, checked, refusal] of [['unchanged', 'unchanged', 'unchanged'], [null, undefined, 'unconfirmed']] as const) {
+    const reports: Array<{ result: string; checked?: string }> = []
+    const site: Site = { requests: [], answer: () => ({ status: 422, body: '{}' }) }
+    const writer = createFrameWriter({
+      companyId: COMPANY, runId: FRAME_RUN, host: HOST, going: () => true, stepsSoFar: () => 0, frames: [frame({ max: 2, left: 2 })],
+      api: { async framePermit(_c, _r, body) { return { kind: 'ok', value: { write: 1, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } } }, async frameReport(_c, _r, body) { reports.push(body); return { kind: 'ok', value: {} } } },
+      readAgain: async () => readAgain,
+      promise: () => ({ state: () => browserPromiseState({ values: [], binds: [], decisions: [] }, []), digest: v => `hmac:${createHash('sha256').update(v).digest('hex')}`, ask: async () => 'denied' }),
+    })
+    await writer.hold(held(site, 'POST', '/coupons', JSON_TYPE, '{}'))
+    assert.deepEqual(reports.map(r => [r.result, r.checked]), [['refused', checked]])
+    assert.equal(writer.records()[0].refusal, refusal)
+    assert.equal(writer.locked(), false)
+  }
+  // The card says which: never "not saved" from the status alone.
+  assert.match(CW.siteRefusedStatus(422), /確かめられていません/)
+  assert.match(CW.siteRefusedStatus(422, 'unchanged'), /保存されていません/)
+  assert.doesNotMatch(WORK_WRITE_WORDS['site-refused'], /保存されていません/)
+})
+
+test('sent is not done: "済みました" only when reading back matches what was promised and sent; differs and not read are said apart, never ✓', async () => {
+  const run = (reads: Record<string, string>, saveBody?: string) => {
+    const world = workWorld({ promise: true, answers: [CLICK_SAVE, DONE_PLAIN], reads, ...(saveBody ? { saveBody } : {}), frameStart: () => ({ kind: 'ok', value: { ...BOUND(), afterRead: ['/coupons/{created}'] } }) })
+    return world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons', values: PERSON }).then(words => ({ words, card: viewOf(world.wiring)?.card }))
+  }
+  const matched = await run({ '/coupons/4242': '{"title":"冬のクーポン"}' })
+  assert.ok(matched.words.startsWith(W.done), matched.words)
+  assert.equal(matched.card?.state, 'all_ok')
+  const differs = await run({ '/coupons/4242': '{"title":"夏のクーポン"}' })
+  assert.ok(differs.words.startsWith(W.doneDiffers), differs.words)
+  assert.equal(differs.card?.state, 'ng')
+  assert.match(JSON.stringify(differs.card), new RegExp(CW.promisedDiffers))
+  const unread = await run({})
+  assert.ok(unread.words.startsWith(W.doneUnconfirmed), unread.words)
+  assert.equal(unread.card?.state, 'not_read')
+  // A promised field the read does not show is not confirmed (Codex review point 8: missing is not equal).
+  // The sent memo reads as sent, the promised title is not shown: still not confirmed.
+  const missing = await run({ '/coupons/4242': '{"memo":"m"}' }, '{"title":"冬のクーポン","memo":"m"}')
+  assert.ok(missing.words.startsWith(W.doneUnconfirmed), missing.words)
+  // The card with nothing read back and nothing compared is never all ✓.
+  assert.equal(workResultCard({ end: { kind: 'done' }, summary: 'x', writes: [], afterReads: [], checks: [], comparedName: null }).state, 'not_read')
+})
+
+const STOP_ASKS = JSON.stringify({ do: 'stop', why: 'need-person', unread: [], question: '同名のタグ【全員に送る】がある。既存のタグを使ってよいか？' })
+const PREVIEW_CARD = `bo_${'a'.repeat(32)}`
+
+test('the stopped card\'s answer is not used up by a request refused before its run starts (independent review)', async () => {
+  const world = workWorld({ promise: true, answers: [STOP_ASKS], frameStart: () => ({ kind: 'refused', code: 'BROWSER_RUN_BUSY' }) })
+  // The first request's preview needs a frames run: refuse none for it, then the busy refusal for the continuation.
+  let starts = 0
+  world.w.frameStart = body => (++starts === 1 ? { kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) } : { kind: 'refused', code: 'BROWSER_RUN_BUSY' })
+  await world.tool.execute({ site: HOST, task: 'タグを作って', skill: 'coupons' })
+  world.wiring.decide(COMPANY, PREVIEW_CARD, 'proceed')
+  const again = () => world.wiring.work({ companyId: COMPANY, conversationId: 'conv-1', companyRoot: null, site: HOST, task: 'タグを作って', skill: 'coupons', items: [], decision: PREVIEW_CARD, signal: new AbortController().signal, onCard: () => {} })
+  assert.notEqual((await again()).words, W.badDecision)
+  // Still usable: the refusal came before the run started.
+  world.w.frameStart = () => ({ kind: 'refused', code: 'BROWSER_RUN_BUSY' })
+  assert.notEqual((await again()).words, W.badDecision)
+})
+
+test('the stopped card\'s answer: only a ［そのまま進める］ the member pressed continues it, once, for that site and Skill; the question goes to the next operator, never to the consultation AI', async () => {
+  const world = workWorld({ promise: true, answers: [STOP_ASKS, SKILL_PLAN, CLICK_SAVE, DONE_PLAIN] })
+  const first = await world.tool.execute({ site: HOST, task: 'タグを作って', skill: 'coupons' })
+  assert.equal(first.includes('同名のタグ'), false)
+  assert.ok(first.includes(W.askedFooter))
+  const again = (decision: string | null, over: { site?: string; skill?: string | null } = {}) => world.wiring.work({
+    companyId: COMPANY, conversationId: 'conv-1', companyRoot: null, site: over.site ?? HOST, task: 'タグを作って', skill: over.skill === undefined ? 'coupons' : over.skill,
+    items: [], decision, signal: new AbortController().signal, onCard: () => {},
+  })
+  // Not pressed yet: no continuing.
+  assert.equal((await again(PREVIEW_CARD)).words, W.badDecision)
+  assert.deepEqual(world.wiring.decide(COMPANY, PREVIEW_CARD, 'proceed'), { ok: true })
+  assert.equal((await again(PREVIEW_CARD, { skill: 'other' })).words, W.badDecision)
+  assert.equal(world.wiring.decide(COMPANY, `bo_${'9'.repeat(32)}`, 'proceed'), null)
+  const going = again(PREVIEW_CARD)
+  for (let i = 0; i < 100 && viewOf(world.wiring)?.phase !== 'ready'; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  await world.wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
+  const words = (await going).words
+  assert.equal(words.includes('同名のタグ'), false)
+  // The next operator has the question (outside text) and the fixed answer; the run's promise keeps the answer's word.
+  const material = world.w.materials.at(-1) as { person: { decided?: Array<{ question: { outside: string }; answer: string }> } }
+  assert.equal(material.person.decided?.[0].answer, 'はい（そのまま進める）')
+  assert.match(material.person.decided?.[0].question.outside ?? '', /同名のタグ〔全員に送る〕/)
+  assert.deepEqual((world.w.promises.at(-1) as { decisions: string[] }).decisions, ['proceed'])
+  // Used once.
+  assert.equal((await again(PREVIEW_CARD)).words, W.badDecision)
+})
+
+test('sent is not done: a refused write is compared with its address as it read right before that very write, not the run\'s first look (Codex review)', async () => {
+  // The first save changes the record A → B; the second answers 422 but put A back: never "found unchanged".
+  const reads: Record<string, string> = { '/coupons': '{"title":"A"}' }
+  // (The page's save sends a title: the read shows it, so an unchanged read is proof.)
+  const twice = { ...started({ needsApproval: false }), afterRead: ['/coupons'], frames: [{ frame: 1, method: 'POST', path: '/coupons', fields: {}, max: 2, used: 0, left: 2 }] }
+  const world = workWorld({
+    promise: true, reads, answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+    site: { requests: [], answer: n => { reads['/coupons'] = n === 1 ? '{"title":"B"}' : '{"title":"A"}'; return n === 1 ? ok201() : { status: 422, body: '{}' } } },
+  })
+  await world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.deepEqual(world.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done', 'frameReport refused'])
+  // A refusal whose address reads as it did right before it is "not saved".
+  const same: Record<string, string> = { '/coupons': '{"title":"A"}' }
+  const kept = workWorld({
+    promise: true, reads: same, answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+    site: { requests: [], answer: n => { if (n === 1) same['/coupons'] = '{"title":"B"}'; return n === 1 ? ok201() : { status: 422, body: '{}' } } },
+  })
+  await kept.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.deepEqual(kept.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done', 'frameReport refused checked=unchanged'])
+})
+
+test('a question answered just before the send limit: the send after it gets its own whole limit, never given up as unknown (Codex review)', async () => {
+  const frames = () => ({ kind: 'ok' as const, value: BOUND({ body: ['title'] }) })
+  const world = workWorld({ promise: true, idleMaxMs: 200, siteDelayMs: 150, pressDoesNotWait: true, answers: [CLICK_SAVE, DONE_PLAIN], frameStart: frames, saveBody: '{"title":"冬のクーポン","memo":"x"}' })
+  const words = world.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.ok((await untilPromiseAsk(world.wiring))?.ask)
+  await new Promise(resolve => setTimeout(resolve, 150))
+  world.wiring.allow(COMPANY, FRAME_RUN, true)
+  await words
+  assert.deepEqual(world.w.calls.filter(c => c.startsWith('frameReport')), ['frameReport done'])
+  assert.equal(world.w.site.requests.length, 1)
 })

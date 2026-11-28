@@ -961,6 +961,10 @@ export interface IpcInvokeChannels {
   'browserLines:runWrite': { args: [companyId: string, cardId: string, contentHash: string]; result: BrowserWriteGetResult }
   'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
   'browserLines:cancelWrite': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
+  /** ［書いてよい］／［書かない］ about a write outside the run's promise (agent-browser.md "The run's promise"; a window showing its consultation). */
+  'browserLines:allowWrite': { args: [companyId: string, cardId: string, allow: boolean]; result: BrowserWriteGetResult }
+  /** ［そのまま進める］／［やめる］ on a stopped card that asks to decide: its fixed answer, kept in main (agent-browser.md "The stopped card's answer"). */
+  'browserLines:decide': { args: [companyId: string, cardId: string, choice: 'proceed' | 'stop']; result: { ok: true } | { ok: false; message: string } }
   /** Settings › 「この PC」: this PC's registration state and the member's usable combinations — never the PC's key (main window only; agent-browser.md "This PC's registration"). */
   'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
   /** 「この PC を登録する」: main makes the key (OS keychain) and registers it; answers the new state only. */
@@ -1450,6 +1454,8 @@ export interface ElectronAPI {
   runBrowserWrite: Invoke<'browserLines:runWrite'>
   confirmBrowserWrite: Invoke<'browserLines:confirmWrite'>
   cancelBrowserWrite: Invoke<'browserLines:cancelWrite'>
+  allowBrowserWrite: Invoke<'browserLines:allowWrite'>
+  decideBrowserStop: Invoke<'browserLines:decide'>
   getBrowserPc: Invoke<'browserDevice:get'>
   registerBrowserPc: Invoke<'browserDevice:register'>
   withdrawBrowserPc: Invoke<'browserDevice:withdraw'>

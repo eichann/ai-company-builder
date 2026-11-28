@@ -1099,7 +1099,7 @@ describe('frames: writes only to what this run made ({made:<id>})', () => {
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_frame_runs').get()).toEqual({ n: 0 })
   })
 
-  it('a done without an id records nothing; an id only with done, only for a maker, only a plain token', async () => {
+  it('a done without an id records nothing; an id only with done, only a plain token — of any frame (the run\'s promise counts it as made here)', async () => {
     const run = await openMade()
     value(await permit(run.runId, 1, alice, MAKE))
     for (const body of [
@@ -1113,12 +1113,12 @@ describe('frames: writes only to what this run made ({made:<id>})', () => {
     value(await done(run.runId, 1))
     expect(madeRows()).toEqual([])
     expect(reason(await permit(run.runId, 2, alice, item('77')))).toEqual(['BROWSER_FRAME_MISMATCH', 'made'])
-    // A frame no later frame names makes nothing: an id with its done is refused, the write stays permitted.
+    // A frame no later frame names keeps what it made too (agent-browser.md "The run's promise": a target this run made); a
+    // `{made:<n>}` frame still fits only its own maker's (the run above).
     const other = await openPlain()
     value(await permit(other.runId, 1, alice, MAKE))
-    expect(code(await done(other.runId, 1, '5'))).toBe('BROWSER_FRAME_BAD_REQUEST')
-    expect(value(frames.get(alice, other.runId)).writes[0].state).toBe('permitted')
-    expect(madeRows()).toEqual([])
+    value(await done(other.runId, 1, '5'))
+    expect(madeRows()).toEqual([{ run_id: other.runId, seq: 1, frame_idx: 1, made: '5' }])
   })
 
   it('an unknown write gives no id, a late done after it neither; a refused one none, its retry that is done does', async () => {
@@ -1250,7 +1250,7 @@ describe('frames: a write with an exact query (agent-browser.md "A write with an
     initDatabase(before)
     initDatabase(before) // idempotent
     expect(before.prepare('SELECT path, query FROM browser_frames').all()).toEqual([{ path: '/api/orders/register', query: null }])
-    expect(sqliteCompanyData(before).forCompany('co-1').browserFrames.frames('bf_old')).toEqual([{ idx: 1, method: 'POST', path: '/api/orders/register', query: null, fields: '{}', max: 1, used: 0 }])
+    expect(sqliteCompanyData(before).forCompany('co-1').browserFrames.frames('bf_old')).toEqual([{ idx: 1, method: 'POST', path: '/api/orders/register', query: null, fields: '{}', max: 1, used: 0, promise: null }])
     expect(() => before.prepare("UPDATE browser_frames SET query = 'x'").run()).toThrow(/query never changes/)
   })
 })
@@ -1412,17 +1412,27 @@ describe('the write ledger across requests (agent-browser.md "The write ledger a
     expect(code(await permit(third.runId, 1))).toBe('ok')
   })
 
-  it('the site\'s answer ends it: a late done (also the app\'s read-back) or a late refusal', async () => {
+  it('the site\'s answer ends it: a late done (also the app\'s read-back), or a late refusal read again and found unchanged — a refusal alone does not', async () => {
     const first = await lostAnswer()
     value(frames.report(alice, first, { write: 1, result: 'done', reason: 'read-back' }, PC))
     expect(conn.prepare('SELECT state, reason FROM browser_frame_writes WHERE company_id = ? AND run_id = ?').get(CO, first)).toEqual({ state: 'done', reason: 'read-back' })
-    const next = await openAdhoc()
-    expect(code(await permit(next.runId, 1))).toBe('ok')
+    // A run of an app that keeps the run's promise (its refusals are read again before they count as "not saved").
+    const waiting = value(await frames.start(alice, { plan: adhoc }, PC))
+    value(frames.promise(alice, waiting.runId, { values: [], binds: [], decisions: [] }, PC))
+    const next = value(await approve(alice, waiting))
+    expect(code(await frames.permit(alice, next.runId, { frame: 1, request: FITS[1], check: { fields: {}, segments: [null, null, null] } }, PC))).toBe('ok')
     value(report(next.runId, 1, 'unknown'))
     value(frames.end(alice, next.runId))
+    // The site's late error alone proves nothing was saved? No ("Sent is not done"): still in doubt (an unknown write is,
+    // whichever app made it).
     value(report(next.runId, 1, 'refused'))
     const third = await openAdhoc()
-    expect(code(await permit(third.runId, 1))).toBe('ok')
+    expect(code(await permit(third.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+    value(frames.end(alice, third.runId))
+    // The same refusal read again and found unchanged: known not saved, the doubt ends.
+    value(frames.report(alice, next.runId, { write: 1, result: 'refused', checked: 'unchanged' }, PC))
+    const fourth = await openAdhoc()
+    expect(code(await permit(fourth.runId, 1))).toBe('ok')
   })
 
   it('a read-back from another PC ends nothing (a sure report: the run\'s own PC only)', async () => {
@@ -1483,5 +1493,219 @@ describe('the write ledger across requests (agent-browser.md "The write ledger a
     // Beside a permitted write, but naming another member than the run's: refused before the key is even looked at.
     expect(() => insert.run(CO, open.runId, 1, bob.userId, DOMAIN, 'member:x', `sha256:${'1'.repeat(64)}`, iso(now))).toThrow(/beside its permitted write/)
     expect(() => insert.run(CO, open.runId, 1, alice.userId, 'elsewhere.example.test', 'member:x', `sha256:${'1'.repeat(64)}`, iso(now))).toThrow(/beside its permitted write/)
+  })
+})
+
+describe('the run\'s promise (agent-browser.md "The run\'s promise")', () => {
+  /** A Skill binding the register write's `title` to 名前 and allowing `note` besides; the note frame's order is open (`{n}`). */
+  const boundYaml = `domain: ${DOMAIN}\nwrites:\n  - { method: POST, path: /api/orders/register, max: 3, body: [title, note], bind: { title: 名前 } }\n  - { method: POST, path: "/api/orders/{n}/note", max: 2 }\n`
+  /** The app's keyed digest of a value (a stand-in key: the server never computes one). */
+  const D = (v: string) => `hmac:${sha(`key\0${v}`)}`
+  const reason = (r: Outcome<unknown>) => [code(r as Refusal), (r as Refusal).body?.reason ?? null]
+  const asked = (r: Outcome<unknown>) => {
+    const b = (r as Refusal).body as { code?: string; fields?: string[]; targets?: number[]; values?: string[] }
+    return [b.code, b.fields, b.targets, b.values]
+  }
+  const REGISTER = (title: string | null, extra: Record<string, string> = {}) => ({
+    frame: 1, request: FITS[1], check: { fields: { ...(title === null ? {} : { title: D(title) }), ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, D(v)])) }, segments: [null, null, null] },
+  })
+  const NOTE = (order: string, digest: string | null = D(order)) => ({
+    frame: 2, request: { method: 'POST', path: `/api/orders/${order}/note`, fields: {} }, check: { fields: {}, segments: [null, null, digest, null] },
+  })
+  const promise = (runId: string, body: unknown, key: string | undefined = PC) => frames.promise(alice, runId, body, key)
+  const add = (runId: string, body: unknown, key: string | undefined = PC) => frames.promiseAdd(alice, runId, body, key)
+  const PROMISED = { values: [{ digest: D('冬の回'), source: 'person' }], binds: [{ frame: 1, field: 'title', digest: D('冬の回') }], decisions: [] }
+  async function openBound(mode: 'per_run' | 'pre_approved' = 'pre_approved', withPromise: unknown = PROMISED): Promise<BrowserFrameRunView> {
+    put(boundYaml)
+    await approveSkill(mode)
+    const started = value(await frames.start(alice, { skill: SKILL }, PC))
+    if (withPromise !== null) value(promise(started.runId, withPromise))
+    return mode === 'per_run' ? value(await approve(alice, started)) : started
+  }
+  const used = (runId: string) => value(frames.get(alice, runId)).frames.map(f => f.used)
+
+  it('the frames carry the Skill\'s body and bind; the promise is made once, before the first permit, from this PC only', async () => {
+    const run = await openBound('pre_approved', null)
+    expect(run.frames.map(f => [f.body ?? null, f.bind ?? null])).toEqual([[['title', 'note'], { title: '名前' }], [null, null]])
+    expect(code(promise(run.runId, PROMISED, 'other-pc'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    // Read strictly against the run's own frames: a field the frame does not bind, a value not in the promise, an unknown key.
+    for (const bad of [
+      { ...PROMISED, binds: [{ frame: 1, field: 'note', digest: D('冬の回') }] },
+      { ...PROMISED, binds: [{ frame: 2, field: 'title', digest: D('冬の回') }] },
+      { ...PROMISED, binds: [{ frame: 1, field: 'title', digest: D('夏の回') }] },
+      { ...PROMISED, values: [{ digest: '冬の回', source: 'person' }] },
+      { ...PROMISED, values: [{ digest: D('冬の回'), source: 'asked' }] },
+      { ...PROMISED, decisions: ['use-it'] },
+      { ...PROMISED, extra: 1 },
+    ]) expect(code(promise(run.runId, bad)), JSON.stringify(bad)).toBe('BROWSER_FRAME_BAD_REQUEST')
+    value(promise(run.runId, PROMISED))
+    // The same again (a lost answer) is kept; another one is refused.
+    value(promise(run.runId, PROMISED))
+    expect(code(promise(run.runId, { ...PROMISED, decisions: ['proceed'] }))).toBe('BROWSER_PROMISE_MADE')
+    // Nothing of a value is kept: digests only.
+    expect(JSON.stringify(conn.prepare('SELECT content FROM browser_frame_promises').all())).not.toContain('冬の回')
+  })
+
+  it('a promise made after the run\'s first permit is refused (service and trigger)', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    expect(code(promise(run.runId, { values: [], binds: [], decisions: [] }))).toBe('BROWSER_PROMISE_TOO_LATE')
+    expect(() => conn.prepare('INSERT INTO browser_frame_promises (company_id, run_id, content, created_at) VALUES (?, ?, ?, ?)').run(CO, run.runId, '{}', iso(now))).toThrow(/before its first permit/)
+  })
+
+  it('a bound field must hold the promised value: another value or none is never permitted, never asked, and takes nothing', async () => {
+    const run = await openBound()
+    expect(code(await frames.permit(alice, run.runId, { frame: 1, request: FITS[1] }, PC))).toBe('BROWSER_PROMISE_CHECK_MISSING')
+    expect(reason(await frames.permit(alice, run.runId, REGISTER('夏の回'), PC))).toEqual(['BROWSER_PROMISE_BROKEN', 'value'])
+    expect(reason(await frames.permit(alice, run.runId, REGISTER(null), PC))).toEqual(['BROWSER_PROMISE_BROKEN', 'missing'])
+    expect(used(run.runId)).toEqual([0, 0])
+    expect(value(await frames.permit(alice, run.runId, REGISTER('冬の回', { note: 'なんでも' }), PC)).frame).toBe(1)
+  })
+
+  it('a field outside the promise, a target nobody promised and a bound field with no value are asked — once; the person\'s answer adds exactly them', async () => {
+    const run = await openBound('pre_approved', { values: [], binds: [], decisions: [] })
+    // The bound field has no promised value, `memo` is outside `body`.
+    expect(asked(await frames.permit(alice, run.runId, REGISTER('冬の回', { memo: 'x' }), PC))).toEqual(['BROWSER_PROMISE_ASK', ['memo'], [], ['title']])
+    // A target this run did not make and nobody promised.
+    expect(asked(await frames.permit(alice, run.runId, NOTE('42'), PC))).toEqual(['BROWSER_PROMISE_ASK', [], [2], []])
+    expect(used(run.runId)).toEqual([0, 0])
+    // The person's 「書いてよい」 (the card's), strictly read: only what that frame may carry.
+    for (const bad of [
+      { frame: 1, fields: [], targets: [], binds: [] },
+      { frame: 1, fields: ['_method'], targets: [], binds: [] },
+      { frame: 2, fields: [], targets: [], binds: [{ field: 'title', digest: D('冬の回') }] },
+      { frame: 1, fields: [], targets: ['42'], binds: [] },
+      { frame: 9, fields: ['memo'], targets: [], binds: [] },
+    ]) expect(code(add(run.runId, bad)), JSON.stringify(bad)).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(add(run.runId, { frame: 1, fields: ['memo'], targets: [], binds: [{ field: 'title', digest: D('冬の回') }] }, 'other-pc'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    value(add(run.runId, { frame: 1, fields: ['memo'], targets: [], binds: [{ field: 'title', digest: D('冬の回') }] }))
+    value(add(run.runId, { frame: 2, fields: [], targets: [D('42')], binds: [] }))
+    expect(value(await frames.permit(alice, run.runId, REGISTER('冬の回', { memo: 'x' }), PC)).frame).toBe(1)
+    value(report(run.runId, 1, 'done'))
+    expect(value(await frames.permit(alice, run.runId, NOTE('42'), PC)).frame).toBe(2)
+    value(report(run.runId, 2, 'done'))
+    // An addition never changes a value already promised: the bound field still holds only 冬の回.
+    value(add(run.runId, { frame: 1, fields: [], targets: [], binds: [{ field: 'title', digest: D('夏の回') }] }))
+    expect(reason(await frames.permit(alice, run.runId, REGISTER('夏の回'), PC))).toEqual(['BROWSER_PROMISE_BROKEN', 'value'])
+    // Another target is asked again (only what the person saw was added).
+    expect(asked(await frames.permit(alice, run.runId, NOTE('43'), PC))).toEqual(['BROWSER_PROMISE_ASK', [], [2], []])
+  })
+
+  it('a target this run made itself, or a value the person gave, needs no question; another run\'s does', async () => {
+    const run = await openBound('pre_approved', { values: [{ digest: D('冬の回'), source: 'person' }, { digest: D('77'), source: 'person' }], binds: [{ frame: 1, field: 'title', digest: D('冬の回') }], decisions: [] })
+    value(await frames.permit(alice, run.runId, REGISTER('冬の回'), PC))
+    value(frames.report(alice, run.runId, { write: 1, result: 'done', created: '42' }, PC))
+    expect(value(await frames.permit(alice, run.runId, NOTE('42'), PC)).frame).toBe(2)
+    value(report(run.runId, 2, 'done'))
+    expect(value(await frames.permit(alice, run.runId, NOTE('77'), PC)).frame).toBe(2)
+    value(report(run.runId, 3, 'done'))
+    value(frames.end(alice, run.runId))
+    const next = value(await frames.start(alice, { skill: SKILL }, PC))
+    value(promise(next.runId, PROMISED))
+    // What the earlier run made is not this run's: asked.
+    expect(asked(await frames.permit(alice, next.runId, NOTE('42'), PC))[0]).toBe('BROWSER_PROMISE_ASK')
+  })
+
+  it('only an open run with a promise takes the person\'s additions, at most 20', async () => {
+    const waiting = await (async () => { put(boundYaml); await approveSkill('per_run'); return value(await frames.start(alice, { skill: SKILL }, PC)) })()
+    value(promise(waiting.runId, PROMISED))
+    expect(code(add(waiting.runId, { frame: 1, fields: ['memo'], targets: [], binds: [] }))).toBe('BROWSER_RUN_NOT_APPROVED')
+    value(frames.end(alice, waiting.runId))
+    const bare = await openAdhoc()
+    expect(code(add(bare.runId, { frame: 1, fields: ['memo'], targets: [], binds: [] }))).toBe('BROWSER_PROMISE_MISSING')
+    value(frames.end(alice, bare.runId))
+    const run = await openBound()
+    for (let i = 0; i < 20; i++) value(add(run.runId, { frame: 1, fields: [`f${i}`], targets: [], binds: [] }))
+    expect(code(add(run.runId, { frame: 1, fields: ['g'], targets: [], binds: [] }))).toBe('BROWSER_PROMISE_FULL')
+    expect(() => conn.prepare("UPDATE browser_frame_promise_adds SET content = '{}'").run()).toThrow(/kept as given/)
+    expect(() => conn.prepare('DELETE FROM browser_frame_promise_adds').run()).toThrow(/kept as given/)
+    expect(() => conn.prepare("UPDATE browser_frame_promises SET content = '{}'").run()).toThrow(/kept as made/)
+    expect(() => conn.prepare('DELETE FROM browser_frame_promises').run()).toThrow(/kept as made/)
+  })
+
+  it('a run without a promise (an older app) is permitted as before; an AI-written plan carries no promise fields', async () => {
+    const run = await openBound('pre_approved', null)
+    expect(value(await frames.permit(alice, run.runId, { frame: 1, request: FITS[1] }, PC)).frame).toBe(1)
+    value(report(run.runId, 1, 'done'))
+    value(frames.end(alice, run.runId))
+    const plan = { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/orders/register', max: 1, body: ['a'], bind: { a: '名前' } }] }
+    const ad = value(await frames.start(alice, { plan }, PC))
+    expect(ad.frames[0]).not.toHaveProperty('bind')
+    expect(ad.frames[0]).not.toHaveProperty('body')
+  })
+
+  it('a stopped card\'s answer the new run continues is kept in its promise (a fixed word, never the question)', async () => {
+    const run = await openBound('pre_approved', { ...PROMISED, decisions: ['proceed'] })
+    expect(JSON.parse((conn.prepare('SELECT content FROM browser_frame_promises WHERE run_id = ?').get(run.runId) as { content: string }).content).decisions).toEqual(['proceed'])
+  })
+})
+
+describe('sent is not done (agent-browser.md "Sent is not done")', () => {
+  const confirm = (runId: string, write: number, answer: string) => frames.confirm(alice, runId, { write, answer }, PC)
+  const DAY = 24 * 60 * 60 * 1000
+  /** The register write with its promise check (accepted and unused for a run without a promise). */
+  const permit = (runId: string, frame: number) => frames.permit(alice, runId, { frame, request: FITS[frame], check: { fields: {}, segments: [null, null, null] } }, PC)
+  /** A run of an app that keeps the run's promise (an empty one is enough). */
+  async function openAdhoc(): Promise<BrowserFrameRunView> {
+    const run = value(await frames.start(alice, { plan: adhoc }, PC))
+    value(frames.promise(alice, run.runId, { values: [], binds: [], decisions: [] }, PC))
+    return value(await approve(alice, run))
+  }
+
+  it('a refusal of a run without a promise (an older app, a row from before) is no doubt, as before', async () => {
+    const run = value(await approve(alice, value(await frames.start(alice, { plan: adhoc }, PC))))
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'refused'))
+    value(frames.end(alice, run.runId))
+    const next = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(next.doubts).toEqual([])
+  })
+
+  it('the site\'s error alone is no proof: its own run goes on, every later run is held until it is read again unchanged or answered', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'refused'))
+    expect(value(frames.get(alice, run.runId)).writes[0]).toMatchObject({ state: 'refused', checked: false })
+    // The run's own corrected try goes on.
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 2, 'refused'))
+    value(frames.end(alice, run.runId))
+    now += DAY
+    const next = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(next.doubts?.map(d => [d.runId, d.write])).toEqual([[run.runId, 1], [run.runId, 2]])
+    value(await approve(alice, next))
+    expect(code(await permit(next.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+    // The person may answer about it like an unknown one.
+    value(confirm(run.runId, 1, 'not_done'))
+    expect(code(await permit(next.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+    value(confirm(run.runId, 2, 'not_done'))
+    expect(code(await permit(next.runId, 1))).toBe('ok')
+  })
+
+  it('a refusal read again and found unchanged is known not saved: no doubt, nothing to answer', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(frames.report(alice, run.runId, { write: 1, result: 'refused', checked: 'unchanged' }, PC))
+    expect(value(frames.get(alice, run.runId)).writes[0]).toMatchObject({ state: 'refused', checked: true, confirmableAt: null })
+    value(frames.end(alice, run.runId))
+    now += DAY
+    expect(code(confirm(run.runId, 1, 'not_done'))).toBe('BROWSER_FRAME_NOT_UNKNOWN')
+    const next = await openAdhoc()
+    expect(code(await permit(next.runId, 1))).toBe('ok')
+    // `checked` only with a refusal, only the one word; and only beside a refused write (trigger).
+    expect(code(frames.report(alice, next.runId, { write: 1, result: 'done', checked: 'unchanged' }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(frames.report(alice, next.runId, { write: 1, result: 'refused', checked: 'yes' }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(() => conn.prepare('INSERT INTO browser_frame_refusal_checks (company_id, run_id, seq, checked_at) VALUES (?, ?, 1, ?)').run(CO, next.runId, iso(now))).toThrow(/beside its refused write/)
+  })
+
+  it('a refusal its own run then wrote done to the same target is no doubt for later runs', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'refused'))
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 2, 'done'))
+    value(frames.end(alice, run.runId))
+    const next = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(next.doubts).toEqual([])
   })
 })

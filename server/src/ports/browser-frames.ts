@@ -41,6 +41,11 @@ export interface FrameRow {
   fields: string
   max: number
   used: number
+  /**
+   * Canonical JSON of the frame's promise fields `{ body?, bind? }` from its Skill's `browser.yaml` (agent-browser.md "The
+   * run's promise"); null when none were declared (an ad-hoc plan; a row made before the column).
+   */
+  promise: string | null
 }
 
 export interface FrameWriteRow {
@@ -81,15 +86,18 @@ export interface WriteLedgerRow {
   target: string
 }
 
-/** A write in doubt on a domain × account: still `permitted` / `unknown` and nobody answered about it. */
+/**
+ * A write in doubt on a domain × account: still `permitted` / `unknown`, or `refused` by the site but never read again and
+ * found unchanged (agent-browser.md "Sent is not done") — and nobody answered about it.
+ */
 export interface WriteDoubtRow {
   runId: string
   seq: number
   target: string
-  state: 'permitted' | 'unknown'
+  state: 'permitted' | 'unknown' | 'refused'
   permittedAt: string
   /** The frame the write fitted (the reviewed declaration's or the card's words, never the page's). */
-  frame: Omit<FrameRow, 'used' | 'max' | 'idx'>
+  frame: Omit<FrameRow, 'used' | 'max' | 'idx' | 'promise'>
 }
 
 export interface BrowserFrameRepository {
@@ -101,6 +109,17 @@ export interface BrowserFrameRepository {
   /** Runs on this domain (ended ones included) with a write still `permitted`. */
   runsInFlightOn(host: string): FrameRunRow[]
   insertRun(run: FrameRunRow, frames: Array<Omit<FrameRow, 'used'>>): void
+  /** The run's promise as the app sent it (canonical JSON), or null when none was made. */
+  promise(runId: string): string | null
+  /** Keep the run's promise (once; only before its first permit: the trigger). False when one is there already. */
+  insertPromise(runId: string, content: string, createdAt: string): boolean
+  /** What the person added to the promise since, in order (canonical JSON each). */
+  promiseAdds(runId: string): string[]
+  insertPromiseAdd(runId: string, seq: number, content: string, addedBy: string, addedAt: string): void
+  /** The refused writes of this run the app read again and found unchanged (their write numbers). */
+  refusalChecks(runId: string): number[]
+  /** Keep that a refused write was found unchanged (once; only beside a `refused` write: the trigger). */
+  insertRefusalCheck(runId: string, seq: number, checkedAt: string): boolean
   frames(runId: string): FrameRow[]
   writes(runId: string): FrameWriteRow[]
   /** Compare-and-set of the run's state (and what moves with it); false when the state was not `from`. */
@@ -120,10 +139,12 @@ export interface BrowserFrameRepository {
   insertLedger(row: WriteLedgerRow, recordedAt: string): void
   /**
    * The writes in doubt on this domain for this outside account, of any run (ended ones included, whatever their age):
-   * the ledger's rows whose write is `permitted` or `unknown` with no answer of the person. Oldest first. `target`: only
-   * that target's (the permit's check, an indexed lookup).
+   * the ledger's rows whose write is `permitted` or `unknown` with no answer of the person, or `refused` with no answer and
+   * not found unchanged — unless a later write of the same run to the same target is `done` (the run's own corrected try
+   * settled it). Oldest first. `target`: only that target's (the permit's check, an indexed lookup); `exceptRun`: leave out
+   * that run's refused writes (its own corrected try goes on).
    */
-  ledgerDoubts(host: string, account: string, target?: string): WriteDoubtRow[]
+  ledgerDoubts(host: string, account: string, target?: string, exceptRun?: string): WriteDoubtRow[]
   /** Compare-and-set of a write's state; false when it was not `from`. */
   setWriteState(runId: string, seq: number, from: FrameWriteState, to: FrameWriteState, change: { settledAt: string; reason?: string | null }): boolean
 }

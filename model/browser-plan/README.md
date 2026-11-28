@@ -63,7 +63,7 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
    end; the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
    `CHECK_DEADLOCK` line is refused.
 2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**,
-   FramesLife **264,480**, LedgerLife **132,387**): a guard against a checker that explores less than it should. **A ceiling**: the
+   FramesLife **264,492**, LedgerLife **214,447**): a guard against a checker that explores less than it should. **A ceiling**: the
    checker writes the whole state graph out as one string for `reach.mjs`, and a string cannot pass ~512 MB — about
    1,750 bytes a state, so roughly **290,000 states** (FramesLife's graph is 463 MB). A change that grows a model past
    that fails with `RangeError: Invalid string length`: narrow the model (as FramesLife's `RefusedOrNot`) rather than
@@ -223,6 +223,12 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
 | `R15_OneWriteAtATime` | One write of the run on its way at a time | 書き込みは1つずつ（2つ目は1つ目の結果が記録されるまで待つ） |
 | `R16_NoSendAfterStop` | Nothing is sent after the AI was stopped | 止めたあとは送らない |
 | `R5_NotDoneStaysTrue` | A write the person answered 「されていなかった」 about never reached the site later either | 「されていなかった」があとから嘘にならない |
+| `R19_WithinPromise` | Nothing outside the run's promise is permitted (only once the person added it on the card) | 約束の外の書き込みは、本人がカードで足したときだけ許可する |
+
+**The run's promise** (agent-browser.md "The run's promise"): a held write is within the promise (`ask_a`, `ask_b`) or not
+in it yet (`out_a` — on frame "a", and only as the run's first write, which keeps the graph under the ceiling: 12 states
+more); the server never permits it (`ServerRefusesPromise`), the person adds it (`PersonAdds`: it is then `ask_a`) or says
+no (`PersonDeclines`).
 
 **Recovering from a failed write** (agent-browser.md "Recovering from a failed write"): a write the site answered with a
 4xx that proves it was not taken is `refused` — the run goes on (no lock), its unit stays used (R14: a corrected try is a
@@ -244,6 +250,7 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
 | `BrokenFramesRefusedGivesUnitBack` | a refused write's unit stays used (`permit` counts it) | R14 |
 | `BrokenFramesConfirmUnlocks` | the person's answer never unlocks the run | R10 |
 | `BrokenFramesConfirmBeforeWindow` | the answer only past the write's permit + 5 s + 30 s (both clocks) | R5 |
+| `BrokenFramesNoPromiseCheck` | the permit asks the run's promise (`browserPromiseVerdict`) | R19 |
 
 ### What FramesLife leaves out
 
@@ -314,10 +321,16 @@ only when the write took effect — `readBackLanded`).
 Rules: R1 (at most one send per write), **R17 `R17_NoBlindDuplicate`** (two runs' writes to the target both took effect
 only when the later one was permitted with the earlier one's result known), **R18 `R18_DoneMeansLanded`** (`done` — the
 site's answer or the read-back — or 「済んでいた」 only for a write that took effect), R5 (「されていなかった」 stays true),
-R7. Variants: `BrokenLedgerDoubtExpires` (the check looks only at runs not ended: a doubt expires with its run's hour)
-→ R17; `BrokenLedgerReadBackGuess` (the read-back reports `done` without proof) → R18. 132,387 states.
+R7, **R20 `R20_NotSavedMeansNotLanded`** (agent-browser.md "Sent is not done": a refused write is "not saved" only when the
+app read it again and found it unchanged — `AppChecksUnchanged`, only when it took no effect; a site may answer an error
+for a write that took effect, so `AppAfterSend` may say `refused` either way, and a refused write not found unchanged is a
+doubt like an unknown one, answerable). Variants: `BrokenLedgerDoubtExpires` (the check looks only at runs not ended: a
+doubt expires with its run's hour) → R17; `BrokenLedgerReadBackGuess` (the read-back reports `done` without proof) → R18;
+`BrokenLedgerRefusedTrusted` (a refusal is no doubt: the site's error taken as proof) → R17; `BrokenLedgerUnchangedGuess`
+("found unchanged" without the read showing it) → R20. 214,447 states.
 
-Left out (the code's tests): other targets and other accounts (they never meet the ledger's key), the start's question on
+Left out (the code's tests): a refused write superseded by a later done write of its own run (one write per run here),
+other targets and other accounts (they never meet the ledger's key), the start's question on
 the card (it only asks the person earlier than the permit's refusal would), more than one write per run and the operator
 (FramesLife), real durations.
 

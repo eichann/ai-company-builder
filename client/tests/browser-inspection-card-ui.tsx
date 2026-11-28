@@ -137,6 +137,9 @@ installElectronAPI({
   runBrowserPlan: async () => { calls.push('runBrowserPlan'); return { ok: false, message: 'x' } as never },
   cancelBrowserPlan: async () => { calls.push('cancelBrowserPlan'); return { ok: false, message: 'x' } as never },
   openBrowserSite: async (_c, host) => { calls.push(`openBrowserSite ${host}`); return { ok: true } as never },
+  // The stopped card's answer is kept in main, bound to the card (agent-browser.md "The stopped card's answer").
+  decideBrowserStop: async (_c, id, choice) => { calls.push(`decideBrowserStop ${id} ${choice}`); return { ok: true } },
+  allowBrowserWrite: async () => { calls.push('allowBrowserWrite'); return { ok: false, message: 'x' } },
   getBrowserInspection: async () => (STOP ? { ok: true, view: stoppedPreview } : state === 'gone' ? { ok: false, message: BROWSER_INSPECTION_CARD_WORDS.gone }
     : state === 'other-window' ? { ok: false, message: BROWSER_INSPECTION_CARD_WORDS.notMainWindow } : { ok: true, view }),
 })

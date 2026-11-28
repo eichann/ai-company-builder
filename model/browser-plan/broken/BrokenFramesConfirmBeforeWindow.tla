@@ -6,7 +6,7 @@ EXTENDS FramesLife
 BrokenConfirms(k) ==
     /\ k = n /\ st[k] = "unknown" /\ sends[k] = 0
     /\ st' = [st EXCEPT ![k] = "cnotdone"]
-    /\ UNCHANGED <<exSt, approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<exSt, approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 BrokenNext == ServerNext \/ AppNext \/ Env \/ \E k \in Ids : BrokenConfirms(k)
 BrokenSpec == Init /\ [][BrokenNext]_vars

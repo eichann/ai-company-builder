@@ -568,15 +568,21 @@ test('a write task on the real window: a press while a held write is being sent 
 
 test('the completion regression: a company Skill\'s copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once', { skip }, () => {
   const r = result.workFlow
-  assert.match(String(r.words), /^済みました/, JSON.stringify(r))
+  assert.match(String(r.words), /^済みました。読み直して、約束した値と送った値になっていることを確かめました/, JSON.stringify(r))
   // Exactly the two writes, in order, with the setting chosen again and the person's own values as written.
   assert.deepEqual(r.flow, [
     { path: '/flow/copy', body: JSON.stringify({ source: 12, setting: 'B設定' }) },
     { path: '/flow/items/99', body: JSON.stringify({ name: '【冬の回】', date: '2026-12-03' }) },
   ])
-  assert.deepEqual((r.calls as string[]).filter(c => c.startsWith('permit') || c.startsWith('report') || c === 'approve'), [
-    'approve', 'permit 1 /flow/copy', 'report done', 'permit 2 /flow/items/99', 'report done',
+  // The run's promise was made before the card, and nothing was asked (no stop, no question more than before).
+  assert.deepEqual((r.calls as string[]).filter(c => c.startsWith('permit') || c.startsWith('report') || c === 'approve' || c.startsWith('promise')), [
+    'promise', 'approve', 'permit 1 /flow/copy', 'report done', 'permit 2 /flow/items/99', 'report done',
   ])
+  const promise = (r.promises as Array<{ values: unknown[]; binds: Array<{ frame: number; field: string }> }>)[0]
+  assert.deepEqual(promise.binds.map(b => [b.frame, b.field]), [[2, 'name'], [2, 'date']])
+  assert.equal(JSON.stringify(r.promises).includes('冬の回'), false)
+  // Reading the copy back matched what was promised: the card is all ✓.
+  assert.equal(r.cardState, 'all_ok')
   // The work had the person's words, the sealed steps and the approved plan — and not the consultation AI's request.
   for (const m of r.workMaterials as Array<{ person: unknown; steps: unknown; plan: unknown; request: unknown }>) {
     assert.deepEqual(m.person, { said: ['元の行は変えない'], values: [{ label: '名前', value: '【冬の回】' }, { label: '日付', value: '2026-12-03' }] })

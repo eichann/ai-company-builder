@@ -42,17 +42,19 @@ rule FramesLife R14_WithinFrames
 rule FramesLife R15_OneWriteAtATime
 rule FramesLife R16_NoSendAfterStop
 rule FramesLife R5_NotDoneStaysTrue
+rule FramesLife R19_WithinPromise
 rule LedgerLife TypeOK
 rule LedgerLife R1_AtMostOneSendPerWrite
 rule LedgerLife R17_NoBlindDuplicate
 rule LedgerLife R18_DoneMeansLanded
 rule LedgerLife R5_NotDoneStaysTrue
+rule LedgerLife R20_NotSavedMeansNotLanded
 rule LedgerLife R7_EverythingSettles
 # states <model> <distinct states of the real model (<model>.cfg)>
 states PlanLife 57618
 states StepsLife 28320
-states FramesLife 264480
-states LedgerLife 132387
+states FramesLife 264492
+states LedgerLife 214447
 # broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
 broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
 broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit
@@ -88,9 +90,12 @@ broken BrokenFramesUsedAfterEnd R2_NoSendWithoutApprovalAndLivePermit
 broken BrokenFramesRefusedGivesUnitBack R14_WithinFrames
 broken BrokenFramesConfirmUnlocks R10_NothingAfterUnknown
 broken BrokenFramesConfirmBeforeWindow R5_NotDoneStaysTrue
+broken BrokenFramesNoPromiseCheck R19_WithinPromise
 # LedgerLife's variants (the write ledger across requests: the server's permit and the app's read-back keep each guard)
 broken BrokenLedgerDoubtExpires R17_NoBlindDuplicate
 broken BrokenLedgerReadBackGuess R18_DoneMeansLanded
+broken BrokenLedgerRefusedTrusted R17_NoBlindDuplicate
+broken BrokenLedgerUnchangedGuess R20_NotSavedMeansNotLanded
 # limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
 # it neither disappears nor grows unnoticed)
 limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit

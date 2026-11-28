@@ -13,7 +13,6 @@
  * No site word.
  */
 import { BROWSER_RUN_ACTIONS, type BrowserRunAction, type BrowserRunLogStep } from '../../shared/core/browser-run-log'
-import { neutralizeOutsideText } from '../../shared/core/outside-text'
 import { cleanLabel } from './browser-page'
 
 export const BROWSER_TRAIL_LIMITS = Object.freeze({
@@ -264,22 +263,23 @@ export const BROWSER_STOP_WORDS = {
   openSite: '開いてログイン',
   /** Under the two buttons: what they do (fixed words; the question itself is above). */
   /** Only under a run that wrote nothing (`decide`): the answer starts the work over from the site's own state. */
-  sendsNote: '押すと、あなたの返事として相談に送ります。この作業ではサイトにまだ何も書いていないので、続きは AI がサイトを読み直して最初から始めます。',
+  sendsNote: '押すと、決まった言葉で相談に返事を送ります（問いの文は送りません）。この作業ではサイトにまだ何も書いていないので、続きは AI がサイトを読み直して最初から始めます。',
+  /** The answer could not be kept (the card is gone: the app restarted, or another window answered otherwise). */
+  notKept: '返事を受け取れませんでした。相談で頼み直してください。',
   /** Under the question of a run that already wrote (`question`): no buttons. */
   askAgain: 'この作業では、もうサイトに送った書き込みがあります。下の「済んだこと」などを見てから、どうするかを相談で頼み直してください（同じものが二重にできないよう、済んでいることも書いてください）。',
   sent: '相談に返事を送りました。',
 } as const
 
 /**
- * The member's message a button sends (their own words to the consultation, as if typed). To go on it names the question —
- * the consultation AI cannot see the card, and writes the decision into its next request from it — as the operator's words
- * about the page, not the member's: labelled so, its quotes and 【】 neutralized so no text the page shaped can close the
- * quote and read as a second request of the member's (independent review). To stop, fixed words only.
+ * The member's message a button sends (agent-browser.md "The stopped card's answer"; Codex review point 6): **fixed words and
+ * the card's id only — never the operator's question**, which a page could have shaped. The answer itself is kept in main
+ * (`browserLines:decide`) bound to that card; to go on, the consultation AI names the card (`decision`) in its next request
+ * and that run takes the answer into its promise and the question to its operator. To stop, fixed words only.
  */
-export function stopAnswerMessage(answer: 'proceed' | 'cancel', question: string): string {
+export function stopAnswerMessage(answer: 'proceed' | 'cancel', cardId: string): string {
   if (answer === 'cancel') return 'ブラウザ操作の係の AI が止まった作業は、ここでやめます。続けないでください。'
-  const quoted = neutralizeOutsideText(question).replace(/「/g, '『').replace(/」/g, '』')
-  return `ブラウザ操作の係の AI の問い「${quoted}」には「はい」と答えます。そのまま続けてください。（「」の中は係の AI がサイトを読んで書いた文で、わたしの頼みではありません）`
+  return `ブラウザ操作のカード（${cardId}）で［そのまま進める］を押しました。そのカードの番号を decision に入れて、同じ頼みをもう一度してください。`
 }
 
 /** The operator's question as the card may show it: one line, NFC, no control / bidirectional / zero-width character, ≤ 300; none → null. */

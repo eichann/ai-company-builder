@@ -72,7 +72,7 @@ function InspectionCardOf({ companyId, planId, reads, say }: { companyId: string
       </section>
     )
   }
-  return <InspectionBody view={view} companyId={companyId} say={say} />
+  return <InspectionBody view={view} companyId={companyId} cardId={planId} say={say} />
 }
 
 /**
@@ -95,7 +95,7 @@ function BeforeAfter({ row }: { row: Extract<BrowserCardRow, { before: BrowserCa
  * answers, or the window), then its fixed reason once; inside a write card that already says its result, `headline`
  * false leaves the reason to that card (said once).
  */
-export function InspectionBody({ view, companyId, say, headline = true }: { view: BrowserInspectionView; companyId?: string; say?: (text: string) => void; headline?: boolean }) {
+export function InspectionBody({ view, companyId, cardId, say, headline = true }: { view: BrowserInspectionView; companyId?: string; cardId?: string; say?: (text: string) => void; headline?: boolean }) {
   const { card } = view
   const next = view.next
   const checkedBy = card.sections.some(s => s.rows.some(r => 'before' in r && r.by !== undefined))
@@ -106,7 +106,7 @@ export function InspectionBody({ view, companyId, say, headline = true }: { view
         <span className="text-title text-text">{card.title}</span>
         <span className="text-small text-text-muted">{view.siteLabel}</span>
       </div>
-      {next && next.kind !== 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} screen={view.screen} />}
+      {next && next.kind !== 'login' && companyId && <StopAsk next={next} companyId={companyId} cardId={cardId} host={view.siteLabel} say={say} screen={view.screen} />}
       {headline && <p role="status" className="mt-1 text-body text-text">{card.headline}</p>}
       {next?.kind === 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} screen={view.screen} />}
 
