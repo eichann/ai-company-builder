@@ -62,6 +62,8 @@ const INLINE_IMAGE = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/
 function webLink(value: string): string | null {
   try {
     const url = new URL(value.trim())
+    // `https://app.acb@evil.example/` reads as one place and goes to another: no user name or password.
+    if (url.username || url.password) return null
     return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
   } catch {
     return null
@@ -83,7 +85,7 @@ const HTML_RULES: CleaningRules = {
   attribute(element, name, value) {
     const tag = element.localName.toLowerCase()
     if (!GLOBAL_ATTRIBUTES.has(name) && !ELEMENT_ATTRIBUTES[tag]?.has(name)) return null
-    if (name === 'style') return cleanDeclarations((element as HTMLElement).style) || null
+    if (name === 'style') return cleanInlineStyle(element, (element as HTMLElement).style)
     if (tag === 'a' && name === 'href') return webLink(value)
     if (name === 'id' || name === 'for' || name === 'name') return PLAIN_NAME.test(value) ? value : null
     if (name === 'type' && tag === 'input') return value.trim().toLowerCase()
@@ -97,9 +99,47 @@ const HTML_RULES: CleaningRules = {
  * same); null when nothing is left, or when what is left is not well-formed (an attribute name XML cannot hold).
  */
 function pictureOf(markup: string): { src: string; width?: number; height?: number } | null {
-  const picture = sanitizeSvg(markup)
+  const picture = sanitizeSvg(withoutMotion(markup))
   if (!picture || new DOMParser().parseFromString(picture.svg, 'image/svg+xml').getElementsByTagName('parsererror').length) return null
   return { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(picture.svg)}`, width: picture.width, height: picture.height }
+}
+
+const MOTION = /^(?:animation|transition)/i
+
+/**
+ * A reply's picture does not move (Codex review: an SVG image runs its CSS animations, past the reply's own limits):
+ * CSS animation and transition are taken out of its styles before the diagrams' cleaner reads it (which drops SMIL).
+ * The diagrams themselves are not touched.
+ */
+function withoutMotion(markup: string): string {
+  const doc = parseInert(markup)
+  for (const element of doc.body.querySelectorAll('*')) {
+    const style = (element as HTMLElement | SVGElement).style
+    if (style) for (const name of Array.from(style)) if (MOTION.test(name)) style.removeProperty(name)
+    if (element.localName === 'style') element.textContent = stillSheet(element.textContent ?? '')
+  }
+  return doc.body.innerHTML
+}
+
+function stillSheet(css: string): string {
+  const sheet = new CSSStyleSheet()
+  try {
+    sheet.replaceSync(css)
+  } catch {
+    return ''
+  }
+  const still = (rules: CSSRuleList) => {
+    for (let i = rules.length - 1; i >= 0; i--) {
+      const rule = rules[i]
+      if (rule instanceof CSSKeyframesRule) (rule.parentRule as CSSGroupingRule | null ?? sheet).deleteRule(i)
+      else {
+        if (rule instanceof CSSStyleRule) for (const name of Array.from(rule.style)) if (MOTION.test(name)) rule.style.removeProperty(name)
+        if ('cssRules' in rule) still((rule as CSSGroupingRule).cssRules)
+      }
+    }
+  }
+  still(sheet.cssRules)
+  return Array.from(sheet.cssRules, rule => rule.cssText).join('\n')
 }
 
 /**
@@ -135,7 +175,7 @@ function svgAsImage(svg: Element): ElementFate {
   const style = svg.getAttribute('style')
   if (style) {
     image.setAttribute('style', style)
-    const kept = cleanDeclarations(image.style)
+    const kept = cleanInlineStyle(image, image.style)
     if (kept) image.setAttribute('style', kept)
     else image.removeAttribute('style')
   }
@@ -159,8 +199,15 @@ const CSS_PROPERTIES = [
   // Owner decision 2026-11-28: light motion (never endless: see cleanDeclarations).
   'animation', 'transition',
 ]
+/**
+ * A custom property's name comes back from the parser with its escapes undone, so it could spell `}`, `;` or `<`
+ * (independent review: a name that ended the rule, or the <style>): only plain names are kept.
+ */
+const CUSTOM_PROPERTY = /^--[A-Za-z0-9_-]{1,64}$/
 const allowedProperty = (name: string) =>
-  name.startsWith('--') || CSS_PROPERTIES.some(base => name === base || name.startsWith(`${base}-`))
+  CUSTOM_PROPERTY.test(name) || (/^[a-z-]+$/.test(name) && CSS_PROPERTIES.some(base => name === base || name.startsWith(`${base}-`)))
+/** A custom property's value is kept as written (tokens, not parsed): colours, numbers, var() and calc() only. */
+const PLAIN_CUSTOM_VALUE = /^[\w\s#%.,()+*/-]*$/
 
 /**
  * A value that loads, runs or breaks out of the <style> it goes into, read after the browser's parser (custom
@@ -169,30 +216,49 @@ const allowedProperty = (name: string) =>
  */
 const LIVE_UNSAFE_VALUE = /url\s*\(|cross-fade|element\s*\(|paint\s*\(|src\s*\(|attr\s*\(|</i
 const unsafeValue = (value: string) => cssLoadsOrRuns(value) || LIVE_UNSAFE_VALUE.test(value)
-/** The screen's size (vh, vw, dvh, …): a reply has no screen of its own. */
-const VIEWPORT_UNIT = /\d(?:[dsl]?v(?:h|w|min|max|i|b))\b/i
+/** The screen's size (vh, vw, dvh, …; cqw and the like fall back to it outside a container): a reply has no screen. */
+const VIEWPORT_UNIT = /\d(?:[dsl]?v(?:h|w|min|max|i|b)|cq(?:w|h|i|b|min|max))\b/i
 /** fixed / sticky would leave the reply's box (cover the app). */
 const KEPT_POSITION = /^(?:static|relative|absolute)$/i
-/** Selectors that reach outside the reply's own markup, or a `<` that could end the <style>. */
-const OUTSIDE_SELECTOR = /:host|::slotted|::part|:root|\bhtml\b|\bbody\b|::backdrop|:fullscreen|::view-transition|</i
-/** Motion stops: at most this many runs, each at most this long (owner decision: no endless motion). */
+/**
+ * Selectors that name the document rather than the reply (`:scope` and a top-level `&` are the root too), or a `<`
+ * that could end the <style>. `*` and the like still reach the frame's root: the frame keeps the reply apart (PR2).
+ */
+const OUTSIDE_SELECTOR = /:host|::slotted|::part|:root|:scope|(?:^|,)\s*&|\bhtml\b|\bbody\b|::backdrop|:fullscreen|::view-transition|</i
+/**
+ * Motion stops (owner decision: no endless motion): at most this many animations on an element, each at most this
+ * many runs of at most this long, starting at most this late (independent review: a chain of delayed runs).
+ */
+const MAX_ANIMATIONS = 3
 const MAX_RUNS = 10
 const MAX_SECONDS = 10
 
 const listOf = (value: string) => value.split(',').map(part => part.trim())
 const fewRuns = (value: string) => listOf(value).every(run => /^\d+(?:\.\d+)?$/.test(run) && Number(run) <= MAX_RUNS)
 const shortTimes = (value: string) => listOf(value).every(time => {
-  const match = /^(\d+(?:\.\d+)?)(ms|s)$/i.exec(time)
+  const match = /^-?(\d+(?:\.\d+)?)(ms|s)$/i.exec(time)
   return !!match && Number(match[1]) / (match[2].toLowerCase() === 'ms' ? 1000 : 1) <= MAX_SECONDS
 })
+const TIMES = new Set(['animation-duration', 'transition-duration', 'animation-delay', 'transition-delay'])
 
 function keptDeclaration(name: string, value: string): boolean {
   if (!value || !allowedProperty(name) || unsafeValue(value) || VIEWPORT_UNIT.test(value)) return false
+  if (name.startsWith('--')) return PLAIN_CUSTOM_VALUE.test(value)
   if (name === 'position') return KEPT_POSITION.test(value)
+  if (name === 'animation-name') return listOf(value).length <= MAX_ANIMATIONS
   if (name === 'animation-iteration-count') return fewRuns(value)
-  if (name === 'animation-duration' || name === 'transition-duration') return shortTimes(value)
+  if (TIMES.has(name)) return shortTimes(value)
   if (name === 'content') return /^(?:none|normal|"[^"\\]*"|'[^'\\]*')$/.test(value)
   return true
+}
+
+/** An element's style, cleaned, or null; kept only when it reads back the same (nothing in it says more than it shows). */
+function cleanInlineStyle(element: Element, style: CSSStyleDeclaration): string | null {
+  const kept = cleanDeclarations(style)
+  if (!kept) return null
+  const probe = element.ownerDocument.createElementNS(HTML_NS, 'span') as HTMLElement
+  probe.setAttribute('style', kept)
+  return cleanDeclarations(probe.style) === kept ? kept : null
 }
 
 function cleanDeclarations(style: CSSStyleDeclaration): string {
@@ -231,6 +297,12 @@ function cleanRules(rules: CSSRuleList): string {
 
 /** A <style> element's text through the browser's CSS parser (a constructed sheet loads nothing, @import included). */
 function cleanStyleSheet(css: string): string {
+  const cleaned = cleanRulesOf(css)
+  // Belt and braces (independent review): what is kept reads back as the same rules, and cannot end its <style>.
+  return cleaned && !cleaned.includes('<') && cleanRulesOf(cleaned) === cleaned ? cleaned : ''
+}
+
+function cleanRulesOf(css: string): string {
   const sheet = new CSSStyleSheet()
   try {
     sheet.replaceSync(css.replace(/@import/gi, '@x-import'))

@@ -6,7 +6,7 @@
 // The audit (`audit` below) restates the allowlist independently of the cleaner's own lists.
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
-import { ALL_TRAPS, CORNER_TRAPS, GOOD_REPLY, SEAMLESS_TRAPS, TRAPS } from './fixtures/reply-html-traps'
+import { ALL_TRAPS, CORNER_TRAPS, GOOD_REPLY, REVIEW_TRAPS, SEAMLESS_TRAPS, TRAPS } from './fixtures/reply-html-traps'
 
 type Clean = { html: string; css: string }
 type PageGlobals = { __pwned?: unknown[] }
@@ -29,12 +29,13 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
     const ATTRIBUTES = new Set(['class', 'style', 'title', 'lang', 'dir', 'role', 'aria-label', 'aria-hidden', 'src', 'alt',
       'width', 'height', 'colspan', 'rowspan', 'scope', 'span', 'start', 'reversed', 'type', 'open', 'datetime', 'name',
       'id', 'checked', 'value', 'for', 'href'])
-    const BAD_CSS = /url\s*\(|@import|@font-face|@layer|image-set|cross-fade|attr\s*\(|\\|<|position\s*:\s*(?:fixed|sticky)|infinite|\d[dsl]?v(?:h|w|min|max)\b|:root|:host|\bhtml\b|\bbody\b|evil\.example/i
+    const BAD_CSS = /url\s*\(|@import|@font-face|@layer|image-set|cross-fade|attr\s*\(|\\|<|position\s*:\s*(?:fixed|sticky)|infinite|\d[dsl]?v(?:h|w|min|max)\b|\dcq(?:w|h|i|b|min|max)\b|:root|:scope|(?:^|[\n,}])\s*&|:host|\bhtml\b|\bbody\b|evil\.example/i
     const seconds = (time: string) => { const m = /^([\d.]+)(ms|s)$/.exec(time.trim()); return m ? Number(m[1]) / (m[2] === 'ms' ? 1000 : 1) : Infinity }
     function motion(css: string): string[] {
       const found: string[] = []
       for (const m of css.matchAll(/animation-iteration-count:\s*([^;}]+)/g)) if (m[1].split(',').some(v => !(Number(v) <= 10))) found.push(`runs ${m[1]}`)
-      for (const m of css.matchAll(/(?:animation|transition)-duration:\s*([^;}]+)/g)) if (m[1].split(',').some(v => seconds(v) > 10)) found.push(`long ${m[1]}`)
+      for (const m of css.matchAll(/(?:animation|transition)-(?:duration|delay):\s*([^;}]+)/g)) if (m[1].split(',').some(v => Math.abs(seconds(v.replace(/^-/, ''))) > 10)) found.push(`long ${m[1]}`)
+      for (const m of css.matchAll(/animation-name:\s*([^;}]+)/g)) if (m[1].split(',').length > 3) found.push(`many ${m[1]}`)
       return found
     }
     function picture(src: string): string[] {
@@ -44,7 +45,12 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
       for (const el of svg.querySelectorAll('*')) {
         if (/^(script|foreignobject|image|a|iframe|img|set|animate)$/i.test(el.localName)) found.push(`picture: <${el.localName}>`)
         if (el.localName === 'style' && /@import|url\(\s*['"]?(?!#)|evil/i.test(el.textContent ?? '')) found.push('picture: style')
-        for (const a of el.attributes) if (/^on/i.test(a.name) || /evil|javascript:/i.test(a.value)) found.push(`picture: ${a.name}`)
+        // A picture in a reply does not move (CSS motion in an SVG image runs; SMIL is not kept).
+        if (el.localName === 'style' && /animation|transition|@keyframes/i.test(el.textContent ?? '')) found.push('picture: motion')
+        for (const a of el.attributes) {
+          if (/^on/i.test(a.name) || /evil|javascript:/i.test(a.value)) found.push(`picture: ${a.name}`)
+          if (/animation|transition/i.test(`${a.name}:${a.value}`) && a.name !== 'class') found.push(`picture: motion ${a.name}`)
+        }
       }
       return found
     }
@@ -57,7 +63,7 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
       'word-break', 'overflow-wrap', 'hyphens', 'list-style-type', 'list-style-position', 'counter-reset', 'counter-increment',
       'content', 'caption-side', 'table-layout', 'empty-cells', 'color-scheme', 'accent-color', 'fill', 'stroke', 'stroke-width',
       'animation', 'transition']
-    const listed = (name: string) => name.startsWith('--') || PROPERTIES.some(base => name === base || name.startsWith(`${base}-`))
+    const listed = (name: string) => /^--[A-Za-z0-9_-]+$/.test(name) || PROPERTIES.some(base => name === base || name.startsWith(`${base}-`))
     // The CSS read back by the browser: only listed properties, only the kept kinds of rule.
     function properties(css: string, inline: boolean): string[] {
       const sheet = new CSSStyleSheet()
@@ -73,8 +79,18 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
       walk(sheet.cssRules)
       return found
     }
+    // CSS the frame puts after the reply's own (PR2's guards) still reads as its own rule: nothing is left open.
+    function closed(css: string, inline: boolean): string[] {
+      const sheet = new CSSStyleSheet()
+      if (inline) {
+        sheet.replaceSync(`x { ${css}; --acb-after: 1 }`)
+        return (sheet.cssRules[0] as CSSStyleRule | undefined)?.style.getPropertyValue('--acb-after').trim() === '1' ? [] : ['style left open']
+      }
+      sheet.replaceSync(`${css}\n.acb-after { color: red }`)
+      return (sheet.cssRules[sheet.cssRules.length - 1] as CSSStyleRule | undefined)?.selectorText === '.acb-after' ? [] : ['css left open']
+    }
     function check({ html, css }: { html: string; css: string }): string[] {
-      const found: string[] = [...properties(css, false)]
+      const found: string[] = [...properties(css, false), ...closed(css, false)]
       const bad = BAD_CSS.exec(css)
       if (bad) found.push(`css: ${bad[0]}`)
       found.push(...motion(css))
@@ -90,7 +106,7 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
         for (const a of el.attributes) {
           const value = a.value
           if (/^on/i.test(a.name) || !ATTRIBUTES.has(a.name)) found.push(`@${a.name}`)
-          if (a.name === 'href' && (el.localName !== 'a' || !/^https?:\/\/[^/]/.test(value))) found.push(`href=${value}`)
+          if (a.name === 'href' && (el.localName !== 'a' || !/^https?:\/\/[^/]/.test(value) || /^https?:\/\/[^/]*@/.test(value))) found.push(`href=${value}`)
           if (a.name === 'src') {
             if (el.localName !== 'img') found.push('src on another element')
             else if (value.startsWith('data:image/svg+xml;charset=utf-8,')) found.push(...picture(value))
@@ -100,7 +116,7 @@ async function audit(page: Page, markups: string[], step = 0): Promise<string[]>
           if (a.name === 'style') {
             const style = BAD_CSS.exec(value)
             if (style) found.push(`style: ${style[0]}`)
-            found.push(...properties(value, true))
+            found.push(...properties(value, true), ...closed(value, true))
             found.push(...motion(value))
           }
         }
@@ -201,10 +217,10 @@ test('a reply as the AI writes it keeps its look and its parts that move without
 
 test('no planted part survives the cleaning: nothing that runs, loads, sends, covers the app or moves for ever', async ({ page }) => {
   const state = await open(page)
-  expect(await audit(page, [TRAPS, SEAMLESS_TRAPS, CORNER_TRAPS, ALL_TRAPS])).toEqual([])
+  expect(await audit(page, [TRAPS, SEAMLESS_TRAPS, REVIEW_TRAPS, CORNER_TRAPS, ALL_TRAPS])).toEqual([])
   const { html, css } = await clean(page, ALL_TRAPS)
   // What is not allowed keeps its words, never itself.
-  for (const words of ['javascript: のリンク', 'data: のリンク', '大文字小文字のリンク', 'タブを挟んだリンク', 'ファイルのリンク', 'スキームなしのリンク', '流れ続ける文字', 'チェックで画面を覆う']) {
+  for (const words of ['人をあざむくリンク', 'パスワードつきのリンク', '名前のわな', 'javascript: のリンク', 'data: のリンク', '大文字小文字のリンク', 'タブを挟んだリンク', 'ファイルのリンク', 'スキームなしのリンク', '流れ続ける文字', 'チェックで画面を覆う']) {
     expect(html, words).toContain(words)
   }
   expect(html).toContain('<a href="https://evil.example/link">外へのリンク</a>')
