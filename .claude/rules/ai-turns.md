@@ -233,7 +233,7 @@ turns").
   not readable (offline) or missing → **off**: nothing starts on a guess; a server without the
   member's switch (404) → the company's as before. The company default is allowed and each
   member starts on; an admin changes both in the admin console 「やることの一覧」, the member in
-  自分の設定.
+  設定 →「AI に任せること」.
 
 ## Execution runs on the server (S10b, records.md "Execution runs")
 

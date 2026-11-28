@@ -1095,3 +1095,12 @@ test('the topic chip: the やること, a linked file\'s line in the reply, × t
   expect(await chat(page, c => (c as unknown as { patches: Array<Record<string, unknown>> }).patches.filter(p => 'topicRecordId' in p)))
     .toEqual([{ sessionId: 'edit-history', topicRecordId: null }])
 })
+
+// A first day (owner decision 2026-11-28, 20番-8): the empty conversation says how it is used (the list's count: conversation-rows.test.ts).
+test('a first day: the empty conversation has one line on how to use it, gone after the first message', async ({ page }) => {
+  await page.goto('/tests/chat-header-ui.html?list=open&turn=manual')
+  const hint = page.locator('[data-chat-empty-hint]').locator('visible=true')
+  await expect(hint).toHaveText('聞きたいことを下に書いてください。話した内容は「AIへの相談」として残り、一覧からいつでも続きを開けます。')
+  await send(page, '使い方を教えて')
+  await expect(hint).toHaveCount(0)
+})

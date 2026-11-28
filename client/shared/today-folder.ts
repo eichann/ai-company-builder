@@ -3,7 +3,7 @@
  * a department's `.personal/` — on the member's Mac only, never synced (push check
  * `[PERSONAL_PATH]`). `<department>/.personal/inbox/日付別/YYYY/YYYYMMDD/`, the date being the
  * company's day (the same "today" as the task list: Japan time until a company setting exists).
- * Which department holds it is the member's choice on this PC (設定 → 自分の設定), else the first
+ * Which department holds it is the member's choice on this PC (設定 → AI に任せること), else the first
  * department they belong to (所属) that is downloaded here. Pure: the renderer, main and tests use it.
  */
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'

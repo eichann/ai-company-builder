@@ -98,8 +98,12 @@ export interface JobCandidateInput {
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype
 const SKILL_REF_RE = /^[A-Za-z0-9_-]{1,100}$/
-/** A place a candidate may name: a grant's path (`jobPathProblem`) with no hidden segment (`.claude`, `.acb`…: never listed). */
-const candidatePath = (p: unknown): p is string => jobPathProblem(p) === null && !(p as string).split('/').some(s => s.startsWith('.'))
+/**
+ * A place a candidate may name: a grant's path (`jobPathProblem`) with no hidden segment (`.claude`, `.acb`…: never listed).
+ * Also what the app's card offers to choose from (UX 段3 #13): the server checks the rest (exists, the member's to read / write).
+ */
+export const isJobCandidatePlace = (p: unknown): p is string => jobPathProblem(p) === null && !(p as string).split('/').some(s => s.startsWith('.'))
+const candidatePath = isJobCandidatePlace
 const MAX_READS = 10
 
 /** The candidate's input, strictly (an unknown key or value is a problem; codes only, never the values sent). */
@@ -160,13 +164,21 @@ export function proposalDeliverableFolder(candidateId: string): string {
 }
 
 /**
+ * Every place a candidate's job may read (`grant.reads.paths`): its read places, then the check's place — the one list the
+ * definition grants and the card shows as 読む場所, so what the member confirms is what the AI may read.
+ */
+export function proposalReadPaths(input: JobCandidateInput): string[] {
+  return [...new Set([...input.reads, ...(input.check.kind === 'new_files' ? [input.check.path] : [])])]
+}
+
+/**
  * The definition a candidate becomes (schema 4, not yet parsed — the server runs `parseJobDefinition` on it): the signed-in
  * member as the responsible person, the Skill the server pinned, the reads and the check's place read, the one やること it
  * creates at its end (`records`, `creates: ['task']`), the record reads / minutes / mail drafts only as chosen, at most one
  * run a day.
  */
 export function proposalDefinition(input: JobCandidateInput, pinned: { actingUser: string; procedure: JobProcedure; skillName: string; candidateId: string }): Record<string, unknown> {
-  const reads = [...new Set([...input.reads, ...(input.check.kind === 'new_files' ? [input.check.path] : [])])]
+  const reads = proposalReadPaths(input)
   const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(input.deliverable !== null ? ['files_write'] : []), ...(input.mailDrafts ? ['outbound_draft'] : [])]
   const routes = [
     ...(input.readRecords ? JOB_PROPOSAL_RECORD_ROUTES : []),

@@ -239,11 +239,11 @@ export const scenes: Scene[] = [
     id: 'approval-card',
     about: 'An approval request (承認のお願い) as it appears in the chat.',
     page: 'approval-card',
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000' },
       { marker: { target: 'role=textbox', label: '1', at: 'left' } },
-      { marker: { target: 'role=button[name="承認" s]', label: '2', at: 'left' } },
+      { marker: { target: 'role=button[name="承認する" s]', label: '2', at: 'left' } },
     ],
   },
 
@@ -267,38 +267,57 @@ export const scenes: Scene[] = [
 
   // ── 2章 招待からログインして、会社を開く ─────────────────────────────────
   {
+    id: 'login-wait',
+    about: 'The app opened before the invitation link: 「招待のメールから始めます」, waiting for the link; the side path below.',
+    ...SIGN_IN,
+    query: { screen: 'server' },
+    steps: [{ waitFor: 'text=招待のリンクを待っています' }],
+    annotations: [
+      { box: 'role=list' }, { marker: { target: 'role=list', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="招待のメールが見当たらないとき"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
     id: 'login-server-setup',
-    about: 'Opened from the invitation link: the server address to connect to and ［つなぐ］.',
+    about: 'Opened from the invitation link: the address to connect to above the sign-in, ［ログイン］ connects and signs in.',
     ...SIGN_IN,
     query: { screen: 'offer' },
+    steps: [
+      { fill: 'role=textbox[name="メールアドレス"]', text: 'yamada@example.com' },
+      { fill: 'role=textbox[name="パスワード"]', text: 'passw0rd!' },
+    ],
     annotations: [
-      { box: 'text=https://acb.example.com' }, { marker: { target: 'text=https://acb.example.com', label: '1', at: 'left' } },
-      { box: 'role=button[name="つなぐ"]' }, { marker: { target: 'role=button[name="つなぐ"]', label: '2', at: 'right' } },
+      { box: 'role=region[name="つなぎ先"]' }, { marker: { target: 'role=region[name="つなぎ先"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=textbox[name="メールアドレス"]', label: '2', at: 'left' } },
+      { box: 'role=button[name="ログイン"]' }, { marker: { target: 'role=button[name="ログイン"]', label: '3', at: 'left' } },
     ],
   },
   {
     id: 'login-server-url',
-    about: 'The app opened first: typing the server address and ［接続］.',
+    about: 'The side path when the mail cannot be found: typing the company\'s address and ［次へ］.',
     ...SIGN_IN,
     query: { screen: 'server' },
-    steps: [{ fill: 'role=textbox', text: 'https://acb.example.com' }],
+    steps: [
+      { click: 'role=button[name="招待のメールが見当たらないとき"]' },
+      { fill: 'role=textbox', text: 'https://acb.example.com' },
+    ],
     annotations: [
       { box: 'role=textbox' }, { marker: { target: 'role=textbox', label: '1', at: 'left' } },
-      { box: 'role=button[name="接続"]' }, { marker: { target: 'role=button[name="接続"]', label: '2', at: 'left' } },
+      { box: 'role=button[name="次へ"]' }, { marker: { target: 'role=button[name="次へ"]', label: '2', at: 'left' } },
     ],
   },
   {
     id: 'login-screen',
-    about: 'The sign-in screen with the address and password filled in.',
+    about: 'The sign-in screen of an app already connected: where the password goes, the address and password filled in.',
     ...SIGN_IN,
     query: { screen: 'login' },
     steps: [
-      { fill: 'role=textbox[name="example@company.com"]', text: 'yamada@example.com' },
-      { fill: 'role=textbox[name="••••••••"]', text: 'passw0rd!' },
+      { fill: 'role=textbox[name="メールアドレス"]', text: 'yamada@example.com' },
+      { fill: 'role=textbox[name="パスワード"]', text: 'passw0rd!' },
     ],
     annotations: [
-      { marker: { target: 'role=textbox[name="example@company.com"]', label: '1', at: 'left' } },
-      { marker: { target: 'role=textbox[name="••••••••"]', label: '2', at: 'left' } },
+      { marker: { target: 'role=region[name="つなぎ先"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=textbox[name="メールアドレス"]', label: '2', at: 'left' } },
       { box: 'role=button[name="ログイン"]' }, { marker: { target: 'role=button[name="ログイン"]', label: '3', at: 'left' } },
     ],
   },
@@ -309,47 +328,48 @@ export const scenes: Scene[] = [
     annotations: [{ box: 'role=button[name=/^検証A社/]' }, { marker: { target: 'role=button[name=/^検証A社/]', label: '1', at: 'left' } }],
   },
   {
-    id: 'company-folder-choice',
-    about: '「作業フォルダを選択してください」: 新しく作成 for a first time, 既存のフォルダを開く otherwise.',
+    id: 'company-join',
+    about: '「検証A社 に参加します」: the company with its address, the 所属 営業部, the automatic place, ［始める］.',
     ...SELECTOR,
-    steps: [{ click: 'role=button[name=/^検証A社/]' }],
+    query: { manual: '1', mine: 'd1' },
+    viewport: { width: 830, height: 760 },
+    steps: [{ click: 'role=button[name=/^検証A社/]' }, { waitFor: 'text=ふつうはこのままで大丈夫です' }],
     annotations: [
-      { box: 'role=button[name=/^新しく作成/]' }, { marker: { target: 'role=button[name=/^新しく作成/]', label: '1', at: 'left' } },
-      { marker: { target: 'role=button[name=/^既存のフォルダを開く/]', label: '2', at: 'left' } },
+      { marker: { target: 'text=あなたの所属の部署です。ほかの部署もあとから置けます', label: '1', at: 'left' } },
+      { marker: { target: '[data-company-place]', label: '2', at: 'left' } },
+      { box: 'role=button[name="始める"]' }, { marker: { target: 'role=button[name="始める"]', label: '3', at: 'left' } },
     ],
   },
   {
-    id: 'company-folder-new',
-    about: 'Where the company folder is made: フォルダを選択 (already chosen) and 開始.',
+    id: 'company-join-place',
+    about: '「置き場所を変えたいとき（任意）」 opened from the place\'s 変える: another place, or a company folder already on this PC.',
     ...SELECTOR,
+    query: { manual: '1', mine: 'd1' },
+    viewport: { width: 830, height: 860 },
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
-      { click: 'role=button[name=/^新しく作成/]' },
-      { click: 'role=button[name=/^フォルダを選択/]' },
-      { waitFor: 'text="/Users/yamada/AI Company Builder/検証A社"' },
+      { waitFor: 'text=ふつうはこのままで大丈夫です' },
+      { click: 'role=button[name="変える"] >> nth=1' },
     ],
     annotations: [
-      { marker: { target: 'role=button[name=/^フォルダを選択/]', label: '1', at: 'left' } },
-      { box: 'role=button[name=/^開始/]' }, { marker: { target: 'role=button[name=/^開始/]', label: '2', at: 'right' } },
+      { marker: { target: 'role=button[name="別の場所に作る（フォルダを選ぶ）"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="この PC にすでにある会社のフォルダを使う"]', label: '2', at: 'left' } },
     ],
   },
 
   // ── 3章 自分の部署を選ぶ ─────────────────────────────────────────────────
   {
     id: 'setup-department-picker',
-    about: '「この PC に置く部署を選ぶ」 with 営業部 checked and the download button.',
+    about: '「この PC に置く部署を選ぶ」 (no 所属 known) with 営業部 checked and the button that takes it to the join screen.',
     ...SELECTOR,
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
-      { click: 'role=button[name=/^新しく作成/]' },
-      { click: 'role=button[name=/^フォルダを選択/]' },
-      { click: 'role=button[name=/^開始/]' },
       { click: 'role=button[name=/^営業部/]' },
     ],
     annotations: [
       { marker: { target: 'text=この PC にダウンロードする部署を選んでください', label: '1', at: 'left' } },
       { box: 'role=button[name=/^営業部/]' }, { marker: { target: 'role=button[name=/^営業部/]', label: '2', at: 'left' } },
-      { box: 'role=button[name=/^選んだ部署をダウンロード/]' }, { marker: { target: 'role=button[name=/^選んだ部署をダウンロード/]', label: '3', at: 'below' } },
+      { box: 'role=button[name=/^選んだ部署にする/]' }, { marker: { target: 'role=button[name=/^選んだ部署にする/]', label: '3', at: 'below' } },
     ],
   },
   {
@@ -358,9 +378,6 @@ export const scenes: Scene[] = [
     ...SELECTOR,
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
-      { click: 'role=button[name=/^新しく作成/]' },
-      { click: 'role=button[name=/^フォルダを選択/]' },
-      { click: 'role=button[name=/^開始/]' },
       { waitFor: 'text=この PC にダウンロードする部署を選んでください' },
     ],
     annotations: [
@@ -370,20 +387,16 @@ export const scenes: Scene[] = [
   },
   {
     id: 'setup-progress',
-    about: 'The first setup downloading: 「ダウンロード中… 46 MB 受信」.',
+    about: 'The first setup receiving the company\'s files: 「準備しています」, 「46 MB 受け取りました」.',
     ...SELECTOR,
-    query: { manual: '1', setup: 'manual' },
+    query: { manual: '1', setup: 'manual', mine: 'd1' },
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
-      { click: 'role=button[name=/^新しく作成/]' },
-      { click: 'role=button[name=/^フォルダを選択/]' },
-      { click: 'role=button[name=/^開始/]' },
-      { click: 'role=button[name=/^営業部/]' },
-      { click: 'role=button[name=/^選んだ部署をダウンロード/]' },
+      { click: 'role=button[name="始める"]' },
       { run: 'window.__acbCompany.progress(48_500_000)' },
-      { waitFor: 'text=/ダウンロード中…/' },
+      { waitFor: 'text=/受け取りました/' },
     ],
-    annotations: [{ box: 'text=/ダウンロード中…/' }, { marker: { target: 'text=/ダウンロード中…/', label: '1', at: 'right' } }],
+    annotations: [{ box: 'text=/受け取りました/' }, { marker: { target: 'text=/受け取りました/', label: '1', at: 'right' } }],
   },
   {
     id: 'department-not-downloaded',
@@ -774,7 +787,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-download-folders',
-    about: '設定 →「ダウンロードするフォルダ」: sizes, what is downloaded, 過去資料 left out.',
+    about: '設定 →「この PC に置くフォルダ」: sizes, what is downloaded, 過去資料 left out.',
     page: 'download-folders',
     query: { manual: '1' },
     steps: [{ waitFor: 'text=/をダウンロード済み/' }],
@@ -928,10 +941,10 @@ export const scenes: Scene[] = [
     about: '承認のお願い (only where the company uses it): the fixed content, the reason, 承認.',
     page: 'approval-card',
     query: { manual: '1' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000' }, { marker: { target: 'text=1,500,000', label: '1', at: 'right' } },
-      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '2', at: 'left' } },
+      { box: 'role=button[name="承認する" s]' }, { marker: { target: 'role=button[name="承認する" s]', label: '2', at: 'left' } },
     ],
   },
   {
@@ -1504,7 +1517,7 @@ export const scenes: Scene[] = [
     about: 'The approval request as 山田さん, who asked, sees it: 「佐藤さんの承認待ち」 and ［取り下げる］.',
     page: 'approval-card',
     query: { manual: '1', viewer: 'requester' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=佐藤さんの承認待ち' }, { marker: { target: 'text=佐藤さんの承認待ち', label: '1', at: 'left' } },
       { box: 'role=button[name="取り下げる"]' }, { marker: { target: 'role=button[name="取り下げる"]', label: '2', at: 'left' } },
@@ -1515,11 +1528,11 @@ export const scenes: Scene[] = [
     about: 'The same request as 佐藤さん, who decides, sees it: the change, the reason to write, ［承認］［差し戻す］.',
     page: 'approval-card',
     query: { manual: '1', approver: 'sato' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000 >> nth=0' }, { marker: { target: 'text=1,500,000 >> nth=0', label: '1', at: 'right' } },
       { box: 'role=textbox' }, { marker: { target: 'role=textbox', label: '2', at: 'left' } },
-      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '3', at: 'left' } },
+      { box: 'role=button[name="承認する" s]' }, { marker: { target: 'role=button[name="承認する" s]', label: '3', at: 'left' } },
       { box: 'role=button[name="差し戻す"]' }, { marker: { target: 'role=button[name="差し戻す"]', label: '4', at: 'right' } },
     ],
   },
@@ -1569,7 +1582,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-my-switches',
-    about: '設定 →「自分の設定」: 「AI が自動で進める」, 「受信を読む」 and 「AI から定期の仕事を提案してもらう」.',
+    about: '設定 →「AI に任せること」: 「AI が自動で進める」, 「受信を読む」 and 「AI から定期の仕事を提案してもらう」.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 1000 },
@@ -1663,7 +1676,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'broker-key-card',
-    about: 'In a consultation: 「Google Gemini の鍵がありません」 with the way to 設定 →「自分の鍵」.',
+    about: 'In a consultation: 「Google Gemini の鍵がありません」 with the way to 設定 →「Claude・Gemini などの鍵」.',
     page: 'broker-key-card',
     viewport: { width: 900, height: 700 },
     steps: [{ waitFor: 'role=group[name="Google Gemini の鍵がありません"] >> role=button' }],
@@ -1674,7 +1687,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-own-keys',
-    about: '設定 →「自分の鍵」: the key stays on the company server; ［自分の鍵を登録］.',
+    about: '設定 →「Claude・Gemini などの鍵」: the key stays on the company server; ［自分の鍵を登録］.',
     page: 'download-folders',
     query: { tab: 'ownkeys', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 700 },
@@ -2054,9 +2067,9 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-today-tabs',
-    about: '設定 →「自分の設定」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
+    about: '設定 →「AI に任せること」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
     ...EXTRA,
-    steps: [{ click: ME }, { click: menuItem('設定') }, { click: 'role=dialog >> role=button[name=/自分の設定/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
+    steps: [{ click: ME }, { click: menuItem('設定') }, { click: 'role=dialog >> role=button[name=/AI に任せること/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
     crop: { region: { x: 380, y: 185, width: 760, height: 280 } },
     annotations: [
       { box: 'role=combobox[name="今日のフォルダを置く部署"]' }, { marker: { target: 'role=combobox[name="今日のフォルダを置く部署"]', label: '1', at: 'left' } },
@@ -2431,7 +2444,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-mine-company-off',
-    about: '設定 →「自分の設定」 when the company turned 受信を読む off: greyed, 「会社の設定で止まっています」.',
+    about: '設定 →「AI に任せること」 when the company turned 受信を読む off: greyed, 「会社の設定で止まっています」.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', company: 'off' },
     viewport: { width: 1100, height: 800 },
@@ -2501,36 +2514,36 @@ export const scenes: Scene[] = [
   // ── 44章 設定の見取り図と、アカウント ──────────────────────────────────
   {
     id: 'settings-nav',
-    about: 'The top of the settings\' list of sections: あなた, 同期, AI と連携.',
+    about: 'The top of the settings\' list of sections: AI, つないでいるサービス, 知らせ.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
     viewport: { width: 1100, height: 800 },
-    steps: [{ waitFor: 'role=button[name="自分の設定"]' }],
+    steps: [{ waitFor: 'role=button[name="AI に任せること"]' }],
     crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
     annotations: [
-      { marker: { target: 'text="あなた"', label: '1', at: 'right' } },
-      { marker: { target: 'text="同期"', label: '2', at: 'right' } },
-      { marker: { target: 'text="AI と連携"', label: '3', at: 'right' } },
+      { marker: { target: 'text="AI"', label: '1', at: 'right' } },
+      { marker: { target: 'text="つないでいるサービス"', label: '2', at: 'right' } },
+      { marker: { target: 'text="知らせ"', label: '3', at: 'right' } },
     ],
   },
   {
     id: 'settings-nav-more',
-    about: 'The settings\' list scrolled to its end: the three settings for the company\'s technical staff, 仕事 and 入力.',
+    about: 'The settings\' list scrolled to its end with 詳しい設定 opened: ファイルと同期 and the three settings for the company\'s technical staff.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
     viewport: { width: 1100, height: 800 },
     steps: [
-      { waitFor: 'role=button[name="自分の設定"]' },
+      { waitFor: 'role=button[name="AI に任せること"]' },
+      { click: 'role=button[name="詳しい設定"]' },
       // The list scrolls inside the window (its height stays the same).
       { run: 'for (const el of document.querySelectorAll(\'nav[aria-label="設定の項目"] *\')) if (el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight' },
       SETTLE,
     ],
     crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
     annotations: [
-      { box: 'role=button[name="APIキー（このPC）"]' }, { box: 'role=button[name="環境変数（.env）"]' }, { box: 'role=button[name="AIに渡す環境変数"]' },
-      { marker: { target: 'role=button[name="環境変数（.env）"]', label: '4', at: 'right' } },
-      { marker: { target: 'text="仕事"', label: '5', at: 'right' } },
-      { marker: { target: 'text="入力"', label: '6', at: 'right' } },
+      { marker: { target: 'text="ファイルと同期"', label: '4', at: 'right' } },
+      { box: 'role=button[name="同期しないファイル"]' }, { box: 'role=button[name="API キー・環境変数（この PC）"]' }, { box: 'role=button[name="AIに渡す環境変数"]' },
+      { marker: { target: 'role=button[name="詳しい設定"]', label: '5', at: 'right' } },
     ],
   },
   {
@@ -2568,9 +2581,9 @@ scenes.push(
   forAdminGuide('browser-plan-card', 'admin-app-plan-card'),
   {
     id: 'admin-app-env-move',
-    about: '設定 →「APIキー（このPC）」: the note that it is for older apps, and ［この鍵をサーバーに移す］ for a key in the .env.',
+    about: '設定 →「API キー・環境変数（この PC）」: the note that it is for older apps, and ［この鍵をサーバーに移す］ for a key in the .env.',
     page: 'download-folders',
-    query: { tab: 'apikeys', manual: '1', role: 'member' },
+    query: { tab: 'envkeys', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 760 },
     steps: [{ waitFor: 'role=button[name="この鍵をサーバーに移す"]' }, SETTLE],
     crop: { target: 'role=dialog', padding: 0 },

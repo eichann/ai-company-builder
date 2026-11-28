@@ -1,7 +1,9 @@
 // Signing in to the ACB server and the server calls the renderer makes
 // directly. The session (cookies, and the token in the sign-in / sign-up
 // answer) stays in the main process (services/session.ts): sign-in and sign-up
-// answer the renderer only { success, error? }.
+// answer the renderer only { success, error? }. Sign-in names the server its screen showed:
+// main sends the password only when that is still this computer's server (never without one)
+// (ipc-and-main-process.md "The invitation's 「アプリを開く」").
 //   auth:signUp, auth:signIn, auth:signOut, auth:getSession,
 //   api:getCompanies, api:createCompany, api:getDepartments
 
@@ -16,6 +18,15 @@ export interface AuthDeps {
   onSignedOut: () => void
   /** The server confirmed who is signed in (/api/me, after sign-in and when the session is restored). */
   onSignedIn?: (userId: string) => void
+}
+
+// Pressing again would be refused the same way (the screen keeps its address): opening the app again shows the saved one.
+export const AUTH_SERVER_CHANGED = 'つなぎ先が変わったため、ログインしませんでした。アプリをいったん閉じて開き直し、表示されるつなぎ先を確かめてからログインしてください。'
+
+/** The address a screen showed is the configured server (trailing slashes aside; '' is never one). */
+function sameServer(shown: unknown, configured: string): boolean {
+  const bare = (url: string) => url.replace(/\/+$/, '')
+  return typeof shown === 'string' && bare(shown) !== '' && bare(shown) === bare(configured)
 }
 
 function extractResponseMessageFromJson(data: unknown): string | undefined {
@@ -82,9 +93,16 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
     }
   })
 
-  ipc.handle('auth:signIn', async (_, email: string, password: string) => {
+  ipc.handle('auth:signIn', async (_, email: string, password: string, server: unknown) => {
+    // One read: the password goes to exactly the server compared here.
+    const target = serverUrl()
+    // The screen names the server it showed: none, anything saved since, or not a string sends nothing.
+    if (!sameServer(server, target)) {
+      console.warn('[auth] sign-in refused: the server on screen is not this computer\'s server')
+      return { success: false, error: AUTH_SERVER_CHANGED }
+    }
     try {
-      const response = await fetch(`${serverUrl()}/api/auth/sign-in/email`, {
+      const response = await fetch(`${target}/api/auth/sign-in/email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

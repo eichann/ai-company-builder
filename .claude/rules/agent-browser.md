@@ -206,7 +206,7 @@ run's frames ("Writes within frames, in the app"). Owner decisions
 
 ## The app's window (PR 4: the member opens and logs in; the AI is not connected)
 
-A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「AI と連携」;
+A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「つないでいるサービス」;
 the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and one line on where its
 login lives — `loginNotKept` 「ログインはアプリを閉じるまで覚えています。アプリを開き直すと、もう一度ログインが必要です。」,
 `loginNotKeptBySandbox` when the member's 「AI の囲い」 is not 囲う (`BrowserSiteView.notKeptBySandbox`: the last valid
@@ -2583,7 +2583,7 @@ paths and never ask the switch.
   never this PC's clock) → あなた待ち amber 「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved
   plan not started, a `permitted` run and an `unknown` one not yet confirmable → shown under 新着, never counted (作業中 before
   2026-11-26). Every row only opens this
-  card in `InboxCardDialog` (the type guard in `model.test.ts` refuses an action kind that approves, sends, runs
+  card beside the inbox's list (the type guard in `model.test.ts` refuses an action kind that approves, sends, runs
   or confirms). Settled = in neither list = gone (nothing stored; no 新着, the server keeps no notice for
   plans). **Read** when the inbox mounts, when the panel opens, when a card in the inbox closes, **when a plan's
   state moves on any card** (`planStore` `subscribePlanStates`: ［任せる］ in the consultation's card, a cancel, a

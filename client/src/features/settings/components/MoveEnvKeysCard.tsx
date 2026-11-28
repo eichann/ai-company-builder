@@ -1,4 +1,4 @@
-// On the old 「APIキー（このPC）」 and 「環境変数（.env）」 pages: says these are for older
+// On 「API キー・環境変数（この PC）」 (詳しい設定): says these are for older
 // app versions and special cases, and offers to move a built-in service's key from
 // this computer's .env to the server as one's own key. Only the last 4 are shown.
 import { Button, Callout, Card, SubHeading } from '../../../shared/ui/primitives'
@@ -10,9 +10,9 @@ export function LegacyKeysNote({ onOpenOwnKeys }: { onOpenOwnKeys: () => void })
     <Callout
       tone="info"
       title="古い版のアプリや、特別な場合のための画面です"
-      action={<Button size="sm" onClick={onOpenOwnKeys}>「自分の鍵」を開く</Button>}
+      action={<Button size="sm" onClick={onOpenOwnKeys}>「Claude・Gemini などの鍵」を開く</Button>}
     >
-      鍵の置き場所のおすすめは「自分の鍵」です。鍵は会社のサーバーで暗号化して預かり、この PC にも AI にも渡しません。ここ（この PC の .env）に置いた鍵は、AI や、AI が動かすスクリプトから読めてしまいます。
+      鍵の置き場所のおすすめは「Claude・Gemini などの鍵」です。鍵は会社のサーバーで暗号化して預かり、この PC にも AI にも渡しません。ここ（この PC の .env）に置いた鍵は、AI や、AI が動かすスクリプトから読めてしまいます。
     </Callout>
   )
 }

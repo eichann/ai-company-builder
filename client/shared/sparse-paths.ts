@@ -146,5 +146,5 @@ export function notDownloadedAgentMessage(folder: string): string {
 
 /** What the member is told when an app action would write into a folder that is not downloaded. */
 export function notDownloadedUserMessage(folder: string): string {
-  return `このフォルダ（${folder}）はダウンロードしていないため、ここには保存できません。設定の「ダウンロードするフォルダ」でダウンロードしてから保存してください。`
+  return `このフォルダ（${folder}）はダウンロードしていないため、ここには保存できません。設定の「この PC に置くフォルダ」でダウンロードしてから保存してください。`
 }

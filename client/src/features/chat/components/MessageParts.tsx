@@ -22,6 +22,7 @@ import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef } from '../../../../shared/job-proposals'
 import { ApprovalCard } from './ApprovalCard'
+import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { JobProposalCard } from './JobProposalCard'
 import { ShareProposalCard } from './ShareProposalCard'
 import { SHARE_PROPOSAL_PART_TYPE, readShareProposalCard } from '../../../../shared/share-proposals'
@@ -108,6 +109,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
   const plan = useMemo(() => planParts(parts), [parts])
   // A 「ブラウザ操作」 stopped card's answer buttons send the member's own message through the conversation's send.
   const { say } = useContext(ReviewActionsContext)
+  // ［大きく開く（タブ）］ on an approval card: only where something opens a record's tab (not a consultation's own window).
+  const canOpenRecord = useCommandAvailable('record.open')
+  // The same for a 「定期の仕事の案」 card: a tab of its own (a candidate is not a record).
+  const canOpenJobProposal = useCommandAvailable('jobProposal.open')
   const lastIndex = parts.length - 1
   // Searched once the reply has ended (not per streamed chunk): a "no key" answer → a 「自分の鍵」 card.
   const keyNeeds = useMemo(() => (isStreaming ? [] : brokerKeyNeedsOf(parts)), [parts, isStreaming])
@@ -147,11 +152,12 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         if (part.type === APPROVAL_PART_TYPE) {
           const ref = readApprovalCardRef((part as { data?: unknown }).data)
-          return ref ? <ApprovalCard key={item.key} card={ref} /> : null
+          return ref ? <ApprovalCard key={item.key} card={ref} onOpenLarge={canOpenRecord ? () => void runCommand('record.open', { recordId: ref.approvalId }) : undefined} /> : null
         }
         if (part.type === JOB_PROPOSAL_PART_TYPE) {
           const ref = readJobProposalCardRef((part as { data?: unknown }).data)
-          return ref ? <JobProposalCard key={item.key} card={ref} /> : null
+          return ref ? <JobProposalCard key={item.key} card={ref}
+            onOpenLarge={canOpenJobProposal ? () => void runCommand('jobProposal.open', { companyId: ref.companyId, candidateId: ref.candidateId }) : undefined} /> : null
         }
         if (part.type === AI_ASKED_PART_TYPE) {
           const card = readAiAskedCard((part as { data?: unknown }).data)

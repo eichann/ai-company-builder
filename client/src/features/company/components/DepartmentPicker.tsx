@@ -1,20 +1,23 @@
 import { useState } from 'react'
 import { ArrowRight, Check, CloudArrowDown } from '@phosphor-icons/react'
-import { NOTHING_PICKED, pickedDownload, togglePick, type DepartmentPick, type PickableDepartment } from '../model'
+import { NOTHING_PICKED, pickedDownload, togglePick, type DepartmentChoice, type DepartmentPick, type PickableDepartment } from '../model'
 import { BACK_BUTTON, ScreenHeading } from './SelectorParts'
 
 /**
  * Which departments a first setup puts on this PC; the rest can be added later. 「すべての部署」 is a
- * choice of its own: with nothing chosen the button waits (never 「すべて」 by itself). Rendered only
- * while shown, so every visit starts with nothing chosen.
+ * choice of its own: with nothing chosen the button waits (never 「すべて」 by itself). It starts
+ * from what the join screen has chosen (the member's 所属, or nothing) and hands the choice back
+ * to it: nothing is downloaded before ［始める］ there.
  */
-export function DepartmentPicker({ departments, onBack, onDownload }: {
+export function DepartmentPicker({ departments, initial, onBack, onChoose }: {
   departments: PickableDepartment[]
+  initial: DepartmentChoice
   onBack: () => void
   /** 'all' = every department; else the chosen folders in the list's order. */
-  onDownload: (folders: 'all' | string[]) => void
+  onChoose: (folders: 'all' | string[]) => void
 }) {
-  const [pick, setPick] = useState<DepartmentPick>(NOTHING_PICKED)
+  const [pick, setPick] = useState<DepartmentPick>(() =>
+    initial === 'all' ? { all: true } : initial ? { all: false, folders: new Set(initial) } : NOTHING_PICKED)
   const download = pickedDownload(departments, pick)
 
   return (
@@ -41,11 +44,11 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
         </button>
         <button
           disabled={download === null}
-          onClick={() => { if (download !== null) onDownload(download) }}
+          onClick={() => { if (download !== null) onChoose(download) }}
           className="flex-1 flex items-center justify-center gap-2 bg-primary enabled:hover:bg-primary-hover text-on-primary rounded-control px-4 py-3 transition-colors disabled:opacity-disabled disabled:cursor-not-allowed"
         >
-          {download === 'all' ? 'すべての部署をダウンロード'
-            : download ? `選んだ部署をダウンロード（${download.length}）`
+          {download === 'all' ? 'すべての部署にする'
+            : download ? `選んだ部署にする（${download.length}）`
             : '部署を選んでください'}
           {download !== null && <ArrowRight size={18} />}
         </button>

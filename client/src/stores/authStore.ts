@@ -14,7 +14,8 @@ interface AuthState {
   setInitialized: (initialized: boolean) => void
 
   // Auth methods
-  signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
+  /** `server`: the address the screen showed (main signs in only while it is this computer's server). */
+  signIn: (email: string, password: string, server: string) => Promise<{ success: boolean; error?: string }>
   signUp: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>
   /** The one sign-out: the company screen closes and the login screen shows (unsaved tabs are the caller's: useSaveBeforeLeaving). */
   signOut: () => Promise<void>
@@ -32,10 +33,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setInitialized: (isInitialized) => set({ isInitialized }),
 
-  signIn: async (email, password) => {
+  signIn: async (email, password, server) => {
     set({ isLoading: true })
     try {
-      const result = await authApi.signIn(email, password)
+      const result = await authApi.signIn(email, password, server)
       if (result.success) {
         // Fetch user info after sign in
         const session = await authApi.getSession()

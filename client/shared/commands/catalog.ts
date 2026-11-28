@@ -103,13 +103,19 @@ export const COMMANDS = defineCommands([
   },
   {
     // Settings → 「自分の鍵」, that service shown first (its form open when the member may register).
-    id: 'settings.openOwnKey', title: '「自分の鍵」の設定を開く', class: 'view',
+    id: 'settings.openOwnKey', title: '「Claude・Gemini などの鍵」の設定を開く', class: 'view',
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),
   },
   {
     // Shows a record's card in the editor area (files tab), as a place ← → can return to.
     id: 'record.open', title: '記録のカードを開く', class: 'view',
     args: z.object({ recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/) }),
+  },
+  {
+    // Shows a 「定期の仕事の案」 (not a record: the candidate the chat's card reads) as a tab in the middle, read with the member's
+    // session like the card (jobs.md "Member proposals" "Opened large"). Only a view: every press there is the card's own.
+    id: 'jobProposal.open', title: '定期の仕事の案を大きく開く', class: 'view',
+    args: z.object({ companyId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/), candidateId: z.string().regex(/^jc\.[0-9a-f]{32}$/) }),
   },
   {
     // Runs an action of a record's type through the server's state engine

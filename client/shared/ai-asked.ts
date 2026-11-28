@@ -69,7 +69,7 @@ export function aiAskedUndoStaleText(stateNow: string | null): string {
   return `取り消せませんでした。もう取り消したか、このあと別の変更がありました。${stateNow ? `（いまは「${stateNow}」です）` : ''}`
 }
 
-/** 設定 → 自分の設定's description of 「AI に完了を頼めるようにする」 (`MySwitchesSection.tsx`): what it opens, from the one list. */
+/** 設定 → AI に任せること's description of 「AI に完了を頼めるようにする」 (`MySwitchesSection.tsx`): what it opens, from the one list. */
 export const AI_COMPLETES_SWITCH_TEXT = `AI との相談で「この7件を完了にして」のように頼むと、あなたの記録について AI が次のことをします：${AI_ASKED_SETTING_WORDS.join('・')}（それぞれ、画面であなたができるものだけ）。` +
   '頼んだときだけで、AI が自分の判断ですることはありません。したことは相談の中に一覧で出て、そこから取り消せます。この設定はあなただけのものです。'
 

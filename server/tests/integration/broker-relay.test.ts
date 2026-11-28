@@ -228,12 +228,12 @@ describe('the relay', () => {
     const token = tokenFor(['gemini'])
     const r = await call('POST', '/openai/v1/chat/completions', { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{"model":"gpt-5-mini"}' })
     expect(r.status).toBe(403)
-    expect(r.json.error.message).toBe('この作業には OpenAI の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。 [ACB_NO_KEY:openai]')
+    expect(r.json.error.message).toBe('この作業には OpenAI の鍵が必要です。管理者に頼むか、設定の『Claude・Gemini などの鍵』から登録してください。 [ACB_NO_KEY:openai]')
     expect((await call('GET', '/nope/v1/x', { headers: { authorization: `Bearer ${token}` } })).status).toBe(404)
     // The app's placeholder (keys exist, none for this member): the same sentence, nothing sent upstream.
     const before = received.length
     const p = await call('POST', '/gemini/v1beta/models/x:generateContent', { headers: { 'x-goog-api-key': 'acb_tok_none' }, body: '{}' })
-    expect([p.status, p.json.error.message]).toEqual([403, 'この作業には Google Gemini の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。 [ACB_NO_KEY:gemini]'])
+    expect([p.status, p.json.error.message]).toEqual([403, 'この作業には Google Gemini の鍵が必要です。管理者に頼むか、設定の『Claude・Gemini などの鍵』から登録してください。 [ACB_NO_KEY:gemini]'])
     expect(received.length).toBe(before)
   })
 

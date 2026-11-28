@@ -97,7 +97,7 @@ describe('the member\'s own setting', () => {
     const { token: t } = await token('u-bob')
     const r = await complete(t, id, 1)
     expect(r).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
-    expect(r.body.error).toContain('自分の設定')
+    expect(r.body.error).toContain('設定の「AI に任せること」でオンにすると')
     expect(await record(id)).toMatchObject({ state: 'todo', version: 1 })
   })
 })

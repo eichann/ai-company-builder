@@ -174,6 +174,8 @@ interface ListProps {
   error: string | null
   /** What was just done from a row that moved it away (「…を元に戻しました」). */
   status?: string | null
+  /** Nothing at all in this look (a first day): under 「新着」 (あなた待ち and 新着 together), one line on what comes here (`INBOX_PURPOSE`). */
+  empty?: boolean
 }
 
 const Heading = ({ label, count, danger, children, action }: { label: string; count: number; danger?: boolean; children?: ReactNode; action?: ReactNode }) => (
@@ -184,6 +186,9 @@ const Heading = ({ label, count, danger, children, action }: { label: string; co
     {action}
   </div>
 )
+/** What the inbox is for, said while it is empty (owner decision 2026-11-28, 20番-8). */
+export const INBOX_PURPOSE = 'ここには、あなたが動かすもの（承認・送る前の確認・止まった仕事）と、新しい知らせが届きます。'
+
 const Empty = ({ children }: { children: ReactNode }) => <p className="px-3 py-3 text-small text-text-muted">{children}</p>
 
 /** The end of what is drawn: told when it comes into view, and a line to press for the next rows. */
@@ -197,7 +202,7 @@ function MoreRows({ left, onMore }: { left: number; onMore: () => void }) {
 }
 
 /** The inbox's rows: あなた待ち and 新着 (the 「新着」 chip), or one of them, or 確認したもの. */
-export function InboxList({ sections, totals, redCount = true, filter, elsewhere = 0, onOpenTasks, turnNotListed, unreadNotListed = 0, more, work, notice, meetingButtons, onOpen, onSeen, onButton, onUndo, undone, onAllSeen, meetingNote, error, status }: ListProps) {
+export function InboxList({ sections, totals, redCount = true, filter, elsewhere = 0, onOpenTasks, turnNotListed, unreadNotListed = 0, more, work, notice, meetingButtons, onOpen, onSeen, onButton, onUndo, undone, onAllSeen, meetingNote, error, status, empty = false }: ListProps) {
   const row = (item: InboxItem) => <InboxRow key={item.key} item={item} buttons={item.meetingId ? meetingButtons?.(item.meetingId) : undefined} current={work?.currentKey === item.key}
     onOpen={onOpen} onSeen={onSeen} onButton={onButton} onUndo={onUndo} undone={!!item.undo && undone.has(item.undo.noticeId)} />
   const hasMeetings = [...sections.news, ...sections.moving].some(i => i.meetingId)
@@ -207,6 +212,7 @@ export function InboxList({ sections, totals, redCount = true, filter, elsewhere
       {error && <p role="alert" className="px-3 py-2 text-small text-danger-text">{error}</p>}
       {status && !error && <p role="status" className="px-3 py-2 text-small text-success-text">{status}</p>}
       {notice}
+      {empty && filter === 'new' && <p data-inbox-purpose className="px-3 pt-3 text-small text-text-muted">{INBOX_PURPOSE}</p>}
       <div {...listAttrs}>
         {(filter === 'new' || filter === 'waiting') && (
           <section aria-label="あなた待ち">

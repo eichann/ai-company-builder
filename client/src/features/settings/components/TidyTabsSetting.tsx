@@ -1,4 +1,4 @@
-// 設定 → 自分の設定: 「前の日のタブを自動で片づける」 (per Mac, on unless turned off). The screen
+// 設定 → AI に任せること: 「前の日のタブを自動で片づける」 (per Mac, on unless turned off). The screen
 // (AppShell) gives the switch's state and saves it (features/editor/tidyTabs.ts).
 import { useId } from 'react'
 import { Broom } from '@phosphor-icons/react'

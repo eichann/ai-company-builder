@@ -13,6 +13,8 @@ paths:
   - "client/shared/approvals.ts"
   - "client/electron/features/approvals/**"
   - "client/src/features/chat/components/ApprovalCard.tsx"
+  - "client/src/features/chat/components/ApprovalCardParts.tsx"
+  - "client/src/features/chat/approvalCard.ts"
   - "client/src/features/chat/approvalStore.ts"
   - "client/src/features/chat/hooks/useApproval.ts"
   - "client/tests/approval-tools.test.ts"
@@ -196,13 +198,36 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
   the card reads the request by id with the member's **session** each time it is shown (IPC
   `approvals:get`; `approvalStore.ts` + `hooks/useApproval.ts`, loaded on first subscribe — no
   effect). Members are named from the company's member list (`/members`, in main), never ids.
-- Shows: 1,200,000 → 1,500,000（+25%）, 理由（議事録の引用）, 前例 (count + items), 材料, 似ているもの
-  (a create), 「AI のまとめ（参考）」, the reason box prefilled with the draft (editable), 「承認」 /
-  「差し戻す」 for a viewer who may approve — 「承認」 sends **the hash of the content shown**
-  (`approvals:approve`) with 「中身が変わっていないことを確かめて承認します」 — 「取り下げる」 for the
-  requester; state lines 「<name>さんの承認待ち」 (an approval never says 確かめる, owner 2026-11-02) / 「承認されました。HubSpot の金額も …
-  になりました」 / 「差し戻されました：理由」 / 「HubSpot 側で変わっています。…」. No jargon (プラグイン /
-  型 / オントロジー / ハッシュ).
+- **Laid out to decide** (owner decision 2026-11-28, UX 12番 案A; the look only — what is approved and every check
+  below are unchanged): one column, in the order the approver decides — ① **what changes**, large (「金額」 then
+  ~~1,200,000~~ → **1,500,000** ＋25%; a create: 「新しく作る<型の名前>」 and its title, `ApprovalCardParts.tsx`
+  `ChangeSection`), then **one folded line each** (`<details>`): the basis 「根拠：『<the quote's first line>』（材料 n）」
+  — the quote's first 24 characters, 「…」 when cut or more lines follow (`approvalCard.ts` `quotePeek`, `basisSummary`)
+  — opening to the quote and 材料; 「前例（同じ部署・同じ欄の承認）：n 件」; 「似ているお願い（まだ承認待ちのもの）：n 件」
+  (only when there are some); an empty one is a single line 「根拠：なし」 / 「前例：なし」 — ② **the duplicate check** (a
+  create with similar records, required: 「まず確かめてください：すでにある<型>と同じではありませんか？」 with
+  「これと同じ<型>です（作らない）」 per record and 「別の<型>として作る」; that choice holds **for the content (hash) it was
+  made on** — content read again with another hash asks again) — ③ **the reason** (required, prefilled with the
+  AI's / requester's draft and said so: 「AI の下書きが入っています。直せます」) — ④ ［承認する］（primary）［差し戻す］ in a
+  bar **sticky at the bottom of the scrolling view** while the card is on screen (a short screen, a long card), with
+  one line beside them: 「先に『同じかどうか』を選ぶと承認できます」 / 「理由を書くと押せます」 / 「中身が変わっていないことを
+  確かめて承認します」 (`answerHint`). Someone who may not approve sees no reason box and no bar; the draft shows as
+  「AI のまとめ（参考）：…」 / 「お願いした人のまとめ：…」 and the requester gets 「取り下げる」. State lines 「<name>さんの承認待ち」
+  (an approval never says 確かめる, owner 2026-11-02) / 「承認されました。HubSpot の金額も … になりました」 / 「差し戻されました：
+  理由」 / 「HubSpot 側で変わっています。…」. No jargon (プラグイン / 型 / オントロジー / ハッシュ).
+- **What is shown is what is approved**: 「承認する」 sends **the hash of the view the card draws** (`approvals:approve`,
+  taken from the same render as the values on screen, never one read at another time); a 409 `CONTENT_CHANGED` shows
+  「内容が変わりました。もう一度確かめてください」 and the content the server holds now, and only a press on that sends its
+  hash. Folding hides nothing from what is approved: the fixed content is the change at the top, always open.
+- **Where it shows** (one component, `ApprovalCard`, owned by `chat`; other places get it through `app/`): a reply
+  (`MessageParts.tsx`, with ［大きく開く（タブ）］ — `record.open` of the request, offered only where something handles it,
+  so not in a consultation's own window), the request's record tab and a task's prepared things (`AppShell`
+  `approvalCard`), and the inbox (`renderApprovalCard`, beside its list; the inbox passes `onDone` there, which reaches the list through
+  `finishBeside` and its company-era gate — `notifications.md` "Another company"). `onDone` is called only when the
+  server's answer to a press here finished the request (`pressFinished`: approved / sent back / withdrawn / 「同じ」 —
+  a write that failed or went stale stays; a press whose answer never came and that a later read shows done does not
+  call it either — the card stays, saying what happened), so a list worked through (the inbox, UX 11番) goes on to the next one. The
+  inbox has no approve or send-back of its own: the reason is required, so only the card's bar answers.
 - **A press whose answer never came** (offline, a 5xx: it may or may not have reached the server; owner 2026-11-28):
   the card never says 「開き直すと分かります」. It reads the request again by itself (`approvals:get`, at once, then after 2,
   5 and 8 s: `src/features/chat/unknownResult.ts`, `hooks/useUnknownResult.ts`) and judges the press by the state it moved
@@ -245,5 +270,9 @@ readers, precedents readable incl. counts (record and request separately), dedup
 retention clears only the text, CROSS, an absent approver's delegate only during the absence and
 only what they read, recorded 代わりに), `server/tests/integration/plugin-operations.test.ts`
 (prior → 202), permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`,
-`client/tests/approval-tools.test.ts`, `client/tests/ui/approval-card.spec.ts` (the shown hash
-is sent; no approve button for a non-approver).
+`client/tests/approval-tools.test.ts`, `client/src/features/chat/approvalCard.test.ts` (the folded basis line, the
+hint beside the buttons, which answers finish a press), `client/tests/ui/approval-card.spec.ts` (the shown hash is
+sent; content changed after the card was drawn is shown again and each approve sends the hash that was on screen —
+mutation-checked with the hash taken from the first read; 「別」 asks again on new content; the bar stays at the bottom
+of a short screen; ［大きく開く（タブ）］ only where a tab opens; `onDone` only on a finished press; no approve button for
+a non-approver).

@@ -42,7 +42,7 @@ test('the settings screen always says it, whichever section is open', async ({ p
   const state = await openPreview(page, 'download-folders', { view: 'settings' })
   const nav = page.getByRole('navigation', { name: '設定の項目' })
   await expect(nav.getByText(SENTENCE)).toBeVisible()
-  await nav.getByRole('button', { name: '入力候補' }).click()
+  await nav.getByRole('button', { name: '入力（音声・候補）' }).click()
   await expect(nav.getByText(SENTENCE)).toBeVisible()
   expectNoPageErrors(state)
 })

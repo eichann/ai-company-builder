@@ -1,4 +1,4 @@
-// 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c), 「AI に完了を頼めるようにする」
+// 設定 → AI に任せること: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c), 「AI に完了を頼めるようにする」
 // (the member's alone, shown only when the server answers it; records.md "The AI at the member's request"), and
 // 「届いた議事録を AI が自動で読む」 (MeetingAutoReadSetting).
 // The company decides whether each may be used (管理画面の「詳しい設定」); one it stops is greyed
@@ -34,7 +34,7 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
   const { loadRef, switches, error, companyOff, busy, change } = useWorkSwitches(companyId)
   return (
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
-      <SectionHeader title="自分の設定" description="あなたの分だけの設定です。ほかの人には変わりません。" />
+      <SectionHeader title="AI に任せること" description="あなたの分だけの設定です。ほかの人には変わりません。" />
       {!switches && !error ? (
         <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />{CALM.loading}</div>
       ) : !switches ? (

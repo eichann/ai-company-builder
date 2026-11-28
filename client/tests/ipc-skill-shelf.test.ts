@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { commitRepo, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
+import { commitRepo, loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harness/main-harness.ts'
 import { shelfListing } from '../../shared/core/skill-shelf.ts'
 import { WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
 import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NO_BACKUP_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_REQUEST_OFFLINE_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
@@ -17,7 +17,7 @@ before(async () => {
   await h.startApp()
   h.server.on('POST', '/api/auth/sign-in/email', { json: { user: { id: 'u1' } }, headers: { 'Set-Cookie': 'better-auth.session_token=t.s; Path=/' } })
   h.server.on('GET', '/api/me', { json: { success: true, data: { id: 'u1', email: 'me@example.com', name: 'me' } } })
-  await h.invoke('auth:signIn', 'me@example.com', 'right')
+  await h.invoke('auth:signIn', 'me@example.com', 'right', SERVER_URL)
   await h.invoke('auth:getSession')
 })
 after(() => h.shutdown())

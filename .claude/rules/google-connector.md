@@ -151,7 +151,7 @@ export. `drive.readonly` stays in `GOOGLE_NEVER_SCOPES`.
   「許可をやめる」. `MyGoogle.companyFeatures` / `seen` carry both; the screen opens by itself only
   for an offered feature neither granted nor seen, so a member who unticks scopes is told once
   and never asked in a loop.
-- App: `ConnectToolsScreen.tsx` (first run from `app/AppDialogs.tsx`, and 設定 →「仕事の道具をつなぐ」),
+- App: `ConnectToolsScreen.tsx` (first run from `app/AppDialogs.tsx`, and 設定 →「つないでいるサービス」 →「サービスの一覧」, each card with ［詳しく］ to its service),
   rules in `features/settings/connectTools.ts` (`connectToolsOffer` decided once at load and kept
   while the member connects; `connectToolsView`; `googleDeclinedText`), `hooks/useConnectTools.ts`.
   IPC (lane A): `google:connectAll`, `google:markSeen`, `slack:markSeen`; Slack's button reuses
@@ -558,7 +558,7 @@ read-only budget, and the kit's seed turns the relay on (`once('google-relay')`)
   保存」, 「オンにする / オフにする」, the practice / operator / vault notices, 「会社で使うもの」 (one 「オフにする / オンにする」 per feature; Drive notes it needs the Picker), 「メンバーの許可（読む
   もの・送るもの）」 with 「止める」 (confirmation). Words: 「Google で許可」, 予定と議事録を読む /
   メールを送る — no OAuth, scope, token or plugin on screen.
-- App 設定 →「Google」 (tab after 「自分の鍵」 in 「AI と連携」:
+- App 設定 →「Google」 (after 「サービスの一覧」 in 「つないでいるサービス」:
   `client/src/features/settings/components/GoogleSection.tsx`, `hooks/useGoogle.ts`, ports
   `GoogleReads` / `GoogleOutbound` in `features/settings/api.ts`, whose status and 「許可をやめる」
   answers also go to `src/shared/lib/googlePermission.ts` so the task list re-reads today's

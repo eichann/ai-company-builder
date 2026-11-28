@@ -8,7 +8,8 @@
  */
 import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchLine, type JobCheck, type JobSetTrigger, type JobSetWatchLine, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
-const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
+/** A weekday as people say it (also the card's choices, UX 段3 #13). */
+export const JOB_WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
 /** The record types an event-triggered job may watch, as people call them (stage 4a). */
 const EVENT_TYPE_WORDS: Record<string, string> = { task: 'やること' }
@@ -63,7 +64,7 @@ export function jobTriggerText(trigger: JobTrigger): string {
   if (isSetTrigger(trigger)) return jobSetTriggerText(trigger)
   if (trigger.every === 'day') return `${trigger.businessDaysOnly ? '毎営業日' : '毎日'} ${trigger.at}`
   if (trigger.every === 'week') {
-    const day = WEEKDAY_WORDS[trigger.weekday]
+    const day = JOB_WEEKDAY_WORDS[trigger.weekday]
     return trigger.businessDaysBefore > 0 ? `毎週${day}の${trigger.businessDaysBefore}営業日前 ${trigger.at}` : `毎週${day} ${trigger.at}`
   }
   const day = trigger.day === 'last' ? '末日' : `${trigger.day}日`

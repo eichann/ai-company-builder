@@ -1,4 +1,4 @@
-// 設定 → 自分の設定: which department's 自分だけのフォルダ (.personal) holds 今日のフォルダ, on this PC
+// 設定 → AI に任せること: which department's 自分だけのフォルダ (.personal) holds 今日のフォルダ, on this PC
 // (client/shared/today-folder.ts). The screen (AppShell) gives the departments and saves the choice.
 import { useState } from 'react'
 import { CalendarBlank } from '@phosphor-icons/react'

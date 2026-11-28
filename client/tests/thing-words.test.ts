@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CORE_TYPE_FILES } from '../../shared/core/core-types'
 import { parseTypeFile, type TypeDefinition } from '../../shared/core/record-types'
-import { bundleWords, stateWord, thingKindOf, thingName } from '../shared/thing-words'
+import { bundleWords, CALM, stateWord, thingKindOf, thingName } from '../shared/thing-words'
 import { summaryView } from '../shared/record-views'
 
 // 言葉の決まり 1.: no 「型」, no category word, no machine name on a member's screen.
@@ -78,4 +78,8 @@ test('a decision not confirmed yet is 「決めたことの案」 on every scree
   assert.equal(thingName({ type: 'decision', state: 'unconfirmed' }), '決めたことの案')
   assert.equal(thingName({ type: 'decision', state: 'confirmed' }), '決めたこと')
   assert.equal(thingName({ type: 'decision', state: 'retracted' }), '決めたこと')
+})
+
+test('the empty やること says what will come there in the inbox\'s words (「動かすもの」, never 「押すもの」; 20番-8)', () => {
+  assert.equal(CALM.emptyTasks, 'まだやることはありません。ここに、あなたが動かすものが並びます')
 })

@@ -355,10 +355,37 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   *offers* a server: `features/app-link/link.ts` passes an https origin alone (http only on
   loopback; no credentials, path, query or fragment, one `server`), `features/app-link/ipc.ts`
   holds it only while the app has no server (a link never switches a configured app), and
-  `appLink:acceptServer` takes no argument — it saves the address main holds, after the member
-  saw it on the server screen (`ServerSetupScreen`, host shown large) and pressed 「つなぐ」 and
-  that server answered `/api/config` as ACB. Tests: `tests/app-link.test.ts` (mutation-checked),
-  `ipc-app.test.ts` 「an invitation link (open-url) never points…」.
+  `appLink:acceptServer` saves the address main holds — never one the renderer names — after the
+  member saw it and pressed ［ログイン］ and that server answered `/api/config` as ACB. ［つなぐ］ is
+  part of ［ログイン］ (UX review 20, owner decision 4, 2026-11-28): the offered address is shown as
+  「つなぎ先」 (host large) above the email and password (`SignInForm`, in `ServerSetupScreen`);
+  ［ログイン］ first accepts the address, then signs in, so no password is sent before the member
+  pressed with that host on screen (an address that cannot be accepted sends none). The renderer
+  passes the address it showed (`acceptServer(shown)`) only as a confirmation: main refuses
+  (`APP_LINK_CHANGED`) when it differs from the one it holds, or is missing, so a newer link that
+  arrived between the screen's last look (every 1.5 s) and the press is never used. A newer link
+  seen while the form is up is not a quiet update: the form starts again (`key` = the address, so
+  the typed password is gone) under 「つなぎ先が変わりました…」. 「つながない」 stays beside the host
+  until it is accepted, and a look that started before it is not applied after it. The sign-in screen of a configured app shows its
+  host the same way. **Main also guards where the password goes** (UX stage 3 review, 2026-11-29):
+  accepting and signing in are two IPC calls, and the server can be saved by another step between
+  them (an address typed before the link came, whose check answered late). So both sign-in screens
+  pass the address they show to `auth:signIn(email, password, server)` — also on a retry after
+  connecting, which skips the accept — and main, reading its server once, sends nothing and answers
+  `AUTH_SERVER_CHANGED` when that is not this computer's server (trailing slashes aside; none, `''`, a
+  non-string or another address is refused). `server` is **required** (owner decision 2026-11-29:
+  renderer and main ship together, so no released renderer calls without it); a call without one
+  sends nothing. The typed path's check that answers after its screen was replaced (a
+  link's form came) saves nothing (`TypedAddress`, a callback ref, no effect). Before sign-in nothing names the company (owner decision 6): the host is the
+  check, the company's name shows only on the join screen after sign-in (`download-choices.md`).
+  With no server and no link, the first screen waits for the link (「招待のメールから始めます」);
+  typing the address (`config:validateServerUrl`, then `setServerUrl`) is its side path
+  「招待のメールが見当たらないとき」. Tests: `tests/app-link.test.ts` (mutation-checked: the shown
+  address), `ipc-app.test.ts` 「an invitation link (open-url) never points…」 and 「auth:signIn with
+  the address the screen showed…」 (mutation-checked: main's comparison),
+  `tests/ui/sign-in.spec.ts` (accept before sign-in, the address on screen, a newer link refused,
+  a newer link while typing clears the form, a typed address's late check saves nothing and every
+  sign-in names the address on screen — mutation-checked).
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);

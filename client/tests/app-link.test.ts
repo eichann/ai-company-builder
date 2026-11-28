@@ -1,12 +1,13 @@
 // The invitation's 「アプリを開く」 link (electron/features/app-link): anyone can write such a
 // link, so a fake one must never point the app at another server. Guards: only https server
 // addresses (http on this computer), the origin alone, only while no server is set, and only
-// after the member pressed 「つなぐ」 and that server answered as ACB — with the address main
-// holds, never one the renderer names.
+// after the member pressed ［ログイン］ (which connects, then signs in) with that address on the
+// screen and that server answered as ACB — with the address main holds, never one the renderer
+// names (the renderer only confirms which one it showed).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { serverFromAppLink, appLinkInArgs } from '../electron/features/app-link/link.ts'
-import { APP_LINK_ALREADY_SET, APP_LINK_NO_OFFER, APP_LINK_NOT_ACB, registerAppLinkIpc } from '../electron/features/app-link/ipc.ts'
+import { APP_LINK_ALREADY_SET, APP_LINK_CHANGED, APP_LINK_NO_OFFER, APP_LINK_NOT_ACB, registerAppLinkIpc } from '../electron/features/app-link/ipc.ts'
 import type { IpcRegistrar } from '../electron/ipc/registrar.ts'
 
 const link = (server: string) => `ai-company-builder://open?server=${encodeURIComponent(server)}`
@@ -57,13 +58,17 @@ function harness(options: { server?: string; acb?: boolean } = {}) {
   return { links, state, call }
 }
 
-test('the address is used only after the member pressed つなぐ and the server answered as ACB', async () => {
+test('the address is used only after the member pressed ログイン with it on screen and the server answered as ACB', async () => {
   const h = harness()
   h.links.offer(link('https://acb.example.com'))
   assert.deepEqual(await h.call('appLink:serverOffer'), { server: 'https://acb.example.com' })
   assert.equal(h.state.server, '', 'nothing is saved by the link itself')
-  // whatever the renderer passes is ignored: main uses the address the link brought
-  assert.deepEqual(await h.call('appLink:acceptServer', 'https://evil.example'), { success: true })
+  // the renderer only confirms what it showed: another address, or none, is refused and never saved
+  assert.deepEqual(await h.call('appLink:acceptServer', 'https://evil.example'), { success: false, error: APP_LINK_CHANGED })
+  assert.deepEqual(await h.call('appLink:acceptServer'), { success: false, error: APP_LINK_CHANGED })
+  assert.equal(h.state.server, '')
+  assert.deepEqual(h.state.checked, [], 'a refused press does not even contact the server')
+  assert.deepEqual(await h.call('appLink:acceptServer', 'https://acb.example.com'), { success: true })
   assert.equal(h.state.server, 'https://acb.example.com')
   assert.deepEqual(h.state.checked, ['https://acb.example.com'])
   assert.equal(await h.call('appLink:serverOffer'), null)
@@ -76,7 +81,7 @@ test('a refused link, a server that is not ACB, or つながない leaves the ap
   assert.deepEqual(await h.call('appLink:acceptServer'), { success: false, error: APP_LINK_NO_OFFER })
 
   h.links.offer(link('https://not-acb.example'))
-  assert.deepEqual(await h.call('appLink:acceptServer'), { success: false, error: APP_LINK_NOT_ACB })
+  assert.deepEqual(await h.call('appLink:acceptServer', 'https://not-acb.example'), { success: false, error: APP_LINK_NOT_ACB })
   assert.equal(h.state.server, '')
 
   await h.call('appLink:dismissServer')
@@ -95,6 +100,16 @@ test('a link never switches an app that already has a server', async () => {
   const later = harness()
   later.links.offer(link('https://other.example.com'))
   later.state.server = 'https://ours.example.com'
-  assert.deepEqual(await later.call('appLink:acceptServer'), { success: false, error: APP_LINK_ALREADY_SET })
+  assert.deepEqual(await later.call('appLink:acceptServer', 'https://other.example.com'), { success: false, error: APP_LINK_ALREADY_SET })
   assert.equal(later.state.server, 'https://ours.example.com')
+})
+
+test('a newer link that arrives between the screen\'s last look and the press is not used', async () => {
+  const h = harness()
+  h.links.offer(link('https://acb.example.com'))
+  const shown = (await h.call('appLink:serverOffer') as { server: string }).server
+  h.links.offer(link('https://other.example.com'))
+  assert.deepEqual(await h.call('appLink:acceptServer', shown), { success: false, error: APP_LINK_CHANGED })
+  assert.equal(h.state.server, '')
+  assert.deepEqual(await h.call('appLink:serverOffer'), { server: 'https://other.example.com' })
 })

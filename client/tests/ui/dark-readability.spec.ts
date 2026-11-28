@@ -68,11 +68,12 @@ for (const theme of ['dark', 'light'] as const) {
       await expectReadable(theme, page.getByRole('heading', { name: '名前を変更' }), page.getByRole('textbox'), page.getByRole('button', { name: 'キャンセル' }))
     })
 
-    test('the company selector: the list, the empty state and the folder choice', async ({ page }) => {
-      await open(page, 'company-selector', theme)
+    test('the company selector: the list, the empty state and the join screen', async ({ page }) => {
+      await open(page, 'company-selector', theme, { folder: 'refuse' })
       await expectReadable(theme, page.getByText('山田工務店', { exact: true }), page.getByText('demo@example.com'))
       await page.getByText('阿部商店', { exact: true }).click()
-      await expectReadable(theme, page.getByText('既存のフォルダを開く'), page.getByRole('button', { name: '戻る' }))
+      await expectReadable(theme, page.getByRole('heading', { name: '阿部商店 に参加します' }), page.getByText('ファイルの置き場所'),
+        page.getByRole('alert'), page.getByRole('button', { name: '別の場所に作る（フォルダを選ぶ）' }), page.getByRole('button', { name: '会社の一覧に戻る' }))
       await open(page, 'company-selector', theme, { companies: 'empty' })
       await expectReadable(theme, page.getByText('まだ会社がありません。新しく作成してください。'), page.getByText('新しい会社を作成'))
     })
@@ -100,20 +101,23 @@ for (const theme of ['dark', 'light'] as const) {
       const state = await open(page, 'sign-in', theme)
       await page.getByRole('button', { name: 'ログイン' }).click()
       await expectReadable(theme,
-        page.getByRole('heading', { name: 'AI Company Builder' }),
+        page.getByRole('heading', { name: 'ログイン' }),
         page.getByText('メールアドレス', { exact: true }),
-        page.getByText('メールアドレスとパスワードを入力してください'),
+        page.getByText('acb.example.com', { exact: true }),
+        page.getByText('メールアドレスとパスワードを入れてください'),
         page.getByRole('link', { name: /Webサイトで新規登録/ }))
       expectNoPageErrors(state)
     })
 
     test('the server setup screen and the invitation link\'s offer', async ({ page }) => {
       await open(page, 'sign-in', theme, { screen: 'server' })
+      await expectReadable(theme, page.getByRole('heading', { name: 'AI Company Builder へようこそ' }), page.getByText('招待のリンクを待っています'), page.getByRole('button', { name: '招待のメールが見当たらないとき' }))
+      await page.getByRole('button', { name: '招待のメールが見当たらないとき' }).click()
       await page.getByRole('textbox').fill('bad.example.com')
       await page.keyboard.press('Enter')
       await expectReadable(theme, page.getByRole('heading').first(), page.getByRole('textbox'), page.getByText('このアドレスの会社のサーバーが見つかりません'))
       await open(page, 'sign-in', theme, { screen: 'offer' })
-      await expectReadable(theme, page.getByRole('heading', { name: '招待のリンクから開きました' }), page.getByLabel('つなぐサーバー'), page.getByRole('button', { name: 'つながない' }))
+      await expectReadable(theme, page.getByRole('heading', { name: 'ログインして参加' }), page.getByText('acb.example.com', { exact: true }), page.getByRole('button', { name: 'つながない' }))
     })
 
     test('the new skill wizard follows the theme', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, rowsAboutRecord, markMatches, paginateConversationRows, paletteConsultations } from './conversationRows'
+import { buildConversationRows, rowsAboutRecord, markMatches, paginateConversationRows, paletteConsultations, listCountText } from './conversationRows'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -91,4 +91,9 @@ test('the matched part is marked the way the search matches it (width and case f
   assert.equal(marked('㍻の資料', '平'), '[㍻]の資料')
   assert.equal(marked('見積書', 'なし'), '見積書')
   assert.equal(marked('見積書', '  '), '見積書')
+})
+test('the count line never says 「0件の相談」 beside 「まだ相談はありません」 (20番-8); a search still says 「0件」', () => {
+  assert.equal(listCountText(0, false), null)
+  assert.equal(listCountText(3, false), '3件の相談')
+  assert.equal(listCountText(0, true), '0件')
 })

@@ -642,7 +642,7 @@ says 「似ているやることがあります：「…」」 with ［まとめ
 The list and the card are complete without Gmail / Slack; following mail and chat up (来た連絡,
 返事のお願い, 返事を待つ) is a bonus when the company has them, never something to log by hand.
 - **Company level** — `GET /me/work-switches` `channels` (`tasks.md`; a usable connector for the
-  `mail` / `chat` role): neither → 設定 → 自分の設定 shows no 受信を読む switch, only
+  `mail` / `chat` role): neither → 設定 →「AI に任せること」 shows no 受信を読む switch, only
   「Gmail・Slack をつなぐと、返事の追いかけを AI がします」 (the one entry; the Google / Slack sections
   stay). The task screens carry no mail / chat parts of their own to hide: the card's もとの連絡 shows
   only on a task linking a 来た連絡 (above), 「返事を待つ」 only on a mail draft being sent
@@ -651,7 +651,7 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   list (and the title bar) after a disconnect until it is finished — the list never asks about
   connections (`tasks-list.test.ts` "a 返事のお願い or a 来た連絡 to confirm …").
 - **Member level** (company connected, this member not, or 受信を読む off): nothing is hidden —
-  自分の設定 is where they turn it on / 「Google で許可する」, and what others asked of them stays.
+  設定 →「AI に任せること」 is where they turn it on / 「Google で許可する」, and what others asked of them stays.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
@@ -782,7 +782,7 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   checker `[PERSONAL_PATH]`). The date is **the company's day** (`dayWindow`, Japan time until a
   company setting exists), the same "today" as the task list, so a note written at 00:30 lands in
   the day the list calls today.
-- **Which department** (`todayFolderDepartment`): the member's choice in 設定 → 自分の設定 「今日のフォルダ」
+- **Which department** (`todayFolderDepartment`): the member's choice in 設定 →「AI に任せること」 「今日のフォルダ」
   (`TodayFolderSetting.tsx`, per company on this PC: localStorage `acb.todayFolder:<company id>`,
   `src/shared/lib/todayFolderSetting.ts`) while that department is downloaded here; otherwise
   おまかせ = the first department the member belongs to (所属, `getMyDepartments`, in the tabs' order)

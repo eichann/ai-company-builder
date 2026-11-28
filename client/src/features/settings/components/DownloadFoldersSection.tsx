@@ -1,4 +1,4 @@
-// Settings → ダウンロードするフォルダ: choose, folder by folder, what this
+// Settings → この PC に置くフォルダ: choose, folder by folder, what this
 // computer downloads. A draft edited as a tree of tri-state checkboxes
 // (department → sub-folders, lazily loaded, with sizes from the server), applied
 // in one go from a sticky footer. Model: shared/sparse-paths.ts (everything is
@@ -182,7 +182,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments, unsav
   // The settings ask before closing while the choice is not applied (適用 = 保存 here).
   // While it is being applied there is nothing left to ask about (asking would apply it twice).
   const applying = phase.kind === 'applying' || phase.kind === 'checking'
-  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty && !applying ? 'ダウンロードするフォルダの変更（まだ適用していません）' : null), save: startApply }))
+  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty && !applying ? 'この PC に置くフォルダの変更（まだ適用していません）' : null), save: startApply }))
 
   const busy = phase.kind === 'applying' || phase.kind === 'checking'
 
@@ -305,7 +305,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments, unsav
     <div className="flex min-h-full flex-col">
       <div className="flex-1 space-y-5 px-8 pb-6 pt-7">
         <SectionHeader
-          title="ダウンロードするフォルダ"
+          title="この PC に置くフォルダ"
           description="チェックを外したフォルダはこのPCにダウンロードされません。サーバーには残っていて、いつでもダウンロードし直せます。チームの誰かが新しく作ったフォルダは自動でダウンロードされます。"
         />
 

@@ -25,7 +25,7 @@ before(async () => {
   h.server.on('GET', `/api/companies/${CO}/browser-devices-me`, () => ({ json: { success: true, data: state === 'none' ? { state } : { id: 'bd_x', label: 'pc', state } } }))
   h.server.on('POST', `/api/companies/${CO}/browser-devices`, () => { state = 'pending'; return { status: 201, json: { success: true, data: { id: 'bd_x', label: 'pc', state } } } })
   h.server.on('DELETE', `/api/companies/${CO}/browser-devices-me`, () => { state = 'revoked'; return { json: { success: true, data: { id: 'bd_x', label: 'pc', state } } } })
-  await h.invoke('auth:signIn', 'me@example.com', 'right')
+  await h.invoke('auth:signIn', 'me@example.com', 'right', SERVER_URL)
   await h.invoke('auth:getSession')
 })
 after(() => h.shutdown())

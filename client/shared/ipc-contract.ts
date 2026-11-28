@@ -41,13 +41,14 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { JobActionResult, JobFeedbackResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
-import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult, SetWatchCandidateResult, SetWatchChoice, SetWatchSkillsResult } from './job-proposals'
+import type { JobCandidateDiscardResult, JobCandidateResult, JobCandidateReviseResult, JobProposalResult, MyJobProposalsResult, SetWatchCandidateResult, SetWatchChoice, SetWatchSkillsResult } from './job-proposals'
 import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingAutoReadResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { MeetingAutoReadMode } from '../../shared/core/minutes'
+import type { JobCandidateInput } from '../../shared/core/job-proposals'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { RecordsTablePage, RecordsTableQuery } from './records-table'
@@ -504,7 +505,8 @@ export interface IpcInvokeChannels {
 
   // Authentication and the server's API (the session stays in the main process)
   'auth:signUp': { args: [email: string, password: string, name?: string]; result: AuthResult }
-  'auth:signIn': { args: [email: string, password: string]; result: AuthResult }
+  // server: the address the screen showed; main signs in only when it is still this computer's server.
+  'auth:signIn': { args: [email: string, password: string, server: string]; result: AuthResult }
   'auth:signOut': { args: []; result: SimpleResult }
   'auth:getSession': { args: []; result: SessionResult }
   'api:getCompanies': { args: []; result: CompaniesResult }
@@ -655,6 +657,7 @@ export interface IpcInvokeChannels {
   'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
   /** 「やめる」: the candidate not submitted yet is discarded on the server (the member's own press). */
   'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
+  'jobProposals:revise': { args: [companyId: string, candidateId: string, fingerprint: string, input: JobCandidateInput]; result: JobCandidateReviseResult }
   /** 「見張りを足す」 (4b-4 PR6b): the department Skills the member reads, with whether each can run a set watch. */
   'jobProposals:setWatchSkills': { args: [companyId: string]; result: SetWatchSkillsResult }
   /** 「見張りを足す」: a set watch's candidate from the member's choices (the server builds the rest), shown before 「管理者に出す」. */
@@ -664,7 +667,7 @@ export interface IpcInvokeChannels {
   'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
   /** Turn it on / off (off: nothing is counted or asked). */
   'jobRepeatAsks:set': { args: [companyId: string, on: boolean]; result: JobRepeatAskSetting }
-  // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
+  // AI に任せること → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
   /** The member's switches (+ the company's 使ってよいか / 初めの値). */
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
   /** Turn one on / off (a switch the company does not allow cannot be turned on: `WORK_SWITCH_COMPANY_OFF`). */
@@ -870,7 +873,7 @@ export interface IpcInvokeChannels {
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
   // The server address from an invitation's 「アプリを開く」 link (features/app-link): offered, shown, accepted by the member
   'appLink:serverOffer': { args: []; result: { server: string } | null }
-  'appLink:acceptServer': { args: []; result: SimpleResult }
+  'appLink:acceptServer': { args: [shown: string]; result: SimpleResult }
   'appLink:dismissServer': { args: []; result: void }
   // Extra environment variable names passed to AI processes (agents/agent-env.ts), this computer only
   'config:getAgentEnvPassthrough': { args: []; result: string[] }
@@ -1288,11 +1291,12 @@ export interface ElectronAPI {
   getMyJobProposals: Invoke<'jobProposals:mine'>
   withdrawJobProposal: Invoke<'jobProposals:withdraw'>
   discardJobCandidate: Invoke<'jobProposals:discard'>
+  reviseJobCandidate: Invoke<'jobProposals:revise'>
   getSetWatchSkills: Invoke<'jobProposals:setWatchSkills'>
   createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
   getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
   setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
-  // 自分の設定 → 「受信を読む」「AI が自動で進める」.
+  // AI に任せること → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>
   // 見られる人 for the lists.

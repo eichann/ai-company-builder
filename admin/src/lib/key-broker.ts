@@ -136,7 +136,7 @@ export const CHECK_RESULT_TEXT: Record<BrokerKeyCheckResult, string> = {
 
 /** The one switch per service: what it does, for the admin (shown under it). */
 export const OWN_KEYS_SWITCH_HELP =
-  'オンにすると、メンバーが「設定 → 自分の鍵」から自分の鍵を登録できます。送り先はこのサービスの決まった宛先だけです。会社の鍵が使える仕事では会社の鍵を、ないときは自分の鍵を使います（会社優先）。オフにすると会社の鍵だけを使い、登録済みの自分の鍵は使われなくなります（消えません）。'
+  'オンにすると、メンバーが「設定 → Claude・Gemini などの鍵」から自分の鍵を登録できます。送り先はこのサービスの決まった宛先だけです。会社の鍵が使える仕事では会社の鍵を、ないときは自分の鍵を使います（会社優先）。オフにすると会社の鍵だけを使い、登録済みの自分の鍵は使われなくなります（消えません）。'
 
 /** Why API keys cannot be registered (the server has no usable key-encryption key). */
 export const BROKER_OFF_TEXT: Record<BrokerStatusReason, string> = {

@@ -46,7 +46,7 @@ test('［承認する…］ opens the approval card and approves nothing; the ca
   const card = beside(page, '承認のお願い')
   await expect(card).toBeVisible()
   await expect(card).toContainText('一覧からは承認できません')
-  await expect(card.getByRole('button', { name: '承認', exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: '承認する', exact: true })).toBeVisible()
   await expect(page.locator('#acted')).toHaveText('')
   await card.getByRole('button', { name: '閉じる' }).click()
   await expect(card).toBeHidden()
@@ -198,7 +198,7 @@ for (const theme of ['light', 'dark'] as const) {
     if (SHOTS) {
       await page.screenshot({ path: `${SHOTS}/inbox-preview-${theme}.png`, animations: 'disabled' })
       await page.locator('[data-inbox-row="record:approval-preview0001"]').getByRole('button', { name: '承認する…' }).click()
-      await expect(beside(page, '承認のお願い').getByRole('button', { name: '承認', exact: true })).toBeVisible()
+      await expect(beside(page, '承認のお願い').getByRole('button', { name: '承認する', exact: true })).toBeVisible()
       await page.screenshot({ path: `${SHOTS}/inbox-approval-card-${theme}.png`, animations: 'disabled' })
     }
     expectNoPageErrors(state)
@@ -269,7 +269,7 @@ test('a card opens beside the list; its press is followed by the next row (no �
   await expect(card).toContainText('値引きの承認 1')
   await expect(card.getByRole('group', { name: '一覧の何件目か' })).toContainText('3 / 9')
   await expect(page.locator('#acted')).toHaveText('')
-  await card.getByRole('button', { name: '承認', exact: true }).click()
+  await card.getByRole('button', { name: '承認する', exact: true }).click()
   await expect(page.locator('#acted')).toHaveText('approve approval-more0001')
   await expect(card).toContainText('値引きの承認 2')
   const notice = page.locator('[data-work-notice]')
@@ -320,18 +320,32 @@ test('a press answered after the member opened another card changes nothing on s
   await openPreview(page, 'inbox', { approvals: '2', slow: '1' })
   await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
   const card = beside(page, '承認のお願い')
-  await card.getByRole('button', { name: '承認', exact: true }).click()
+  await card.getByRole('button', { name: '承認する', exact: true }).click()
   await page.locator('[data-inbox-row="record:outbound_message-preview01"]').getByRole('button', { name: '確かめて送る…' }).click()
   await expect(page.locator('[data-inbox-row="record:approval-more0001"]')).toHaveCount(0)
   await expect(beside(page, '送るメールの下書き')).toBeVisible()
   await expect(page.locator('[data-work-notice]')).toHaveCount(0)
 })
 
+test('an approval answered after the company changed moves nothing: no next row, no line (the card answers into its own era)', async ({ page }) => {
+  await openPreview(page, 'inbox', { approvals: '2', slow: '1' })
+  await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
+  const card = beside(page, '承認のお願い')
+  await card.getByRole('button', { name: '承認する', exact: true }).click()
+  await page.evaluate(() => (window as unknown as { __acbInbox: { leaveCompany: () => void } }).__acbInbox.leaveCompany())
+  await expect(page.locator('#acted')).toHaveText('approve approval-more0001')
+  // The answer has come (the card shows that request's answer) — and the list did not move on in the next company's era.
+  await expect(card.getByRole('group', { name: '承認のお願い' })).toHaveAttribute('data-state', 'approved')
+  await expect(card).not.toContainText('値引きの承認 2')
+  await expect(page.locator('[data-work-notice]')).toHaveCount(0)
+  await expect(page.locator('[data-inbox-row="record:approval-more0002"]')).not.toHaveAttribute('data-inbox-current', '')
+})
+
 test('an approval whose outside write failed stays on its card (never 「片づけました」): the member reads what happened', async ({ page }) => {
   await openPreview(page, 'inbox', { approvals: '2', failed: '1' })
   await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
   const card = beside(page, '承認のお願い')
-  await card.getByRole('button', { name: '承認', exact: true }).click()
+  await card.getByRole('button', { name: '承認する', exact: true }).click()
   await expect(page.locator('#acted')).toHaveText('approve approval-more0001')
   await expect(card.getByRole('group', { name: '承認のお願い' })).toHaveAttribute('data-state', 'failed')
   await expect(page.locator('[data-inbox-row="record:approval-more0001"]')).toHaveAttribute('data-inbox-current', '')
@@ -345,4 +359,21 @@ test('narrowed to a kind, あなた待ち\'s count is a part: never a second red
   await kinds(page).locator('[data-inbox-kind="approval"]').click()
   await expect(count(page, 'あなた待ち')).toHaveText('1')
   await expect(heading).not.toHaveClass(/text-danger-text/)
+})
+
+test('a first day: one line says what comes here, the kind chips are hidden while all of them are 0, and come back with the first row', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { empty: '1' })
+  await expect(page.locator('[data-inbox-purpose]')).toHaveText('ここには、あなたが動かすもの（承認・送る前の確認・止まった仕事）と、新しい知らせが届きます。')
+  await expect(page.getByRole('group', { name: '種類で絞る' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'あなた待ち' })).toContainText('あなたを待っているものはありません。')
+  // Only on the look with nothing at all: 確認したもの keeps its own words.
+  await chip(page, /^確認したもの/).click()
+  await expect(page.locator('[data-inbox-purpose]')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('with rows, the line is not said and the kind chips stay', async ({ page }) => {
+  await openPreview(page, 'inbox')
+  await expect(page.locator('[data-inbox-purpose]')).toHaveCount(0)
+  await expect(page.getByRole('group', { name: '種類で絞る' })).toBeVisible()
 })

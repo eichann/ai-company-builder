@@ -130,5 +130,5 @@ export const OPEN_FILE_OUTSIDE = 'この相談の会社フォルダの外にあ�
 export const OPEN_FILE_NO_MAIN = 'メインの画面が開いていないため、開けませんでした。'
 /** A folder left out on this computer (a department folder of the company repository, never a private folder's). */
 export function openFileNotDownloaded(folder: string): string {
-  return `このフォルダ（${folder}）はダウンロードしていないため、開けません。設定の「ダウンロードするフォルダ」でダウンロードしてから開いてください。`
+  return `このフォルダ（${folder}）はダウンロードしていないため、開けません。設定の「この PC に置くフォルダ」でダウンロードしてから開いてください。`
 }

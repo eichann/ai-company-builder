@@ -20,11 +20,15 @@ export type AppLinkReads = ElectronPort<'getAppLinkServerOffer'>
 /**
  * Using that address (main checks it answers as an ACB server, then makes it this computer's
  * server: sign-in sends the password there from now on) or forgetting it. The renderer never
- * names the address: main uses the one the link brought.
+ * names the address: main uses the one the link brought, and only when it is still the one
+ * the screen showed (`shown`; a newer link in between is refused).
  */
 export type AppLinkWrites = ElectronPort<'acceptAppLinkServer' | 'dismissAppLinkServer'>
 
-/** Signing in: the email and password are sent to the company server. */
+/**
+ * Signing in: the email and password are sent to the company server — only when `server` (the
+ * address the screen showed) is still this computer's server; main refuses otherwise.
+ */
 export type SignInOutbound = ElectronPort<'signIn'>
 /** Signing up: the email, password and name are sent and the server creates an account. */
 export type SignUpOutbound = ElectronPort<'signUp'>
@@ -56,16 +60,16 @@ export function getAppLinkServerOffer(reads: AppLinkReads = window.electronAPI) 
   return reads.getAppLinkServerOffer()
 }
 
-export function acceptAppLinkServer(writes: AppLinkWrites = window.electronAPI) {
-  return writes.acceptAppLinkServer()
+export function acceptAppLinkServer(shown: string, writes: AppLinkWrites = window.electronAPI) {
+  return writes.acceptAppLinkServer(shown)
 }
 
 export function dismissAppLinkServer(writes: AppLinkWrites = window.electronAPI) {
   return writes.dismissAppLinkServer()
 }
 
-export function signIn(email: string, password: string, outbound: SignInOutbound = window.electronAPI) {
-  return outbound.signIn(email, password)
+export function signIn(email: string, password: string, server: string, outbound: SignInOutbound = window.electronAPI) {
+  return outbound.signIn(email, password, server)
 }
 
 export function signUp(email: string, password: string, name?: string, outbound: SignUpOutbound = window.electronAPI) {

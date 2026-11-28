@@ -16,7 +16,7 @@ import { ContactCard } from '../components/ContactCard'
 import { CONTACT_ROW_READS, createContactStore, rowContact } from '../contactStore'
 import { contactsToRead, inboxView, noticedRecordIds, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 import { CONTACT_NAME } from '../../../../shared/thing-words'
-import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, paged, sectionsOf, type BesideCard, type InboxKind } from '../workModel'
+import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, paged, sectionsOf, showsKindChips, type BesideCard, type InboxKind } from '../workModel'
 import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
 import { WorkThroughBar, WorkThroughNotice } from '../../../shared/ui/WorkThrough'
 import { commandArea } from '../../../shared/commands/commands'
@@ -244,14 +244,14 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     body: (
       <div className="flex h-full min-h-0">
         <div className={`flex min-h-0 min-w-0 flex-col ${besidePane ? 'w-2/5 flex-shrink-0 border-r border-[color:var(--color-border)]' : 'flex-1'}`}>
-          <div className="flex-shrink-0 border-b border-[color:var(--color-border)] bg-bg"><KindChips kind={kind} counts={kindCount} onKind={chooseKind} /></div>
+          {showsKindChips(kind, sections) && <div className="flex-shrink-0 border-b border-[color:var(--color-border)] bg-bg"><KindChips kind={kind} counts={kindCount} onKind={chooseKind} /></div>}
           <div className="min-h-0 flex-1 overflow-auto">
             <InboxList sections={drawn.sections} totals={totals} redCount={kind === 'all'} filter={filter} elsewhere={view.counts.elsewhere} onOpenTasks={onOpenTasks}
               turnNotListed={view.turnNotListed} unreadNotListed={view.unreadNotListed}
               more={{ left: drawn.left, onMore: () => setLimit(l => l + INBOX_PAGE) }}
               work={{ listKey: INBOX_WORK_KEY, order, currentKey: beside?.rowKey ?? null }} notice={<WorkThroughNotice listKey={INBOX_WORK_KEY} />}
               meetingButtons={meetingButtons} onOpen={item => work.show(item.key)} onSeen={item => { setError(null); seeRow(item) }} onButton={pressButton}
-              onUndo={item => { void undo(item) }} undone={undone} onAllSeen={allSeen} meetingNote={meetingNote} error={error} status={status} />
+              onUndo={item => { void undo(item) }} undone={undone} onAllSeen={allSeen} meetingNote={meetingNote} error={error} status={status} empty={!showsKindChips(kind, sections)} />
           </div>
         </div>
         {besidePane}
