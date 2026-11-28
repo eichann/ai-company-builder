@@ -2070,6 +2070,7 @@ POST /api/records-ai/job-proposals-ai/candidates      (act) { skill, trigger, ch
 GET  /me/job-candidates/:candidateId                  the session: the caller's own candidate (and its proposal once submitted)
 POST /me/job-candidates/:candidateId/submit { fingerprint }   the session → 201 (200 when submitted already)
 POST /me/job-candidates/:candidateId/discard          the session: 「やめる」, the creator's own not submitted yet (again: the same)
+POST /me/job-candidates/:candidateId/revise { fingerprint, input }   the session: the card changed in place → the same id rebuilt, 200
 GET  /me/job-proposals                                the caller's proposals
 POST /me/job-proposals/:proposalId/withdraw           the proposer, only while submitted
 GET  /job-proposals?state=                            owner / admin
@@ -2115,6 +2116,39 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   the candidate's view answers 410 `JOB_CANDIDATE_DISCARDED` (naming nothing it held) and the submit the same, also when
   「やめる」 lands while a submit awaits the Skill (checked again inside the submit's write); after its 24 hours it is gone as
   any (the one 404). Still counted among the member's 20 live candidates until then (the safe side).
+- **Changing it from the card** (`revise`, UX 段3 #13, owner decisions 2026-11-28 「12・13番」 2 / 3; the server part, added before
+  the app's card): the member changes what the card shows in place — the same list values the AI chooses from
+  (`JobCandidateInput`: the time, the check and its place, the Skill, read places, the deliverable place, record reads, mail
+  drafts, the minutes, missed runs) — and the app sends the whole input with the fingerprint it showed. **The session only**
+  (`companyMember`: a record token alone is not signed in, 401 — so no AI tool, run or 「AI の番」 reaches it; the app offers it
+  to the card alone). **One builder** (`buildCandidate`, shared with the AI's create): the responsible person the signed-in
+  member before the Skill is read, the Skill pinned now (`JOB_SKILL_MISSING`), places existing and theirs to read / write
+  (`JOB_CANDIDATE_PLACE`, one answer naming nothing), the server's name 「<Skill>（<いつ>）」 (the member never names it,
+  decision 3) and the one parser (schema 4); `rightsFit` again inside the write (`JOB_CANDIDATE_PLACE`, as the create).
+  Order: the body `{ fingerprint, input }` exactly (400 `BAD_REQUEST`), the input as `parseJobCandidateInput` takes it (400
+  `BAD_JOB_CANDIDATE`); then the candidate — already submitted → 409 `JOB_CANDIDATE_SUBMITTED` (asked first: the proposal
+  outlives the content, and what an owner / admin reviews is what was submitted), another member's / company's / missing /
+  expired → the one 404, discarded → 410 `JOB_CANDIDATE_DISCARDED`, a place it names no longer theirs → the one 404 **before**
+  the fingerprint is compared (the view's rule, no oracle), a set watch's (schema 5) → 409 `JOB_CANDIDATE_NOT_REVISABLE`, a
+  fingerprint not the one stored → 409 `JOB_VERSION_FINGERPRINT`. **The same id, a new content** (no new row, so the 20 a
+  member and the chat message's card reference are untouched; the deliverable folder `job-<8 hex>` stays): in one
+  transaction the candidate is read again (submitted / gone / discarded / another fingerprint since → refused as above) and
+  replaced by a compare-and-set on the fingerprint shown (`reviseCandidate`, never a discarded row); its creator, `createdAt`
+  and 24 hours unchanged. Answer: the candidate's view (200). Unchanged input → the same fingerprint, nothing written.
+  **Two changes at once** from one card: one wins, the other `JOB_VERSION_FINGERPRINT` (the card reads again). **The submit
+  checks the fingerprint again inside its write**: a change landing while a submit awaits the Skill refuses that submit
+  (`JOB_VERSION_FINGERPRINT`, nothing made); a submit landing first makes the change `JOB_CANDIDATE_SUBMITTED`. A rolled-back
+  build reads a revised row as any candidate (no new column or mark). The card builds the input from the definition with
+  `proposalInputOf` (`shared/core/job-proposals.ts`: `proposalDefinition` of it gives the same definition). Nothing about an
+  approval, a proposal's states or 受け取る changes. Test: `job-proposals.test.ts` "revise: …", `job-set-watch-proposals.test.ts`
+  (schema 5 refused), the routes test (a consultation's and a run's token 401, the session 200), permission matrix row +
+  `CROSS`. Mutation check: 14 guards removed or inverted one at a time (the body's shape, the first look at the candidate,
+  the reader check before the fingerprint, schema 4 only, the look again in the write, the submit's fingerprint again in its
+  write, the repository's compare-and-set and its discarded exclusion); each fails a test except: the fingerprint check in
+  the write and the compare-and-set (each alone suffices; both removed fail 「two changes sent at once」), the first
+  fingerprint check (the write's check answers the same; it only saves the git reads), `rightsFit` in the write (the
+  places check reads the rights again after the awaits, as in the create: defence) and the `actingUser` check (the
+  candidate is read by its creator, who is always its responsible person: defence).
 - **The zone** (owner decision 2026-11-22): the candidate's view says `timeZone` — the company's zone as the clock uses it
   (`JobProposalDeps.timeZoneOf`, today `DEFAULT_COMPANY_TIME_ZONE` for every company: there is no per-company setting yet) —
   additive and optional; an older app ignores it.

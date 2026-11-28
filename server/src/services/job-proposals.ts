@@ -20,10 +20,10 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import {
   JOB_CANDIDATES_PER_MEMBER, JOB_CANDIDATE_TTL_MS, JOB_PROPOSALS_PER_DAY, JOB_PROPOSALS_WAITING_MAX, JOB_PROPOSAL_STATES,
   isJobCandidateId, isJobProposalId, isJobProposalReturnReason, jobCandidatePlaces, jobProposalReturnReasonText, newJobCandidateId, newJobProposalId,
-  candidateSchemaOf, parseJobCandidateInput, parseJobSetWatchCandidateInput, proposalDefinition, setWatchProposalDefinition, type JobProposalReturnReason,
+  candidateSchemaOf, parseJobCandidateInput, parseJobSetWatchCandidateInput, proposalDefinition, setWatchProposalDefinition, type JobCandidateInput, type JobProposalReturnReason,
 } from '../../shared/core/job-proposals'
 import {
-  JOB_NEEDS_NEWER_SCREEN, JOB_SET_WATCH_SCHEMA, jobDefinitionCanonical, jobPathProblem, newJobId, parseJobDefinition, storedJobDefinition,
+  JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SET_WATCH_SCHEMA, jobDefinitionCanonical, jobPathProblem, newJobId, parseJobDefinition, storedJobDefinition,
   type JobDefinition, type JobProcedure,
 } from '../../shared/core/jobs'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
@@ -64,6 +64,8 @@ const NO_COMPANY_FOLDER = () => refuse('conflict', 'この会社は全社フォ�
 const DEPARTMENT_SKILL_MISSING = () => refuse('conflict', '部署の Skill が見つかりません。部署のフォルダの .claude/skills/ に置いて同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
 /** One set watch per responsible person (jobs.md "The set watch (schema 5)"): the approval refuses a second; said before it. */
 const SET_WATCH_TAKEN = () => refuse('conflict', 'あなたには、同じ形（これから来る、条件に合うもの全部）の定期の仕事がもう動いています。1人に1つだけです。', { code: 'JOB_SET_WATCH_ONE_PER_PERSON' })
+/** A set watch's candidate (schema 5): made from 「見張りを足す」's choices, never changed by a revise. */
+const NOT_REVISABLE = () => refuse('conflict', 'この案は、ここでは直せません。', { code: 'JOB_CANDIDATE_NOT_REVISABLE' })
 const DECIDED = (state: string) => refuse('conflict', state === 'approved' ? 'この案はもう承認されました。' : 'この案はもう決まっています。', { code: 'JOB_PROPOSAL_DECIDED', state })
 
 /** How many proposals a list answers. */
@@ -184,6 +186,21 @@ export function createJobProposals(deps: JobProposalDeps) {
     }
   }
 
+  /**
+   * The one builder of a chat candidate's content (a new candidate and a revised one alike): the responsible person fixed to
+   * the signed-in member **before** the Skill is read (read as theirs), the Skill pinned now, every place existing and theirs
+   * to read (the deliverable's also to write), then the definition built by `proposalDefinition` and parsed by the one parser
+   * (schema 4). The caller checks `rightsFit` again inside its write.
+   */
+  async function buildCandidate(member: Member, input: JobCandidateInput, id: string): Promise<Outcome<{ definition: JobDefinition; canonical: string }>> {
+    const skill = await pinSkill(member, input.skill)
+    if (!skill.ok) return skill
+    if (!(await placesUsable(member, jobCandidatePlaces(input), input.deliverable))) return PLACE_REFUSED()
+    const def = parseJobDefinition(proposalDefinition(input, { actingUser: member.userId, procedure: skill.value.procedure, skillName: skill.value.name, candidateId: id }))
+    if (!def.ok) return BAD_DEFINITION(def.problems)
+    return ok({ definition: def.definition, canonical: jobDefinitionCanonical(def.definition) })
+  }
+
   /** The owners / admins of the company now (a proposal's notice goes to each). */
   const adminsOf = (companyId: string) => memberships.listByCompany(companyId).filter(m => hasFullAccess(m.role)).map(m => m.user_id)
 
@@ -228,19 +245,13 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (run !== null) return NOT_IN_RUN()
       const parsed = parseJobCandidateInput(body)
       if (!parsed.ok) return BAD_INPUT(parsed.problems)
-      const input = parsed.input
       const handle = companyData.forCompany(member.companyId)
       handle.jobs.dropExpiredCandidates(clock.now())
       if (handle.jobs.liveCandidates(member.userId, clock.now()) >= JOB_CANDIDATES_PER_MEMBER) return CANDIDATES_FULL()
-      // The responsible person is the signed-in member, fixed before any Skill is read (the Skill is read as theirs).
-      const actingUser = member.userId
-      const skill = await pinSkill(member, input.skill)
-      if (!skill.ok) return skill
-      if (!(await placesUsable(member, jobCandidatePlaces(input), input.deliverable))) return PLACE_REFUSED()
       const id = newJobCandidateId(hex32(ids))
-      const def = parseJobDefinition(proposalDefinition(input, { actingUser, procedure: skill.value.procedure, skillName: skill.value.name, candidateId: id }))
-      if (!def.ok) return BAD_DEFINITION(def.problems)
-      const canonical = jobDefinitionCanonical(def.definition)
+      const built = await buildCandidate(member, parsed.input, id)
+      if (!built.ok) return built
+      const { definition, canonical } = built.value
       const at = clock.now()
       const row: JobCandidateRow = {
         id, createdBy: member.userId, definition: canonical, fingerprint: hashCanonical(canonical), createdAt: at,
@@ -249,13 +260,63 @@ export function createJobProposals(deps: JobProposalDeps) {
       const saved = transactions.run((): Outcome<void> => {
         // The approval's own rights check (also the shelf Skill's place) inside the write, on the membership and scopes now —
         // after every await above — as it will run at the submit and the approval.
-        if (!deps.jobs.rightsFit(member.companyId, actingUser, def.definition)) return PLACE_REFUSED()
+        if (!deps.jobs.rightsFit(member.companyId, member.userId, definition)) return PLACE_REFUSED()
         if (handle.jobs.liveCandidates(member.userId, at) >= JOB_CANDIDATES_PER_MEMBER) return CANDIDATES_FULL()
         handle.jobs.insertCandidate(row)
         return ok(undefined)
       })
       if (!saved.ok) return saved
       return ok(candidateView(row, null, member))
+    },
+
+    /**
+     * `POST /me/job-candidates/:candidateId/revise { fingerprint, input }` (the member's session only — no record-token route
+     * reaches it; UX 段3 #13, owner decision 2026-11-28): the member changed the card in place — the same list values the AI
+     * chooses from — and the server builds the candidate again with the one builder a new candidate uses (`buildCandidate`:
+     * the member as the responsible person, the Skill pinned now, places they read / write), checks the rights inside the
+     * write and replaces the candidate's content **under the same id** by a compare-and-set on the fingerprint the card showed:
+     * a new fingerprint, nothing else of the candidate changes (its creator, its 24 hours). Only the creator's own schema-4
+     * candidate, not submitted, not discarded; no proposal, approval or job exists before the submit, so none is touched.
+     */
+    async revise(member: Member, candidateId: string, body: unknown): Promise<Outcome<JobCandidateView>> {
+      if (!isJobCandidateId(candidateId)) return CANDIDATE_NOT_FOUND()
+      if (!isObject(body) || Object.keys(body).length !== 2 || typeof body.fingerprint !== 'string' || !('input' in body)) return BAD_BODY('{ fingerprint, input }')
+      const fingerprint = body.fingerprint
+      const parsed = parseJobCandidateInput(body.input)
+      if (!parsed.ok) return BAD_INPUT(parsed.problems)
+      const handle = companyData.forCompany(member.companyId)
+      // The candidate as it stands: not submitted (a proposal outlives the content: asked first), theirs and live, not discarded.
+      const stands = (): Outcome<JobCandidateRow> => {
+        if (handle.jobs.proposalOfCandidate(member.userId, candidateId)) return ALREADY_SUBMITTED()
+        const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
+        if (!row) return CANDIDATE_NOT_FOUND()
+        if (row.discarded) return DISCARDED()
+        return ok(row)
+      }
+      const before = stands()
+      if (!before.ok) return before
+      const old = candidateDefinition(before.value)
+      if (old === null || old.actingUser !== member.userId) return CANDIDATE_NOT_FOUND()
+      // What it names must still be theirs to read before its fingerprint is compared (the view's own rule: no oracle).
+      if (!deps.jobs.readsAllFor(member.companyId, member.userId, old)) return CANDIDATE_NOT_FOUND()
+      // A set watch's candidate (schema 5) is made from other choices (「見張りを足す」): not changed here.
+      if (old.schema !== JOB_PROPOSAL_SCHEMA) return NOT_REVISABLE()
+      if (before.value.fingerprint !== fingerprint) return FINGERPRINT_CHANGED()
+      const built = await buildCandidate(member, parsed.input, candidateId)
+      if (!built.ok) return built
+      const { definition, canonical } = built.value
+      const next = hashCanonical(canonical)
+      const result = transactions.run((): Outcome<JobCandidateRow> => {
+        // Everything that can change while the Skill and the places were read, again, inside the write.
+        const now = stands()
+        if (!now.ok) return now
+        if (now.value.fingerprint !== fingerprint) return FINGERPRINT_CHANGED()
+        if (!deps.jobs.rightsFit(member.companyId, member.userId, definition)) return PLACE_REFUSED()
+        if (next !== fingerprint && !handle.jobs.reviseCandidate(candidateId, member.userId, fingerprint, canonical, next)) return FINGERPRINT_CHANGED()
+        return ok({ ...now.value, definition: canonical, fingerprint: next })
+      })
+      if (!result.ok) return result
+      return ok(candidateView(result.value, null, member))
     },
 
     /**
@@ -377,7 +438,10 @@ export function createJobProposals(deps: JobProposalDeps) {
         const again = handle.jobs.proposalOfCandidate(member.userId, candidateId)
         if (again) return first(again)
         // Discarded meanwhile (「やめる」 pressed while the awaits ran): never submitted.
-        if (handle.jobs.candidate(candidateId, member.userId, clock.now())?.discarded) return DISCARDED()
+        const now = handle.jobs.candidate(candidateId, member.userId, clock.now())
+        if (now?.discarded) return DISCARDED()
+        // Revised meanwhile (the card changed it while the awaits ran): what was checked is no longer what it holds.
+        if (now && now.fingerprint !== row.fingerprint) return FINGERPRINT_CHANGED()
         if (!deps.jobs.rightsFit(member.companyId, member.userId, definition)) return GRANT_EXCEEDS()
         if (handle.jobs.countProposals(member.userId, { state: 'submitted' }) >= JOB_PROPOSALS_WAITING_MAX) return WAITING_FULL()
         if (handle.jobs.countProposals(member.userId, { since: dayStart(member.companyId) }) >= JOB_PROPOSALS_PER_DAY) return TODAY_FULL()

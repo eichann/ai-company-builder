@@ -11,6 +11,9 @@
  *   POST /me/job-candidates/:candidateId/submit { fingerprint }   → 201 (200 when submitted already) JobProposalView
  *   POST /me/job-candidates/:candidateId/discard   「やめる」 → { discarded: true } (the creator's own, not submitted; again: the same)
  *                                                  — a discarded candidate then answers 410 JOB_CANDIDATE_DISCARDED until its time
+ *   POST /me/job-candidates/:candidateId/revise { fingerprint, input }   the card changed in place (input as the AI's create
+ *                                                  takes it, `proposalInputOf` gives it back) → 200 JobCandidateView: the same id,
+ *                                                  rebuilt and checked by the server, a new fingerprint (schema 4 only, not submitted)
  *   GET  /me/job-proposals                          the caller's proposals, newest first
  *   POST /me/job-proposals/:proposalId/withdraw     the proposer, only while submitted
  *

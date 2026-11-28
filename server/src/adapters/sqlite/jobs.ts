@@ -535,6 +535,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       return conn.prepare(`UPDATE ai_job_candidates SET fingerprint = ? WHERE company_id = ? AND id = ? AND created_by = ? AND fingerprint <> ?`)
         .run(DISCARDED_MARK, companyId, candidateId, createdBy, DISCARDED_MARK).changes > 0
     },
+    reviseCandidate(candidateId, createdBy, fromFingerprint, definition, fingerprint) {
+      return conn.prepare(`UPDATE ai_job_candidates SET definition = ?, fingerprint = ? WHERE company_id = ? AND id = ? AND created_by = ? AND fingerprint = ? AND fingerprint <> ?`)
+        .run(definition, fingerprint, companyId, candidateId, createdBy, fromFingerprint, DISCARDED_MARK).changes > 0
+    },
     liveCandidates(createdBy, now) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_candidates WHERE company_id = ? AND created_by = ? AND expires_at > ?`)
         .get(companyId, createdBy, now) as { n: number }).n

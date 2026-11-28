@@ -13,7 +13,7 @@
  */
 import {
   JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_OUTBOUND_ROUTES, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
-  JOB_SET_WATCH_SCHEMA, jobPathProblem, type JobMissed, type JobProcedure, type JobSetTrigger, type JobTimeTrigger,
+  JOB_SET_WATCH_SCHEMA, jobPathProblem, type JobDefinition, type JobMissed, type JobProcedure, type JobSetTrigger, type JobTimeTrigger,
 } from './jobs'
 import { jobTriggerText } from './job-words'
 import { isValidFolderName, isValidSkillName } from './names'
@@ -189,6 +189,31 @@ export function proposalDefinition(input: JobCandidateInput, pinned: { actingUse
       limits: { minutes: input.minutes, runsPerDay: 1 },
     },
     origin: JOB_PROPOSAL_ORIGIN,
+  }
+}
+
+/**
+ * The input a candidate's definition (schema 4, as the server answered it) was built from — what the card shows the member
+ * to change in place and sends back, changed, to `POST /me/job-candidates/:id/revise` (UX 段3 #13): `proposalDefinition` of
+ * it gives that definition again (the read places in their order; the check's place left out of them when it came last, as
+ * the builder adds it). null for anything the builder never makes (another schema, title words an owner / admin added…).
+ */
+export function proposalInputOf(definition: JobDefinition): JobCandidateInput | null {
+  if (definition.schema !== JOB_PROPOSAL_SCHEMA || definition.run.kind !== 'procedure' || 'kind' in definition.trigger) return null
+  const p = definition.run.procedure
+  const skill = p.source === 'company_skill' ? p.skill : p.source === 'shelf_skill' ? p.item : null
+  if (skill === null) return null
+  const c = definition.check
+  const check: JobCandidateInput['check'] | null = c.kind === 'new_files' ? { kind: 'new_files', path: c.path }
+    : c.kind === 'new_meetings' && c.titleWords.length === 0 ? { kind: 'new_meetings' } : null
+  if (check === null) return null
+  const g = definition.grant
+  const paths = g.reads.paths
+  const reads = check.kind === 'new_files' && paths[paths.length - 1] === check.path ? paths.slice(0, -1) : [...paths]
+  return {
+    skill, trigger: definition.trigger, check, reads, deliverable: g.writes.area === 'deliverable' ? g.writes.place : null,
+    readRecords: JOB_PROPOSAL_RECORD_ROUTES.every(r => g.routes.includes(r)), mailDrafts: g.outbound === 'draft_only',
+    minutes: g.limits.minutes, missed: { ...definition.missed },
   }
 }
 
