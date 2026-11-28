@@ -491,6 +491,11 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
   never counted). **On one line** (decision 6): under 440 px (`KINDS_FIT_PX`, measured with `useIsNarrowerThan`)
   すべて and the first two stay and the rest are one 「その他」 select (`foldKinds`), which shows the kind chosen when it is
   among them. Another chip or kind is a new look.
+- **A first day** (owner decision 2026-11-28, 20番-8): while the look has no row at all under すべて
+  (`showsKindChips`, `workModel.ts`), the kind chips are hidden (a row of zeros says nothing) and, under 「新着」, one line
+  says what comes here (`INBOX_PURPOSE`: 「ここには、あなたが動かすもの（承認・送る前の確認・止まった仕事）と、新しい知らせが届きます。」).
+  A kind other than すべて keeps the chips, so the member can always go back. Tests: `src/features/inbox/workModel.test.ts`,
+  `tests/ui/inbox.spec.ts` 「a first day…」 (`inbox-ui.html?empty=1`).
 - **15 rows first** (decision 4, `INBOX_PAGE`): the first 15 rows across the sections in order (`paged`); reaching the end
   (`useWhenVisible`, an IntersectionObserver on a callback ref, no effect) or pressing 「続きを表示（あと N 件）」 draws 15 more.
   **The rows are what main already read**: going down asks the server nothing (`/records/my-turn` holds the turn's first

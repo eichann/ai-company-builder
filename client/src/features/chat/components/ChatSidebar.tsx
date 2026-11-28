@@ -6,7 +6,7 @@ import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { NewDot, StatusBadge } from '../../../shared/ui/primitives'
 
 import { startConsultationDrag } from '../../../shared/lib/dragTypes'
-import { paginateConversationRows, buildConversationRows, conversationLine, isEmptyConversation, rowsAboutRecord, markMatches, type ConversationTab } from '../conversationRows'
+import { paginateConversationRows, buildConversationRows, conversationLine, isEmptyConversation, rowsAboutRecord, markMatches, listCountText, type ConversationTab } from '../conversationRows'
 import { useConsultationTopics } from '../consultationTopicsStore'
 import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../consultationStatus'
 import { useConsultationStatuses } from '../consultationStatusStore'
@@ -276,7 +276,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
         {text && <button type="button" onClick={clearSearch} aria-label="検索をクリア"><X size={12} /></button>}
       </label>
       <p className="flex items-center gap-2 text-xs text-gray-500" aria-live="polite">
-        {loading ? '読み込んでいます' : query.trim() ? `${rows.length}件` : `${rows.length}件の相談`}
+        {loading ? '読み込んでいます' : listCountText(rows.length, !!query.trim())}
       </p>
     </div>
     {error && <div role="alert" className="px-3 pb-2 text-xs text-red-600">{error}<button onClick={() => refreshRef.current()} className="block underline mt-1">再読み込み</button></div>}

@@ -59,6 +59,15 @@ export function buildConversationRows(sessions: ChatSessionSummary[], tabs: Conv
 }
 
 /**
+ * The line under the search box: 「N件」 for a search, 「N件の相談」 otherwise — and nothing for an empty list, which
+ * 「まだ相談はありません」 already says (owner decision 2026-11-28, 20番-8: never said twice).
+ */
+export function listCountText(count: number, searching: boolean): string | null {
+  if (searching) return `${count}件`
+  return count > 0 ? `${count}件の相談` : null
+}
+
+/**
  * `text` cut into the parts that match `query` the way the search does (NFKC, case-insensitive:
  * 「ｍｔｇ」 marks 「MTG」) and the rest, in order; no match → one plain part.
  */

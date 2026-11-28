@@ -213,7 +213,7 @@ export function turnGroupLine(name: string, count: number, ask?: string): string
 // --- Waiting, empty, failing (6.) -------------------------------------------------------
 export const CALM = {
   loading: '読み込んでいます',
-  emptyTasks: 'まだやることはありません。ここに、あなたが押すものが並びます',
+  emptyTasks: 'まだやることはありません。ここに、あなたが動かすものが並びます',
   emptyLinks: 'まだありません',
   notFound: '見つかりませんでした',
   offline: 'サーバーにつながらないため、表示できません。つながると自動で読み直します',

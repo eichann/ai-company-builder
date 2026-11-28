@@ -101,6 +101,8 @@ let state: NoticesState = MANUAL ? manualState : {
     ],
   },
 }
+// `?empty=1`: a first day — nothing waits and nothing is new (owner decision 2026-11-28, 20番-8).
+if (params.get('empty') === '1') state = { available: true, myTurn: { total: 0, items: [], resting: 0 }, notices: { available: true, unread: 0, items: [] } }
 // A fixed clock for the rows added below (never the real date: a test must not change with the day it runs).
 const FIXED = (minute: number) => new Date(Date.UTC(2026, 10, 27, 0, 0) + minute * 60_000).toISOString()
 const MANY = Number(params.get('many') ?? 0)

@@ -10,6 +10,7 @@ import { appInstructionOf } from '../../../../shared/app-instruction'
 import { droppedRecordsOf } from '../../../../shared/record-drop'
 import { droppedRecordLine } from '../recordDrop'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
+import { THING_NAMES } from '../../../../shared/thing-words'
 
 // The conversation's messages: only the latest are rendered (messageWindow.ts;
 // 「以前のメッセージを表示」 keeps the reading position), each one memoised, and
@@ -299,6 +300,12 @@ interface MessageListProps {
   onEditingChange?: (messageId: string, editing: boolean) => void
 }
 
+/**
+ * What an empty conversation says (owner decision 2026-11-28, 20番-8): where to write, and that it stays as a
+ * consultation in the list. Under the greeting, only until the member's first message.
+ */
+export const EMPTY_CONVERSATION_HINT = `聞きたいことを下に書いてください。話した内容は「${THING_NAMES.consultation}」として残り、一覧からいつでも続きを開けます。`
+
 /** The latest messages are always laid out (see MessageItem's content-visibility). */
 const ALWAYS_RENDERED_MESSAGES = 20
 
@@ -388,6 +395,10 @@ export const MessageList = memo(function MessageList({
         />
         )
       })}
+
+      {status === 'ready' && !messages.some(m => m.role === 'user') && (
+        <p data-chat-empty-hint className="text-small text-text-muted">{EMPTY_CONVERSATION_HINT}</p>
+      )}
 
       {/* Thinking indicator when submitted but no response yet */}
       {status === 'submitted' && (

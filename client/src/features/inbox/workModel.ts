@@ -76,6 +76,14 @@ export function kindCounts(sections: InboxSections): Record<InboxKind, number> {
   return counts
 }
 
+/**
+ * Whether the kind chips show (owner decision 2026-11-28, 20番-8): not while the look has nothing at all (a first day's
+ * row of zeros says nothing). A chosen kind other than 「すべて」 keeps them, so the member can always go back.
+ */
+export function showsKindChips(kind: InboxKind, sections: InboxSections): boolean {
+  return kind !== 'all' || allRows(sections).length > 0
+}
+
 export function narrowed(sections: InboxSections, kind: InboxKind): InboxSections {
   if (kind === 'all') return sections
   const keep = (rows: InboxItem[]) => rows.filter(i => kindOf(i) === kind)
