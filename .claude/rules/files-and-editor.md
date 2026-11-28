@@ -286,10 +286,14 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   Typing during ［届いた版を採用］'s keep → nothing replaced, pick again.
 - Every save first re-reads the disk (`decideSave`): if it is no longer the loaded version,
   nothing is written — autosave shows the banner; ⌘S opens the compare view; closing the tab keeps
-  it open and brings it to the front with the compare view. Closing a tab whose save failed
-  otherwise asks before discarding.
+  it open and brings it to the front with the compare view. **Only when a keep has failed for that
+  change** (`OpenFile.keepFailed`, cleared once the change is resolved) does closing offer
+  「保存せずに閉じる」, saying 「閉じると、この編集は残りません（バックアップ履歴にも入りません）。」 (owner
+  2026-11-28: a file whose versions can never be kept, e.g. under `.backups/`, would otherwise never
+  close). Closing a tab whose save failed otherwise asks before discarding.
   Tests: `tests/ui/editor-tabs.spec.ts` (one press each way, what is kept, a failed keep replaces
-  nothing, changed again while comparing, ⌘S), `tests/editor-disk-state.test.ts`, `tests/ipc-fs.test.ts`
+  nothing, changed again while comparing, ⌘S), `editor-panel.spec.ts` (closing: the compare view, and
+  「保存せずに閉じる」 only after a failed keep), `tests/editor-disk-state.test.ts`, `tests/ipc-fs.test.ts`
   「editor:backupEdits…」.
 - **Leaving never drops edits** (stage-1 #1, 2026-10-31). Autosave writes only the shown tab, so
   an edit in a tab left within the second, a tab paused by an external change and a failed save

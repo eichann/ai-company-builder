@@ -8,6 +8,8 @@ import { openPreview } from './helpers'
 
 const FILE = '/Users/demo/会社/コンテンツG/台本.md'
 const AI_PARAGRAPH = 'AI が追記した段落です。'
+/** A confirm of any kind (a dangerous one is an alertdialog). */
+const anyDialog = (page: Page) => page.locator('[role="dialog"], [role="alertdialog"]')
 const editor = (page: Page) => page.locator('.cm-content[role="textbox"]')
 const banner = (page: Page) => page.getByRole('alert').filter({ has: page.getByRole('button') })
 const disk = (page: Page) => page.evaluate(path => (window as unknown as { __acbFiles: Record<string, string | undefined> }).__acbFiles[path], FILE)
@@ -67,7 +69,7 @@ test('［自分の版を保存］ saves in one press, after keeping the version 
   await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
   await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
   await expect(page.getByText('あなたの版を保存しました。届いた版はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(anyDialog(page)).toHaveCount(0)
   await expect(banner(page)).toHaveCount(0)
   expect(await disk(page)).toContain('私の追記')
   const kept = await backups(page)
@@ -83,7 +85,7 @@ test('［届いた版を採用］ takes it in one press, no confirm, after keepi
   await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
   await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
   await expect(page.getByText('届いた版にしました。あなたの編集はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(anyDialog(page)).toHaveCount(0)
   await expect(banner(page)).toHaveCount(0)
   await expect(editor(page)).toContainText(AI_PARAGRAPH)
   await expect(editor(page)).not.toContainText('私の追記')
@@ -179,7 +181,7 @@ test('⌘S on a file changed elsewhere opens the compare view instead of overwri
   await editor(page).click()
   await page.keyboard.press('ControlOrMeta+s')
   await expect(compare(page)).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(anyDialog(page)).toHaveCount(0)
   expect(await disk(page)).not.toContain('私の追記')
 })
 

@@ -21,6 +21,8 @@ export interface OpenFile extends EditorFileState {
   comparing?: boolean
   /** The file changed again while the member was comparing: the view says so until they pick. */
   changedWhileComparing?: boolean
+  /** Keeping a version in the backups failed for this change: only then may closing drop the edits. */
+  keepFailed?: boolean
 }
 
 /**
@@ -28,7 +30,7 @@ export interface OpenFile extends EditorFileState {
  * choose, and says so when the version it shows was replaced meanwhile.
  */
 function followCompare(before: OpenFile, after: OpenFile): OpenFile {
-  if (after.external?.kind !== 'changed') return { ...after, comparing: false, changedWhileComparing: false }
+  if (after.external?.kind !== 'changed') return { ...after, comparing: false, changedWhileComparing: false, keepFailed: false }
   if (!after.comparing) return after
   const shown = before.external?.kind === 'changed' ? before.external.diskContent : null
   return shown === after.external.diskContent ? after : { ...after, changedWhileComparing: true }

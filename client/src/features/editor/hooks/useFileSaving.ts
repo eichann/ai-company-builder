@@ -40,7 +40,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     new Promise<boolean>(resolve => setConfirmRequest({ ...request, resolve })), [])
 
   const markSaved = useCallback((filePath: string, content: string) => updateFile(filePath, f => ({
-    ...f, originalContent: content, missing: false, external: undefined, comparing: false, changedWhileComparing: false,
+    ...f, originalContent: content, missing: false, external: undefined, comparing: false, changedWhileComparing: false, keepFailed: false,
   })), [updateFile])
 
   /**
@@ -133,6 +133,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       // 'missing': the file went after the check — there is nothing on disk to lose.
       if (!backup?.success || (!backup.backupPath && backup.skipped !== 'missing')) {
         setError('届いた版をバックアップに残せなかったため、保存していません。あなたの編集はこのタブにそのまま残っています。')
+        updateFile(filePath, f => ({ ...f, keepFailed: true }))
         return false
       }
       // Changed again while it was being kept: what was kept is not what the member saw.
@@ -163,6 +164,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       const backup = rootPath ? await backupEdits(rootPath, filePath, edits) : null
       if (!backup?.success || !backup.backupPath) {
         setError('あなたの編集をバックアップに残せなかったため、届いた版にしていません。あなたの編集はこのタブにそのまま残っています。')
+        updateFile(filePath, f => ({ ...f, keepFailed: true }))
         return false
       }
       // Typing went on while the edits were being kept: what was kept is not all of them.
@@ -176,7 +178,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       if (now?.kind !== 'changed' || now.diskContent !== compared) return false
       // A watcher event in the meantime is newer than the read above: never mark it clean.
       updateFile(filePath, f => (f.content !== edits || f.external?.kind !== 'changed' || f.external.diskContent !== compared ? f : {
-        ...f, content: compared, originalContent: compared, missing: false, external: undefined, comparing: false, changedWhileComparing: false,
+        ...f, content: compared, originalContent: compared, missing: false, external: undefined, comparing: false, changedWhileComparing: false, keepFailed: false,
       }))
       setNotice('届いた版にしました。あなたの編集はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')
       return true
@@ -221,15 +223,26 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
 
   /**
    * Saves before closing; resolves false to keep the tab open. A file changed
-   * on disk is not closed: its compare view opens (`showFile`) so the member picks.
+   * on disk is not closed: its compare view opens (`showFile`) so the member picks —
+   * unless neither version could be kept there (`keepFailed`): then, and only then,
+   * closing without saving is offered, saying the edits will not be kept.
    */
   const saveBeforeClose = async (path: string): Promise<boolean> => {
     const file = fileContents.get(path)
     if (file && !file.isLoading && isDirty(file)) {
       const saved = await saveFile(path, file.content, { interactive: true })
-      if (!saved && fileContentsRef.current.get(path)?.external?.kind === 'changed') {
-        showFile(path)
-        return false
+      const now = fileContentsRef.current.get(path)
+      if (!saved && now?.external?.kind === 'changed') {
+        if (!now.keepFailed) {
+          showFile(path)
+          return false
+        }
+        return askConfirm({
+          title: '保存せずに閉じますか？',
+          message: 'このファイルは、どちらの版もバックアップに残せませんでした。\n閉じると、この編集は残りません（バックアップ履歴にも入りません）。',
+          confirmText: '保存せずに閉じる',
+          danger: true,
+        })
       }
       if (!saved) {
         const discard = await askConfirm({
