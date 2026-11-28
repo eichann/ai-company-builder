@@ -122,14 +122,19 @@ export function canAutosave(file: EditorFileState): boolean {
 export const EDITOR_OVERWRITE_REASON = 'editor_overwrite' satisfies BackupReason
 /** The tab's edits, kept before ［届いた版を採用］ replaces them (they were never on disk). */
 export const EDITOR_EDITS_REASON = 'editor_edits' satisfies BackupReason
+/** A tab's edits that could not be saved, kept before ［保存せずに進む］ leaves them (sign-out, closing the window). */
+export const EDITOR_LEFT_UNSAVED_REASON = 'editor_left_unsaved' satisfies BackupReason
+/** Why the editor keeps a tab's edits (never on disk) in the backups. */
+export type EditorEditsReason = typeof EDITOR_EDITS_REASON | typeof EDITOR_LEFT_UNSAVED_REASON
+export const EDITOR_EDITS_REASONS: readonly EditorEditsReason[] = [EDITOR_EDITS_REASON, EDITOR_LEFT_UNSAVED_REASON]
 
 /**
  * Why the app kept a version of a file before replacing it: the editor
  * overwrote a changed file, the editor dropped the tab's edits for the version
- * that arrived, a backup was restored over it, or 「元に戻す」 in the sync
+ * that arrived or left them unsaved (［保存せずに進む］), a backup was restored over it, or 「元に戻す」 in the sync
  * preview undid it. Also the backup folder's suffix.
  */
-export type KeepCurrentReason = Extract<BackupReason, typeof EDITOR_OVERWRITE_REASON | typeof EDITOR_EDITS_REASON | 'before_restore' | 'before_revert'>
+export type KeepCurrentReason = Extract<BackupReason, typeof EDITOR_OVERWRITE_REASON | EditorEditsReason | 'before_restore' | 'before_revert'>
 
 export interface EditorOverwriteBackupMetadata {
   timestamp: string

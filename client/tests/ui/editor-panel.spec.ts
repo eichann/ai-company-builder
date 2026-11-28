@@ -18,6 +18,8 @@ const closeButton = (page: Page, path: string) => page.locator('div.group', { ha
 const writes = (page: Page) => page.evaluate(() => (window as unknown as { __acbWrites: Array<[string, string]> }).__acbWrites)
 /** What automatic sync reads before it runs (src/shared/lib/unsavedEdits.ts). */
 const unsavedForSync = (page: Page) => page.evaluate(() => (window as unknown as { __acbHasUnsavedEdits: () => boolean }).__acbHasUnsavedEdits())
+type Kept = { reason: string; path: string; content: string | undefined }
+const backups = (page: Page) => page.evaluate(() => (window as unknown as { __acbBackups: Kept[] }).__acbBackups)
 const pinned = (page: Page) => page.evaluate(() => (window as unknown as { __acbPinned: string[] }).__acbPinned)
 /** A shortcut as macOS reports it (⌘⇧V arrives as key 'v'), sent to the focused element. */
 const shortcut = (page: Page, init: { key: string; shiftKey?: boolean }) => page.evaluate((i) => {
@@ -337,5 +339,80 @@ test('a tab that cannot be saved is named before the window closes; キャンセ
 
   await requestClose(page)
   await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay', 'ack', 'close'])
+  // 保存せずに進む kept the edits in the backups before the window went.
+  expect(await backups(page)).toEqual([{ reason: 'editor_left_unsaved', path: SCRIPT, content: '# 台本\n\n第12回の構成案です。\n追記' }])
+})
+
+test('保存せずに進む: what is typed while the edits are being kept is kept too before the window closes', async ({ page }) => {
+  await open(page)
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFailWrites: Set<string>; __acbBackupDelay: number }
+    w.__acbFailWrites.add(p)
+    w.__acbBackupDelay = 600
+  }, SCRIPT)
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await typeAtEnd(page, '\nあとの追記')
+  await expect.poll(() => closeAnswers(page), { timeout: 5000 }).toEqual(['ack', 'close'])
+  const kept = await backups(page)
+  expect(kept.at(-1)?.content).toContain('あとの追記')
+})
+
+test('保存せずに進む: typing still going on during the last keep is not counted as kept — the member is asked', async ({ page }) => {
+  await open(page)
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFailWrites: Set<string>; __acbBackupDelay: number }
+    w.__acbFailWrites.add(p)
+    w.__acbBackupDelay = 1000
+  }, SCRIPT)
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await typeAtEnd(page, '\n一つ目') // during the first keep
+  await page.waitForTimeout(1400)
+  await typeAtEnd(page, '\n二つ目') // during the second keep
+  await expect(page.getByRole('heading', { name: 'バックアップにも残せなかった編集があります' })).toBeVisible()
+  expect(await closeAnswers(page)).toEqual(['ack'])
+})
+
+test('保存せずに進む: a keep that was skipped (kept nowhere) counts as not kept and is asked about', async ({ page }) => {
+  await open(page)
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFailWrites: Set<string>; __acbFailBackups: { skip: boolean } }
+    w.__acbFailWrites.add(p)
+    w.__acbFailBackups.skip = true
+  }, SCRIPT)
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect(page.getByRole('heading', { name: 'バックアップにも残せなかった編集があります' })).toBeVisible()
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay'])
+})
+
+test('保存せずに進む when the edits cannot be kept either: named again, 「それでも進む」 or キャンセル', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  await pauseClock(page)
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFailWrites: Set<string>; __acbFailBackups: { on: boolean } }
+    w.__acbFailWrites.add(p)
+    w.__acbFailBackups.on = true
+  }, SCRIPT)
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect(page.getByRole('heading', { name: 'バックアップにも残せなかった編集があります' })).toBeVisible()
+  await expect(page.getByText('・台本.md')).toBeVisible()
+  await page.keyboard.press('Enter') // Enter does not go on
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay'])
+  await expect(editor(page)).toContainText('追記')
+
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await page.getByRole('button', { name: 'それでも進む' }).click()
   await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay', 'ack', 'close'])
 })

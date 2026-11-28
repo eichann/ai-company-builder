@@ -12,6 +12,7 @@ import type { VoiceInputAPI } from '../shared/voice-input'
 import type { CalendarTodayOptions } from '../shared/calendar'
 import type { ChatMetadataPatch, ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { HandoffCompletion } from '../shared/handoff'
+import type { EditorEditsReason } from '../shared/editor-disk-state'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
@@ -119,8 +120,8 @@ const api: ElectronAPI = {
   createFile: (path: string, content: string) => invoke('fs:createFile', path, content),
   backupBeforeOverwrite: (rootPath: string, filePath: string) =>
     invoke('editor:backupBeforeOverwrite', rootPath, filePath),
-  backupEdits: (rootPath: string, filePath: string, content: string) =>
-    invoke('editor:backupEdits', rootPath, filePath, content),
+  backupEdits: (rootPath: string, filePath: string, content: string, reason?: EditorEditsReason) =>
+    invoke('editor:backupEdits', rootPath, filePath, content, reason),
   createDirectory: (path: string) => invoke('fs:createDirectory', path),
   exists: (path: string) => invoke('fs:exists', path),
 
