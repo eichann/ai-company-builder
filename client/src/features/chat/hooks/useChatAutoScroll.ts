@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type { UIMessage } from 'ai'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 
 export interface ChatAutoScrollOptions {
   isShown: boolean
@@ -29,6 +30,7 @@ export function useChatAutoScroll({ isShown, isRestoringSession, messages, statu
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef(true)
+  const isShownRef = useLatestRef(isShown)
 
   // History content mounts after restoration; hidden tabs have no layout.
   // Reset only on opening a chat, so reading older messages stays possible.
@@ -65,6 +67,12 @@ export function useChatAutoScroll({ isShown, isRestoringSession, messages, statu
     pendingAutoScrollRef.current = false
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [messages, status, isShown, isRestoringSession])
+
+  // Content that grew after its render (a rich reply's frame, ChatFollowContext): the same rule as new messages.
+  const followIfFollowing = useCallback(() => {
+    if (!isShownRef.current || isInputComposingRef.current || !shouldAutoScrollRef.current) return
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [isShownRef])
 
   // Composition handling
   const flushAfterComposition = useCallback(() => {
@@ -103,5 +111,5 @@ export function useChatAutoScroll({ isShown, isRestoringSession, messages, statu
     }
   }, [])
 
-  return { messagesEndRef, messagesContainerRef, onCompositionStateChange }
+  return { messagesEndRef, messagesContainerRef, onCompositionStateChange, followIfFollowing }
 }
