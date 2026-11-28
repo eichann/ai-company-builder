@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { keepUnsavedEdits, saveUnsavedEdits } from '../../../shared/lib/unsavedEdits'
+import { keepUnsavedEdits, saveUnsavedEdits, unsettledEdits } from '../../../shared/lib/unsavedEdits'
 import { answerWindowClose, onWindowCloseRequested } from '../../../shared/ipc/window-close'
-import { leaveQuestion, notKeptQuestion, type LeaveQuestion } from '../leaving'
+import { leaveAfterSaving, type LeaveQuestion } from '../leaving'
 
 /**
  * Leaving the company screen (sign-out) or closing the window: every editor
@@ -20,16 +20,8 @@ export function useSaveBeforeLeaving({ guardWindowClose = false }: { guardWindow
     busy.current ??= (async () => {
       try {
         const ask = (question: LeaveQuestion) => new Promise<boolean>(resolve => setPending({ question, resolve }))
-        const left = await saveUnsavedEdits()
-        if (left.length === 0) return true
-        if (!await ask(leaveQuestion(left))) return false
-        await keepUnsavedEdits(left)
-        // The dialog has closed, so typing can go on while the edits are kept (in this
-        // tab or another): once more, save everything and keep what is unsaved now — an
-        // edit already kept unchanged is not kept twice. Only this round's answer counts.
-        const notKept = await keepUnsavedEdits(await saveUnsavedEdits())
-        if (notKept.length === 0) return true
-        return await ask(notKeptQuestion(notKept))
+        // Rounds until every tab is saved or kept as it is now (typing goes on meanwhile).
+        return await leaveAfterSaving({ save: saveUnsavedEdits, keep: keepUnsavedEdits, unsettled: unsettledEdits, ask })
       } finally {
         busy.current = null
       }
