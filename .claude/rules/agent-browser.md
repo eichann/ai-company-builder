@@ -5013,8 +5013,9 @@ against their public documentation; sources in the PR that added them):
 - `playwright` (Playwright MCP): `browser_click` (`target` = the ref, `element` a description, dropped),
   `browser_mouse_click_xy` (`x`, `y`: its vision tool), `browser_type` (`target`, `element`, `text`; **without `target`:
   the field pressed just before**, so a field with no ref can be typed into as today), `browser_select_option`
-  (`values`: exactly one), `browser_navigate` (`url`: an `https` address of the run's domain on its default port — or a
-  path —, never another host; no user, no `#`), `browser_navigate_back`, `browser_wait_for` (`time`).
+  (`values`: exactly one), `browser_navigate` (`url`: an `https` address of the run's domain on its default port, written in
+  its plain form — nothing the URL reader would rewrite, such as `..`, a space or `\` — or a path; never another host, no
+  user, no `#`), `browser_navigate_back`, `browser_wait_for` (`time`).
 - `openai` (OpenAI computer use's action objects): `{"type":"click","button":"left","x","y"}` (only `left`),
   `{"type":"type","text"}`, `{"type":"wait"}` (no duration of its own: `OPENAI_WAIT_SECONDS` = 2).
 - `anthropic` (Anthropic computer use, the `computer_20251124` input shape; the 2026-08 toolset's member tools carry the

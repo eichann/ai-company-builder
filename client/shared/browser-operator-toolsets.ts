@@ -151,7 +151,9 @@ function sitePath(url: unknown, host: string): string | null {
   let u: URL
   try { u = new URL(url) } catch { return null }
   if (u.protocol !== 'https:' || u.host !== host || u.username || u.password || u.port || /#/.test(url)) return null
-  return `${u.pathname}${u.search}`
+  // Only an address already in its plain form: nothing the URL reader would rewrite (`..`, a space, `\`) is taken.
+  const path = `${u.pathname}${u.search}`
+  return url === `https://${host}${path}` ? path : null
 }
 
 function readCompact(v: Record<string, unknown>, page: BrowserPageSnapshot | null): Read {
