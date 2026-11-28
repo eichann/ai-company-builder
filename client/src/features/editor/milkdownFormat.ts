@@ -38,6 +38,21 @@ function oneTextblock(state: EditorState): PMNode | null {
   return $from.sameParent($to) && $from.parent.isTextblock ? $from.parent : null
 }
 
+/**
+ * The selected line's size, offered only where a heading can stand (a top-level paragraph or heading,
+ * not a list item or a table cell) and for one line (a heading is one line).
+ */
+function sizeOf(state: EditorState): TextSize | null {
+  const block = oneTextblock(state)
+  if (!block || state.selection.$from.depth !== 1) return null
+  const { from, to } = state.selection
+  let lines = false
+  state.doc.nodesBetween(from, to, node => { if (node.type.name === 'hardbreak' || (node.isText && node.text!.includes('\n'))) lines = true })
+  if (lines) return null
+  if (block.type.name === 'paragraph') return 0
+  return block.type.name === 'heading' && Number(block.attrs.level) <= 3 ? Number(block.attrs.level) as TextSize : null
+}
+
 /** What the bubble shows for the current selection; null when there is nothing to format. */
 export function selectionOf(view: EditorView): InPlaceSelection | null {
   const { state } = view
@@ -54,10 +69,7 @@ export function selectionOf(view: EditorView): InPlaceSelection | null {
   })) as Record<InPlaceMark, boolean>
   const linkType = markType(state, 'link')
   const link = linkType ? linkType.isInSet(sel.$from.marks()) ?? linkType.isInSet(sel.$from.nodeAfter?.marks ?? []) : undefined
-  const block = oneTextblock(state)
-  const size: TextSize | null = !block ? null
-    : block.type.name === 'paragraph' ? 0
-      : block.type.name === 'heading' && Number(block.attrs.level) <= 3 ? Number(block.attrs.level) as TextSize : null
+  const size = sizeOf(state)
   return {
     text,
     box: { left: Math.min(start.left, end.left), top: Math.min(start.top, end.top), bottom: Math.max(start.bottom, end.bottom) },
@@ -85,11 +97,32 @@ export function setInPlaceLink(view: EditorView, href: string | null): boolean {
   return run(view, (state, dispatch) => {
     const { from, to, empty } = state.selection
     if (empty) return false
-    const tr = state.tr.removeMark(from, to, type)
-    if (href) tr.addMark(from, to, type.create({ href }))
+    const tr = state.tr
+    if (href) tr.removeMark(from, to, type).addMark(from, to, type.create({ href }))
+    else {
+      // The whole link goes, not a piece of it (half a link would not read back as written).
+      const [a, z] = linkRange(state, type, from, to)
+      tr.removeMark(a, z, type)
+    }
     dispatch?.(tr)
     return true
   })
+}
+
+/** From the first to the last character of the link(s) the selection touches. */
+function linkRange(state: EditorState, type: MarkType, from: number, to: number): [number, number] {
+  const $from = state.doc.resolve(from)
+  const parent = $from.parent
+  const start = $from.start()
+  let a = from
+  let z = to
+  parent.forEach((child, offset) => {
+    const at = start + offset
+    const end = at + child.nodeSize
+    if (!type.isInSet(child.marks)) return
+    if (end >= a && at <= z) { a = Math.min(a, at); z = Math.max(z, end) }
+  })
+  return [a, z]
 }
 
 /**
@@ -99,7 +132,8 @@ export function setInPlaceLink(view: EditorView, href: string | null): boolean {
 export function setInPlaceSize(view: EditorView, size: TextSize): boolean {
   const { schema } = view.state
   const block = oneTextblock(view.state)
-  if (!block || !['paragraph', 'heading'].includes(block.type.name)) return false
+  // Already that size, or not a place for a heading: nothing to change (the file stays as it is).
+  if (!block || sizeOf(view.state) === null || sizeOf(view.state) === size) return false
   const type = size === 0 ? schema.nodes.paragraph : schema.nodes.heading
   if (!type) return false
   return run(view, (state, dispatch) => {

@@ -201,7 +201,7 @@ export function matchesKey(spec: ParsedKey, input: KeyInput): boolean {
   return spec.mod === (input.metaKey || input.ctrlKey)
     && spec.shift === input.shiftKey
     && spec.alt === input.altKey
-    && (spec.key === keyName(input.key) || (spec.alt && physicalKeyOf(spec.key) === input.code))
+    && (spec.key === keyName(input.key) || (spec.alt && input.metaKey && !input.ctrlKey && physicalKeyOf(spec.key) === input.code))
 }
 
 /**

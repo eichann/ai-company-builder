@@ -52,6 +52,8 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
   // Only the latest load may set state: a slow load of the previous document
   // must not show its reviews on this one.
   const loadSeqRef = useRef(0)
+  // The reviews of this document could not be read: no new review of the member's is started blind.
+  const loadFailedRef = useRef(false)
 
   // Load all reviews from sidecar files
   const loadReviews = useCallback(async (docPath: string) => {
@@ -66,6 +68,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
       ])
       if (seq !== loadSeqRef.current) return
       setHasReviewRequest(reviewRequest !== null)
+      loadFailedRef.current = false
       storedRef.current = new Map(allReviewsRaw.map(r => [r.id, r]))
 
       // Merge external replies and resolutions into reviews
@@ -107,6 +110,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     } catch (err) {
       if (seq !== loadSeqRef.current) return
       console.error('Failed to load reviews:', err)
+      loadFailedRef.current = true
       setReviews([])
       setActiveReview(null)
     } finally {
@@ -243,6 +247,9 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
   const commentAsReviewer = useCallback(async (selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity): Promise<boolean> => {
     if (!filePath) return false
     if (activeReview) return activeReview.status === 'in_progress' ? addComment(selectedText, startOffset, endOffset, body, severity) : false
+    // Until the reviews are read (or when they could not be), the member's review in progress may exist: a
+    // second one would be written beside it.
+    if (loading || loadFailedRef.current) return false
     const review: Review = {
       id: crypto.randomUUID(),
       reviewerName,
@@ -254,8 +261,13 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     }
     return attempt('comment', async () => {
       showReview(await saveOwnReview(filePath, review))
+      // As 「レビューする」 does: a request for a review is answered by starting one.
+      if (hasReviewRequest) {
+        await deleteReviewRequestFile(filePath)
+        setHasReviewRequest(false)
+      }
     })
-  }, [activeReview, filePath, reviewerName, reviewerEmail, addComment, newComment, attempt, showReview, saveOwnReview])
+  }, [activeReview, filePath, reviewerName, reviewerEmail, loading, hasReviewRequest, addComment, newComment, attempt, showReview, saveOwnReview])
 
   const deleteComment = useCallback(async (commentId: string): Promise<boolean> => {
     if (!activeReview || !filePath) return false

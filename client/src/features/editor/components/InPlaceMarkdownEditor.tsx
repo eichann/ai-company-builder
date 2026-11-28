@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Callout, Button } from '../../../shared/ui/primitives'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useCommandHandler } from '../../../shared/commands/commands'
+import { isMacControlKey, type KeyInput } from '../../../../shared/commands/define'
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
 import { previewFrontmatter } from '../markdownFrontmatter'
 import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceMark, type InPlaceRefusal, type InPlaceSelection, type InPlaceSurface, type TextSize } from '../inPlaceEditing'
@@ -9,6 +10,8 @@ import type { CommentBoxProps } from '../selectionSlot'
 import type { CommentSeverity } from '../../doc-review/model'
 import { FrontmatterNote, MarkdownPreview, PreviewSearchBar } from './MarkdownPreview'
 import { SelectionBubble, type BubbleMode } from './SelectionBubble'
+
+const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
 
 /** ［コメント］ on the selected words: the review's comment box (from app/) and where the comment goes (the editor's review). */
 export interface InPlaceComment {
@@ -94,8 +97,9 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
 
   // The bubble's keys (command catalog, editor area): only while the focus is in this document, else
   // the key is the app's (⌘B the left column, ⌘K 探す).
-  const inDocument = () => !!surfaceRef.current?.hasFocus()
-  const withSelection = () => inDocument() && bubble !== null
+  // On a Mac, Ctrl+letter is the text's own movement (Ctrl+B back, Ctrl+E line end): only ⌘ is the shortcut.
+  const inDocument = (input: KeyInput) => !!surfaceRef.current?.hasFocus() && !isMacControlKey(input, IS_MAC)
+  const withSelection = (input: KeyInput) => inDocument(input) && bubble !== null
   const mark = (m: InPlaceMark) => () => surfaceRef.current?.toggleMark(m)
   const size = (z: TextSize) => () => surfaceRef.current?.setSize(z)
   const keys = { target: paneId, acceptsKey: inDocument }
@@ -103,7 +107,11 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   useCommandHandler('editor.toggleItalic', mark('emphasis'), keys)
   useCommandHandler('editor.toggleStrike', mark('strike'), keys)
   useCommandHandler('editor.toggleCode', mark('code'), keys)
-  useCommandHandler('editor.editLink', () => setBubble(b => b && (b.selection.link ? (surfaceRef.current?.setLink(null), b) : { ...b, mode: 'link' })), { target: paneId, acceptsKey: withSelection })
+  useCommandHandler('editor.editLink', () => {
+    if (!bubble) return
+    if (bubble.selection.link) surfaceRef.current?.setLink(null)
+    else setBubble({ ...bubble, mode: 'link' })
+  }, { target: paneId, acceptsKey: withSelection })
   useCommandHandler('editor.setBodyText', size(0), keys)
   useCommandHandler('editor.setHeadingOne', size(1), keys)
   useCommandHandler('editor.setHeadingTwo', size(2), keys)
@@ -156,9 +164,9 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
       </div>
       {bubble && state === 'open' && (bubble.mode === 'comment' && comment ? comment.box({
         position: { x: Math.min(bubble.selection.box.left, window.innerWidth - 300), y: bubble.selection.box.bottom },
-        selectedText: bubble.selection.text,
+        selectedText: bubble.selection.text.trim(),
         onSubmit: async (body, severity) => {
-          const saved = await comment.add(bubble.selection.text, body, severity)
+          const saved = await comment.add(bubble.selection.text.trim(), body, severity)
           if (saved) closeBox()
           return saved
         },

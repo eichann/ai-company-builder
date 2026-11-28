@@ -147,6 +147,8 @@ test('on a Mac, ⌥⌘1 (reported as `¡`) runs the ⌥ shortcut by its physical
   const editor: FocusScope[] = [{ area: 'editor', target: 'editor' }, { area: 'app' }]
   assert.equal(registry.handleKey({ key: '¡', code: 'Digit1', metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, editor), true)
   assert.equal(registry.handleKey({ key: '1', code: 'Digit1', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }, editor), false)
+  // Windows' AltGr arrives as Ctrl+Alt: AltGr+1 is a character to type (`¹`, `|`…), never the shortcut.
+  assert.equal(registry.handleKey({ key: '¹', code: 'Digit1', metaKey: false, ctrlKey: true, shiftKey: false, altKey: true }, editor), false)
   await Promise.resolve()
   assert.equal(ran, 1)
 })

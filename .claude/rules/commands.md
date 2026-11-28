@@ -57,8 +57,9 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
   shows, `tasks-ui.md` "Working through a list"). `mod` = ⌘ or Ctrl (either one, on every
   platform); `shift` and `alt` must match exactly (⌥⌘P is not ⌘P); `key` is `KeyboardEvent.key`,
   a letter A–Z matched in either case (Windows / Linux report Ctrl+Shift+C as `C`, macOS ⌘⇧C as
-  `c`), any other key exactly; with `alt`, a digit or letter also matches by its physical key
-  (`KeyboardEvent.code` `Digit1` / `KeyS`: a Mac reports ⌥⌘1 as `¡`). Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
+  `c`), any other key exactly; with `alt`, a digit or letter pressed with ⌘ (not Ctrl) also matches
+  by its physical key (`KeyboardEvent.code` `Digit1` / `KeyS`: a Mac reports ⌥⌘1 as `¡`; Windows'
+  AltGr arrives as Ctrl+Alt and types a character, never a shortcut). Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
   A shortcut runs the command with no
   arguments, so its args must allow `{}`; two commands cannot share a key in one area.
 - `defineCommands` refuses a bad catalog at start-up (duplicate id, missing class, bad id,
@@ -99,7 +100,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source, an HTML document's 見る ⇄ 中身; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.viewDocument` `{ path, pane? }` | view | each editor (`TabbedEditorPanel.tsx`): an `.html` / `.htm` tab shown as 中身 goes back to 見る, then `file.open` (doc-frame.md "The chat's ［見る］ (A3)") | the chat's ［見る］ on a 「ファイルに書きました／直しました」 row (`features/chat/components/ToolRows.tsx`; shown only while a handler exists — none in a consultation's own window) |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
-| `editor.toggleBold` ⌘B, `editor.toggleItalic` ⌘I, `editor.toggleStrike` ⌘⇧S, `editor.toggleCode` ⌘E, `editor.editLink` ⌘K, `editor.setBodyText` ⌘⌥0, `editor.setHeadingOne` / `Two` / `Three` ⌘⌥1〜3 `{ pane? }` (editor) | local (changes the document; written back like typing) | the document edited in place (`components/InPlaceMarkdownEditor.tsx`): its selection bubble's operations (`files-and-editor.md` "The selection bubble"); each declines the key unless the focus is in the document (`editLink` also needs a selection), so ⌘B / ⌘K reach `layout.toggleLeft` / `find.byName` otherwise | the shortcuts; the bubble's buttons call the same operations directly |
+| `editor.toggleBold` ⌘B, `editor.toggleItalic` ⌘I, `editor.toggleStrike` ⌘⇧S, `editor.toggleCode` ⌘E, `editor.editLink` ⌘K, `editor.setBodyText` ⌘⌥0, `editor.setHeadingOne` / `Two` / `Three` ⌘⌥1〜3 `{ pane? }` (editor) | local (changes the document; written back like typing) | the document edited in place (`components/InPlaceMarkdownEditor.tsx`): its selection bubble's operations (`files-and-editor.md` "The selection bubble"); each declines the key unless the focus is in the document (`editLink` also needs a selection) and, on a Mac, a Ctrl+letter (the text's own Ctrl+B / Ctrl+E), so ⌘B / ⌘K reach `layout.toggleLeft` / `find.byName` otherwise; `notInHtmlDocument`: an HTML document keeps these keys | the shortcuts; the bubble's buttons call the same operations directly |
 
 A chat pane keeps the request until its shown tab can act (history read): the tab then starts a
 new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`
@@ -160,7 +161,7 @@ So the AI works only on the main window's tabs, and only for its own company. Te
   (`docViewShortcutOf` → `shortcutOf(catalog, input, areas)`, `define.ts`) and the viewer runs them
   with `handleKeyAt(area, input)` (the tab's focus chain). A new `app` / `editor` binding is handed
   over by itself; one whose command does nothing on an HTML tab sets `keybinding.notInHtmlDocument`
-  so the document keeps the key (today `editor.find` ⌘F; doc-frame.md "App shortcuts in a
+  so the document keeps the key (today `editor.find` ⌘F and the selection bubble's keys; doc-frame.md "App shortcuts in a
   document").
 - The one window-wide app key: voice input's start / stop (member-configurable, default ⌘⇧M), so
   not a catalog keybinding. `hooks/useVoiceShortcut.ts` holds one `window` capture listener per

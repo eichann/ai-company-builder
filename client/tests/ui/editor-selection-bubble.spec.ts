@@ -137,3 +137,16 @@ test('⌘B and ⌘K are the document\'s only while its words have the focus; els
   expect(await appKeys()).toEqual(['find.byName', 'layout.toggleLeft'])
   expect(await saved(page)).toBe(TEXT.replace('来週', '**来週**'))
 })
+
+test('on a Mac, Ctrl+B / Ctrl+E in the document stay the text\'s own keys (back a character, end of line); only ⌘ formats', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' }))
+  await open(page)
+  await select(page, '来週')
+  await page.keyboard.press('Control+b')
+  await page.keyboard.press('Control+e')
+  await page.clock.runFor(1500)
+  expect((await files(page))[DOC]).toBe(TEXT)
+  await select(page, '来週')
+  await page.keyboard.press('Meta+b')
+  await expect.poll(() => saved(page)).toBe(TEXT.replace('来週', '**来週**'))
+})

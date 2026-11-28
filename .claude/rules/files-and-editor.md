@@ -447,23 +447,28 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
 - Selecting words in a document edited in place shows **one bubble** (`components/SelectionBubble.tsx`,
   `role="toolbar"` 「選んだ文字の飾り」): 太字・斜体・取り消し線・コード (pressed = every selected
   character has it; press again takes it off), リンク (an address box: `https://…`, `mailto:`, a
-  relative path; on a link ［リンクを外す］), 文字の大きさ (本文 / 見出し1〜3 — a paragraph written
-  over several lines has only the selected line changed), ［コメント］. No typeface, colour or
+  relative path; on a link ［リンクを外す］ takes the whole link off), 文字の大きさ (本文 / 見出し1〜3 —
+  offered only for one line where a heading can stand, a top-level paragraph or heading, not a list
+  item or a table cell; a paragraph written over several lines has only the selected line changed;
+  the size it already has changes nothing), ［コメント］. No typeface, colour or
   underline (a Markdown file cannot keep them; owner). Its presses never take the focus from the
   document. The operations are the door's (`InPlaceSurface.toggleMark / setLink / setSize`,
   `milkdownFormat.ts`) and are written back like typing: the changed line only.
 - **Keys go through the command catalog** (`commands.md`): `editor.toggleBold` ⌘B, `toggleItalic`
   ⌘I, `toggleStrike` ⌘⇧S, `toggleCode` ⌘E, `editLink` ⌘K, `setBodyText` ⌘⌥0, `setHeadingOne|Two|Three`
-  ⌘⌥1〜3 (area `editor`). Each declines its key unless the focus is in the document (⌘K also needs
-  a selection), so ⌘B / ⌘K stay the app's left column / 探す elsewhere. Milkdown's own keys for the
-  same operations are switched off (one press, one change). ⌥ keys match by the physical key too
-  (`KeyInput.code`: ⌥⌘1 is `¡` on a Mac).
+  ⌘⌥1〜3 (area `editor`, `notInHtmlDocument`: an HTML document keeps them). Each declines its key
+  unless the focus is in the document (⌘K also needs a selection) and, on a Mac, a Ctrl+letter (the
+  text's own Ctrl+B back / Ctrl+E line end), so ⌘B / ⌘K stay the app's left column / 探す elsewhere. Milkdown's own keys for the
+  same operations are switched off (one press, one change). ⌥ keys match by the physical key too, on
+  a Mac's ⌥⌘ only (`KeyInput.code`: ⌥⌘1 is `¡` there; Windows' AltGr = Ctrl+Alt types a character).
 - **［コメント］ through a slot** (`selectionSlot.ts` `SelectionSlot.commentBox`): `app/editorSelection.ts`
   hands doc-review's `CommentPopover` to `TabbedEditorPanel` (`selection`); the editor imports no
   other feature's parts for it, and the same box serves a review's selection in the reading view and
   the HTML document view. The comment goes into the member's own review in progress, or a new
   review of theirs holding it in one write (`useMarkdownReview.commentAsReviewer`; never into a
-  completed review being read) — the sidecar's name and shape are those 「レビューする」 + a comment
+  completed review being read, nor while the reviews load or after they could not be read: a second
+  review of theirs would be written beside the first; a review request is answered as by
+  「レビューする」) — the sidecar's name and shape are those 「レビューする」 + a comment
   write (`editor-selection-bubble.spec.ts` checks the keys' order). The document then shows as
   reviewed (reading view, its comment beside it). `useTextSelection` moved from doc-review to
   `editor/hooks/` (the selection is the editor's). With this, `FEATURE_IMPORT_EXCEPTIONS` lost

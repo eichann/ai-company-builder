@@ -28,7 +28,7 @@ for (const proto of [dom.window.Element.prototype, dom.window.Range.prototype] a
   proto.getBoundingClientRect = zeroRect
 }
 const { SplicedDocument, splitFront } = await import('./markdownSplice')
-const { setInPlaceSize, toggleInPlaceMark } = await import('./milkdownFormat')
+const { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } = await import('./milkdownFormat')
 const { TextSelection } = await import('@milkdown/prose/state')
 const { makeMilkdown } = await import('./milkdownSurface')
 
@@ -478,4 +478,33 @@ test('a space typed at the end of a line waits on screen: the file gets it with 
   assert.equal(saved(spliced, view), text, 'the trailing space alone writes nothing')
   insertAfter(view, '12/1 ', 'に再訪問')
   assert.equal(saved(spliced, view), '- 次回：12/1 に再訪問\n- 二つめ\n')
+})
+
+test('the bubble changes nothing it should not: 本文 on body text, a size where no heading can stand, half a link', () => {
+  {
+    // Already body text: the paragraph written over several lines is not split.
+    const text = '一行め\n二行め\n三行め\n'
+    const { spliced, view } = open(text)
+    selectWords(view, '二行')
+    assert.equal(setInPlaceSize(view, 0), false)
+    assert.equal(saved(spliced, view), text)
+  }
+  {
+    // A list item, or words over two lines: no size offered, none applied.
+    const { view } = open('- 項目の文\n\n一行め\n二行め\n')
+    selectWords(view, '項目')
+    assert.equal(selectionOf(view)?.size, null)
+    assert.equal(setInPlaceSize(view, 2), false)
+    const from = posAfter(view.state.doc, '一行') - 2
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, posAfter(view.state.doc, '二行'))))
+    assert.equal(selectionOf(view)?.size, null)
+  }
+  {
+    // Taking a link off a few of its words takes the whole link off, written back as its words.
+    const text = '詳しくは [社内の資料](https://example.com/a) を見てください。\n'
+    const { spliced, view } = open(text)
+    selectWords(view, '資料')
+    setInPlaceLink(view, null)
+    assert.equal(saved(spliced, view), '詳しくは 社内の資料 を見てください。\n')
+  }
 })
