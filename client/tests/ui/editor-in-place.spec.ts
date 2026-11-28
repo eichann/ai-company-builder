@@ -123,6 +123,60 @@ test('the AI writing the file shows at once when nothing is edited; with an edit
   expect((await files(page))[MEETING]).toBe('# もう一度書き換えた\n')
 })
 
+const backups = (page: Page) => page.evaluate(() => (window as unknown as { __acbBackups: Array<{ reason: string; path: string; content?: string }> }).__acbBackups)
+const externalEdit = (page: Page, text: string) => page.evaluate(([p, t]) => (window as unknown as { __acbExternalEdit: (p: string, t: string) => void }).__acbExternalEdit(p, t), [MEETING, text] as const)
+
+/** Typed in the document, then the AI writes the file: the band and ［比べて選ぶ］. */
+async function editThenArrive(page: Page) {
+  await open(page)
+  await externalEdit(page, '# 定例\n\n予定を書きます。\n\n- 一つめ\n- 二つめ\n')
+  await expect(doc(page).getByRole('heading', { name: '定例' })).toBeVisible()
+  await caretAfter(page, '予定を書きます')
+  await page.keyboard.type('（私）')
+  await externalEdit(page, '# 定例\n\n予定を書きます。AI が足しました。\n\n- 一つめ\n- 二つめ\n')
+  await page.getByRole('button', { name: '比べて選ぶ' }).click()
+}
+
+test('［届いた版を採用］ after editing in place: the edits are kept first, the document shows what arrived, and the next edit is placed against it', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await editThenArrive(page)
+  await page.getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(doc(page)).toContainText('AI が足しました。')
+  await expect(doc(page)).not.toContainText('（私）')
+  expect(await backups(page)).toEqual([{ reason: 'editor_edits', path: MEETING, content: '# 定例\n\n予定を書きます（私）。\n\n- 一つめ\n- 二つめ\n' }])
+  // The document was opened afresh on the version that arrived: a new edit changes only its own bytes.
+  await caretAfter(page, '二つめ')
+  await page.keyboard.type('です')
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe('# 定例\n\n予定を書きます。AI が足しました。\n\n- 一つめ\n- 二つめです\n')
+})
+
+test('［自分の版を保存］ after editing in place: the arrived version is kept, the edits written, and editing goes on from them', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await editThenArrive(page)
+  await page.getByRole('button', { name: '自分の版を保存' }).click()
+  await expect.poll(async () => (await files(page))[MEETING]).toBe('# 定例\n\n予定を書きます（私）。\n\n- 一つめ\n- 二つめ\n')
+  expect((await backups(page))[0]).toEqual({ reason: 'editor_overwrite', path: MEETING, content: '# 定例\n\n予定を書きます。AI が足しました。\n\n- 一つめ\n- 二つめ\n' })
+  await expect(doc(page)).toContainText('予定を書きます（私）。')
+  await caretAfter(page, '一つめ')
+  await page.keyboard.type('だ')
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe('# 定例\n\n予定を書きます（私）。\n\n- 一つめだ\n- 二つめ\n')
+})
+
+test('保存せずに進む after editing in place keeps exactly what was typed in the backups', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  const before = (await files(page))[MEETING]
+  await page.evaluate(p => (window as unknown as { __acbFailWrites: Set<string> }).__acbFailWrites.add(p), MEETING)
+  await caretAfter(page, '予算の確認を')
+  await page.keyboard.type('二度')
+  await page.evaluate(() => (window as unknown as { __acbRequestClose: () => void }).__acbRequestClose())
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __acbCloseAnswers: string[] }).__acbCloseAnswers)).toEqual(['ack', 'close'])
+  expect(await backups(page)).toEqual([{ reason: 'editor_left_unsaved', path: MEETING, content: before.replace('予算の確認を', '予算の確認を二度') }])
+})
+
 test('closing the window right after typing in the document saves it first', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
   await open(page)

@@ -3,7 +3,8 @@
 // preload API faked. Fictional documents only.
 // window.__acbFiles / __acbWrites: the "disk" and every save; __acbExternalEdit(path, text) writes a
 // file as the AI would (and sends the watcher's event); __acbRequestClose() asks to close the window
-// as main does; __acbCloseAnswers lists the answers.
+// as main does; __acbCloseAnswers lists the answers; __acbBackups every keep (the disk version
+// before an overwrite, or the edits given); __acbFailWrites: saves of these paths fail.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -12,6 +13,7 @@ import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEdito
 import { useKeybindings } from '../src/shared/commands/commands'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
+import { useAppStore } from '../src/stores/appStore'
 
 const ROOT = '/Users/demo/会社'
 const MEETING = `${ROOT}/営業部/定例メモ.md`
@@ -29,13 +31,28 @@ const files: Record<string, string> = {
   [NOTES]: '本文です[^1]。\n\n[^1]: 注の中身\n',
 }
 const writes: Array<[string, string]> = []
+const backups: Array<{ reason: string; path: string; content: string | undefined }> = []
+const failWrites = new Set<string>()
 const changes = emitter<Array<{ type: string; path: string }>>()
 const closeRequests = emitter<void>()
 const closeAnswers: string[] = []
 installElectronAPI({
   readFile: async (p: string) => (p in files ? files[p] : null),
   exists: async (p: string) => p in files,
-  writeFile: async (p: string, content: string) => { files[p] = content; writes.push([p, content]); return true },
+  writeFile: async (p: string, content: string) => {
+    if (failWrites.has(p)) return false
+    files[p] = content
+    writes.push([p, content])
+    return true
+  },
+  backupBeforeOverwrite: async (_root: string, p: string) => {
+    backups.push({ reason: 'editor_overwrite', path: p, content: files[p] })
+    return { success: true, backupPath: `${ROOT}/.backups/2026-11-28T01-02-03-456_editor_overwrite` }
+  },
+  backupEdits: async (_root: string, p: string, content: string, reason = 'editor_edits') => {
+    backups.push({ reason, path: p, content })
+    return { success: true, backupPath: `${ROOT}/.backups/2026-11-28T01-02-03-456_${reason}` }
+  },
   readDirectory: async () => [],
   onFileChanges: changes.subscribe,
   onCloseRequested: (cb: () => void) => closeRequests.subscribe(cb),
@@ -44,10 +61,14 @@ installElectronAPI({
 Object.assign(window, {
   __acbFiles: files,
   __acbWrites: writes,
+  __acbBackups: backups,
+  __acbFailWrites: failWrites,
   __acbCloseAnswers: closeAnswers,
   __acbRequestClose: () => closeRequests.emit(),
   __acbExternalEdit: (p: string, text: string) => { files[p] = text; changes.emit([{ type: 'change', path: p }]) },
 })
+
+useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
 
 export function Preview() {
   useKeybindings()

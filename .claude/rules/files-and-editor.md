@@ -410,9 +410,12 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
 - **Saving, external changes and leaving are the editor's as before**: each written change goes
   through `handleContentChange` (the tab's text, its dot, the preview tab pinned on the first edit),
   so autosave, ⌘S, the external-change band (it pauses autosave; the member's text stays on screen),
-  「ディスクの内容を読み込む」 and saving before leaving / closing apply unchanged. A change of the
-  tab's text that did not come from the editor (the disk followed, the disk version loaded, the
-  source edited) opens the document afresh.
+  ［比べて選ぶ］ and saving / 保存せずに進む before leaving apply unchanged and keep exactly what was
+  typed. The compare view replaces the document while it is open; after ［届いた版を採用］ the document
+  opens afresh on the version that arrived (the edits kept in the backups first), after
+  ［自分の版を保存］ on the edits written — the next change is placed against that text. Any change of
+  the tab's text that did not come from the editor (the disk followed, a version picked, the source
+  edited) opens the document afresh. Tests: `editor-in-place.spec.ts` (both picks, 保存せずに進む).
 - **The source** is the same `CodeEditor` (記号の画面): the toggle's エディタ button and ⌘⇧V
   (`mdViewMode`; nothing chosen yet → the document view where in-place editing is on — a member who
   chose エディタ before keeps it). Reading view instead of editing: 閲覧のみ files, a review being
