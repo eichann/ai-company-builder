@@ -236,3 +236,66 @@ test('⌘F also finds the name and description shown from the file\'s frontmatte
   await box.fill('骨子')
   await expect(page.getByText('1/1')).toBeVisible()
 })
+
+// Images in a document (files-and-editor.md "Images in a document"): ⌘V of an image or a Finder drop hands the bytes
+// to main (which names and places the file beside the document); the document gets one line, `![](images/…)`.
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]
+const images = (page: Page) => page.evaluate(() => (window as unknown as { __acbImages: Array<{ document: string; bytes: number[]; address: string }> }).__acbImages)
+
+/** A paste (⌘V) or a Finder drop on the document carrying these files (and words, when given). */
+async function bring(page: Page, kind: 'paste' | 'drop', files: Array<{ name: string; type: string; bytes: number[] }>, words = '') {
+  await page.evaluate(({ kind, files, words }) => {
+    const dt = new DataTransfer()
+    if (words) dt.setData('text/plain', words)
+    for (const f of files) dt.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }))
+    const editor = document.querySelector('[data-in-place-editor] .ProseMirror')!
+    if (kind === 'paste') {
+      (document.activeElement ?? editor).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+      return
+    }
+    const last = [...editor.querySelectorAll(':scope > p')].pop()!.getBoundingClientRect()
+    editor.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: last.left + 2, clientY: last.top + 2, bubbles: true, cancelable: true }))
+  }, { kind, files, words })
+}
+
+test('⌘V of an image keeps it beside the document and writes its one line after the paragraph; words pasted stay words', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  const state = await open(page)
+  const before = (await files(page))[MEETING]
+  await caretAfter(page, '研修の資料は')
+  // A caret set from outside reaches the editor with the next key (a paste event alone does not make it read it).
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowRight')
+  await bring(page, 'paste', [{ name: 'image.png', type: 'image/png', bytes: PNG }])
+  await expect.poll(async () => (await images(page)).length).toBe(1)
+  expect(await images(page)).toEqual([{ document: MEETING, bytes: PNG, address: 'images/20260101-000000.png' }])
+  await expect(doc(page).locator('img[src*="20260101-000000.png"]')).toHaveCount(1)
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe(before.replace('予算の確認をしました。\n', '予算の確認をしました。\n\n![](images/20260101-000000.png)\n'))
+
+  // Copied words from Word / Excel carry a picture of them too: they are pasted as words, no image kept.
+  await caretAfter(page, '予算の確認を')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowRight')
+  await bring(page, 'paste', [{ name: 'image.png', type: 'image/png', bytes: PNG }], 'しっかり')
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toContain('しっかり')
+  expect((await images(page)).length).toBe(1)
+  expect((await files(page))[MEETING].match(/!\[\]\(images\//g)?.length).toBe(1)
+  expectNoPageErrors(state)
+})
+
+test('a Finder drop: an image goes in at the drop; a PDF or an SVG is refused in one line and nothing is kept or written', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  const before = (await files(page))[MEETING]
+  await doc(page).click()
+  await bring(page, 'drop', [{ name: '資料.pdf', type: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] }, { name: '図.svg', type: 'image/svg+xml', bytes: [0x3c] }])
+  await expect(page.getByRole('status').filter({ hasText: '画像を入れられませんでした。図.svg: 入れられるのは PNG・JPEG・GIF・WebP の画像だけです' })).toBeVisible()
+  expect(await images(page)).toEqual([])
+  await page.getByRole('button', { name: '閉じる' }).click()
+  await bring(page, 'drop', [{ name: '写真.png', type: 'image/png', bytes: PNG }])
+  await expect.poll(async () => (await images(page)).length).toBe(1)
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe(before.replace('予算の確認をしました。\n', '予算の確認をしました。\n\n![](images/20260101-000000.png)\n'))
+})

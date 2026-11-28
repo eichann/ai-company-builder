@@ -33,6 +33,7 @@ const { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } = await
 const { TextSelection } = await import('@milkdown/prose/state')
 const { makeMilkdown } = await import('./milkdownSurface')
 const { blockMenuOf, closeBlockMenu, editTable, turnIntoBlock } = await import('./milkdownBlocks')
+const { insertImage, pastedImageFiles } = await import('./milkdownImages')
 
 let md: Awaited<ReturnType<typeof makeMilkdown>>
 before(async () => {
@@ -705,4 +706,51 @@ test('the file\'s own bullet is used only for what is newly written: a typed cha
     const written = saved(spliced, view)
     assert.deepEqual(changedLines(text, written), { removed: 1, added: 1 }, written)
   }
+})
+
+// Images in a document (files-and-editor.md "Images in a document"): a pasted image is one line of its own,
+// `![](images/…)`, and nothing else in the file changes (owner decision 2026-11-28: 保存で変わるのは文書の1行だけ).
+test('a pasted image writes its one line: on the empty line holding the caret, else right after the top-level block', () => {
+  const image = '![](images/20261129-143005.png)'
+  {
+    // On an empty line (Enter, then ⌘V): that line.
+    const { spliced, view } = open(MEETING)
+    newLine(view, '数字の確認')
+    saved(spliced, view)
+    const lines = view.state.doc.childCount
+    insertImage(view, 'images/20261129-143005.png', view.state.selection.from)
+    assert.equal(view.state.doc.childCount, lines, 'the empty line itself holds the image (no empty line left above it on screen)')
+    assert.equal(saved(spliced, view), plusAfter(MEETING, '## 数字の確認\n', `\n${image}\n`))
+  }
+  {
+    // In the middle of a paragraph's words: a new line after that paragraph, the words untouched.
+    const { spliced, view } = open(MEETING)
+    insertImage(view, 'images/20261129-143005.png', posAfter(view.state.doc, '参加：佐藤'))
+    const text = saved(spliced, view)
+    assert.equal(text, plusAfter(MEETING, '場所：会議室B / オンライン併用\n', `\n${image}\n`))
+    assert.deepEqual(changedLines(MEETING, text), { removed: 0, added: 2 }, 'the image and its blank line')
+  }
+  {
+    // In a nested list item: after the whole list (a list item gains no paragraph), the `*` and the indent kept.
+    const { spliced, view } = open(MEETING)
+    insertImage(view, 'images/20261129-143005.png', posAfter(view.state.doc, '送る前に田中さんが'))
+    assert.equal(saved(spliced, view), plusAfter(MEETING, '* 次回の定例は 11/27（木）10:00〜\n', `\n${image}\n`))
+  }
+  {
+    // Two images dropped at once, then words typed after them: each its own line, in order.
+    const { spliced, view } = open(SKILL)
+    const next = insertImage(view, 'images/20261129-143005.png', posAfter(view.state.doc, '会社名だけにする。'))
+    insertImage(view, 'images/20261129-143005-2.png', next)
+    view.dispatch(view.state.tr.insertText('（図）', view.state.selection.from))
+    assert.equal(saved(spliced, view), plusAfter(SKILL, '> 注意：お客さんの個人名は書かない。会社名だけにする。\n', `\n${image}\n\n![](images/20261129-143005-2.png)（図）\n`))
+  }
+})
+
+test('a paste with words in it stays words: an image is taken from the clipboard only when it holds no text', () => {
+  const clip = (text: string, files: Array<{ type: string }>) => ({ getData: (t: string) => (t === 'text/plain' ? text : ''), files }) as unknown as DataTransfer
+  const png = { type: 'image/png' }
+  assert.equal(pastedImageFiles(clip('', [png])).length, 1, 'a screenshot')
+  assert.equal(pastedImageFiles(clip('売上の表', [png])).length, 0, 'Word / Excel put a picture beside the words')
+  assert.equal(pastedImageFiles(clip('', [{ type: 'application/pdf' }])).length, 0)
+  assert.equal(pastedImageFiles(null).length, 0)
 })

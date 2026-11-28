@@ -12,6 +12,16 @@ export type EditorReads = ElectronPort<'readFile' | 'readFileBinary' | 'exists'>
  * and the tab's edits kept there before taking the version that arrived.
  */
 export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backupBeforeOverwrite' | 'backupEdits'>
+/**
+ * An image pasted or dropped into a document edited in place, kept beside it: the renderer hands the
+ * bytes and the document; main names and places the file (`images/`) and answers its address.
+ */
+export type EditorImageWrites = ElectronPort<'saveDocumentImage'>
+
+export function saveDocumentImage(documentPath: string, bytes: ArrayBuffer, writes: EditorImageWrites = window.electronAPI) {
+  return writes.saveDocumentImage(documentPath, bytes)
+}
+
 /** Why a save was refused, in a sentence for the member (a skill file they may not change, …). */
 export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 

@@ -21,6 +21,11 @@ export interface InPlaceOptions {
   onBlockMenu(menu: InPlaceBlockMenu | null): void
   /** The table holding the caret (its bar's place and what it can do), or none. */
   onTable(table: InPlaceTable | null): void
+  /**
+   * A file pasted or dropped into the document, kept beside it: the address to write (`images/…`),
+   * or null when it was not kept (the screen says why). The editor then puts the image in.
+   */
+  storeImage(file: File): Promise<string | null>
 }
 
 export interface InPlaceBlockMenu {

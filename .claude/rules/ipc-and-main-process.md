@@ -31,7 +31,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status, claudeSignIn:* — `chat-and-agents.md` "Signing in to Claude Code"), `env`,
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
-  editor:backupBeforeOverwrite, editor:backupEdits; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
+  editor:backupBeforeOverwrite, editor:backupEdits; editor:saveImage keeps an image pasted or dropped into a document in
+  `images/` beside it, main naming and placing it, `files-and-editor.md` "Images in a document"; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
@@ -335,7 +336,7 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 
 ## Guards on what the renderer hands main (keep them)
 
-- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `editor:backupEdits`, `env:*`,
+- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `editor:backupEdits`, `editor:saveImage`, `env:*`,
   `git:*` incl. sync / log / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
   goes through `AllowedRoots.validate` (`client/electron/allowed-roots.ts`): inside a registered
   company root **by name and by real location** — every symlink resolved (`realpathSync.native`;
@@ -372,7 +373,8 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);
-  `skills:publish` / `makePrivate` refuse a multi-line entry (`makePrivate` also a skill already
+  `editor:saveImage` takes only the bytes and the document (main makes the path: `images/` beside it, a real folder —
+  never a link —, the kind from the bytes, `wx`); `skills:publish` / `makePrivate` refuse a multi-line entry (`makePrivate` also a skill already
   shared); `fs:createFile` / `rename` / `move` / `copyFromExternal` / `copy` never replace an
   existing target (`files-and-editor.md`); `skills:toggleNurturing` only a
   `SKILL.md`; `shell:openExternal` only `http:` / `https:` / `mailto:` (`electron/external-url.ts`).

@@ -19,6 +19,7 @@ import { strikethroughKeymap } from '@milkdown/preset-gfm'
 import { TextSelection } from '@milkdown/prose/state'
 import type { InPlaceEngine, InPlaceOptions, InPlaceRefusal } from './inPlaceEditing'
 import { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } from './milkdownFormat'
+import { droppedFiles, pastedImageFiles, placeImages } from './milkdownImages'
 import { blockMenuPlugin, blockMenuReport, closeBlockMenu, lineStartRules, REPLACED_LINE_START_RULES, editTable, tableReport, turnIntoBlock } from './milkdownBlocks'
 
 interface MdNode { type: string; value?: unknown; alt?: unknown; children?: MdNode[]; position?: { start: { offset?: number }; end: { offset?: number } } }
@@ -170,6 +171,22 @@ export const milkdownEngine: InPlaceEngine = {
           attributes: { class: 'markdown-body acb-in-place', spellcheck: 'false' },
           nodeViews: {
             image: (node: PMNode) => imageView(node, options.folder),
+          },
+          // An image pasted (⌘V) or a file dropped from Finder: kept beside the document first, then put in.
+          handlePaste: (v: EditorView, e: ClipboardEvent) => {
+            const files = pastedImageFiles(e.clipboardData)
+            if (!spliced || files.length === 0) return false
+            e.preventDefault()
+            void placeImages(v, files, v.state.selection.from, options.storeImage)
+            return true
+          },
+          handleDrop: (v: EditorView, e: DragEvent) => {
+            const files = droppedFiles(e.dataTransfer)
+            if (!spliced || files.length === 0) return false
+            e.preventDefault()
+            const at = v.posAtCoords({ left: e.clientX, top: e.clientY })?.pos ?? v.state.selection.from
+            void placeImages(v, files, at, options.storeImage)
+            return true
           },
           handleDOMEvents: {
             focus: (v: EditorView) => { if (spliced) reportSelection(v); return false },
