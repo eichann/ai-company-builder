@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useId, useState } from 'react'
 import { ArrowsOut, CheckCircle, Hourglass, Robot, Warning, XCircle } from '@phosphor-icons/react'
 import { Button, StatusBadge } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
@@ -67,6 +67,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone,
   // 「別の…として作る」 holds for the content it was chosen on: new content (another hash) asks again.
   const [distinctFor, setDistinctFor] = useState<string | null>(null)
   const [linkMeeting, setLinkMeeting] = useState(true)
+  const hintId = useId()
   // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
   // (Kept per request, not per card: a card shown again or a second card of it offers no press either.)
   const unknown = useUnknownResult<{ kind: ApprovalPress; before: ApprovalView['state'] }>(key)
@@ -191,9 +192,9 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone,
       </div>
       {/* ④ The buttons stay in reach at the bottom of the view (a short screen, a long card) while the card is shown. */}
       {answering && <div data-approval-bar className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-b-card border-t border-[color:var(--color-border)] bg-surface-raised px-3 py-2">
-        <Button variant="primary" disabled={busy || reasonEmpty || mustChoose} onClick={() => void act('approve', view)}>{busy ? '承認しています…' : '承認する'}</Button>
-        <Button disabled={busy || reasonEmpty} onClick={() => void act('send-back', view)}>差し戻す</Button>
-        <span className="text-caption font-normal text-text-subtle">{answerHint({ mustChoose, reasonEmpty })}</span>
+        <Button variant="primary" aria-describedby={hintId} disabled={busy || reasonEmpty || mustChoose} onClick={() => void act('approve', view)}>{busy ? '承認しています…' : '承認する'}</Button>
+        <Button aria-describedby={hintId} disabled={busy || reasonEmpty} onClick={() => void act('send-back', view)}>差し戻す</Button>
+        <span id={hintId} className="text-caption font-normal text-text-subtle">{answerHint({ mustChoose, reasonEmpty })}</span>
       </div>}
     </div>
   )

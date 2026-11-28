@@ -222,9 +222,11 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
 - **Where it shows** (one component, `ApprovalCard`, owned by `chat`; other places get it through `app/`): a reply
   (`MessageParts.tsx`, with ［大きく開く（タブ）］ — `record.open` of the request, offered only where something handles it,
   so not in a consultation's own window), the request's record tab and a task's prepared things (`AppShell`
-  `approvalCard`), and the inbox beside its list (`renderApprovalCard(id, onDone)`). `onDone` is called only when the
+  `approvalCard`), and the inbox (`renderApprovalCard`; the stage-2 inbox, #938, passes `onDone` there — until it
+  lands no caller does). `onDone` is called only when the
   server's answer to a press here finished the request (`pressFinished`: approved / sent back / withdrawn / 「同じ」 —
-  a write that failed or went stale stays), so a list worked through (the inbox, UX 11番) goes on to the next one. The
+  a write that failed or went stale stays; a press whose answer never came and that a later read shows done does not
+  call it either — the card stays, saying what happened), so a list worked through (the inbox, UX 11番) goes on to the next one. The
   inbox has no approve or send-back of its own: the reason is required, so only the card's bar answers.
 - **A press whose answer never came** (offline, a 5xx: it may or may not have reached the server; owner 2026-11-28):
   the card never says 「開き直すと分かります」. It reads the request again by itself (`approvals:get`, at once, then after 2,

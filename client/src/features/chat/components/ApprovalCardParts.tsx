@@ -132,7 +132,7 @@ export function DuplicateCheck({ view, names, chosen, actable, locked, linkMeeti
         <p className="flex flex-wrap items-center gap-1.5 text-small text-text">
           <CheckCircle size={14} weight="bold" aria-hidden className="text-success-icon" />
           すでにある{similar.typeLabel}とは別の{similar.typeLabel}として作ります
-          <button type="button" disabled={locked} onClick={onChooseAgain} className="ml-auto text-small text-link hover:underline">選び直す</button>
+          <button type="button" disabled={locked} onClick={onChooseAgain} className="ml-auto text-small text-link hover:underline disabled:opacity-disabled">選び直す</button>
         </p>
       ) : <>
         <p className="text-small font-strong text-text">まず確かめてください：すでにある{similar.typeLabel}と同じではありませんか？</p>

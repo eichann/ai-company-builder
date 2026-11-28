@@ -96,7 +96,7 @@ test('the approver sees the change, basis, precedents and materials; 「承認�
   await expect(card).toContainText('AI の下書きが入っています。直せます')
   await reason.fill('')
   await expect(card.getByRole('button', { name: '承認する', exact: true })).toBeDisabled()
-  await expect(card).toContainText('理由を書くと押せます')
+  await expect(card.getByRole('button', { name: '承認する', exact: true })).toHaveAccessibleDescription('理由を書くと押せます')
   await reason.fill('対象拡大のため妥当')
   await card.getByRole('button', { name: '承認する', exact: true }).click()
   await expect(page.locator('#sent')).toHaveText(JSON.stringify({ hash: `sha256:${'9c1e'.repeat(16)}`, reason: '対象拡大のため妥当' }))
