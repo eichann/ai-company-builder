@@ -59,6 +59,7 @@ interface Result {
   work: Record<string, unknown>
   workPress: Record<string, unknown>
   workFlow: Record<string, unknown>
+  workFlowCompact: Record<string, unknown>
   verify: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
@@ -566,8 +567,13 @@ test('a write task on the real window: a press while a held write is being sent 
   assert.deepEqual(last.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', '送っている途中なので押していません']])
 })
 
-test('the completion regression: a company Skill\'s copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once', { skip }, () => {
-  const r = result.workFlow
+// The completion regression runs once per tool set (agent-browser.md "The operator's tool sets"): the same guards hold in both.
+for (const [toolset, key] of [['current', 'workFlow'], ['compact', 'workFlowCompact']] as const) test(`the completion regression (${toolset} tool set): a company Skill's copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once`, { skip }, t => {
+  const r = result[key]
+  // Each step's operator was started with this set; its steps and stops are printed for comparing the sets.
+  assert.deepEqual(new Set(r.toolsets as string[]), new Set([toolset]))
+  t.diagnostic(`toolset=${toolset} operatorSteps=${String(r.operatorSteps)} workSteps=${String(r.workSteps)} stops=${String(r.stops)} ms=${String(r.ms)}`)
+  assert.equal(r.stops, 0)
   assert.match(String(r.words), /^済みました。読み直して、約束した値と送った値になっていることを確かめました/, JSON.stringify(r))
   // Exactly the two writes, in order, with the setting chosen again and the person's own values as written.
   assert.deepEqual(r.flow, [

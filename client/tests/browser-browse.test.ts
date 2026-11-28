@@ -31,6 +31,7 @@ import { browserRunLogProblem } from '../../shared/core/browser-run-log'
 import { readBrowserCard } from '../shared/browser-inspection'
 import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
 import { BROWSER_WORDS, type BrowserRunWindow } from '../shared/browser-operation'
+import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
 
 const HOST = 'shop.example.test'
 const COMPANY = 'company-1'
@@ -75,6 +76,8 @@ interface World {
   /** The controller's `windowForRun` (absent: main hands none). */
   openWindow?: (w: World, surface: BrowserBrowseSurface) => BrowserRunWindow
   opens: number
+  /** This PC's tool set (absent: main hands none, so `current`). */
+  toolset?: BrowserOperatorToolset
 }
 
 function world(over: Partial<World> = {}) {
@@ -103,6 +106,7 @@ function world(over: Partial<World> = {}) {
   w.window = over.window === undefined ? surface : over.window
   let steps = 0
   const prompts: string[] = []
+  const toolsets: Array<string | null> = []
   const materials: unknown[] = []
   const images: Array<string | null> = []
   const operator: PreviewOperator = {
@@ -110,6 +114,7 @@ function world(over: Partial<World> = {}) {
     async resolve() { return { ok: true, cli: { path: '/bin/claude', pathDirs: [] } } },
     async step(job) {
       prompts.push(job.prompt ?? 'preview')
+      toolsets.push(job.toolset ?? null)
       materials.push(job.material)
       images.push(job.image ? new TextDecoder().decode(job.image.data) : null)
       const n = steps++
@@ -124,12 +129,13 @@ function world(over: Partial<World> = {}) {
     aiSwitch: () => w.switchOn, userId: () => w.user, context, stopped: () => w.stopped,
     window: () => w.window, registered: () => w.registered, api, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.openWindow ? { openWindow: async () => { w.opens++; return w.openWindow!(w, surface) } } : {}),
+    ...(w.toolset ? { toolset: () => w.toolset! } : {}),
   })
   const run = (input: Partial<{ task: string; items: string[]; signal: AbortSignal }> = {}) => wiring.browse({
     companyId: COMPANY, conversationId: 'conv-1', site: HOST, task: input.task ?? '一覧の受付の終わりを並べて',
     items: input.items ?? ['受付の終わり', '定員'], signal: input.signal ?? new AbortController().signal,
   })
-  return { w, wiring, run, prompts, materials, images }
+  return { w, wiring, run, prompts, toolsets, materials, images }
 }
 
 const SCREEN_MARKER = 'ACB-SCREEN-7c2e'
@@ -402,6 +408,58 @@ test('answers that would act outside what is offered act on nothing', async () =
     assert.deepEqual(r, { kind: 'refused', words: W.failed }, bad)
     assert.equal(w.acted.length, 0, bad)
     assert.deepEqual(w.finished.map(f => f.reason), ['bad-answer'], bad)
+  }
+})
+
+// The tool sets (agent-browser.md "The operator's tool sets"): the compact set's words reach the window as today's
+// actions, so the window, the log and every refusal are the same in both sets.
+const SAME_RUN: Record<BrowserOperatorToolset, string[]> = {
+  current: [
+    '{"do":"type","ref":0,"text":"山田花子"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"back"}', '{"do":"wait","seconds":1}', done('済み'),
+  ],
+  compact: [
+    '{"do":"set","ref":0,"value":"山田花子"}', '{"do":"set","ref":4,"value":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"go","path":"back"}', '{"do":"wait","seconds":1}', done('済み'),
+  ],
+}
+
+test('both tool sets: the same run does the same actions in the window and logs them in today\'s words; the operator is started with its set and shown its history in its own words', async () => {
+  const runs = await Promise.all((['current', 'compact'] as const).map(async toolset => {
+    const { w, run, toolsets, materials } = world({ toolset, answers: SAME_RUN[toolset] })
+    const r = await run()
+    assert.equal(r.kind, 'card', toolset)
+    assert.deepEqual(toolsets, Array(7).fill(toolset))
+    const history = (materials.at(-1) as { history: Array<{ do: string }> }).history.map(h => h.do)
+    return { acted: w.acted, steps: w.finished[0].steps, history }
+  }))
+  assert.deepEqual(runs[1].acted, runs[0].acted)
+  assert.deepEqual(runs[1].steps, runs[0].steps)
+  assert.deepEqual(runs[0].history, ['type', 'select', 'click', 'go', 'back', 'wait'])
+  assert.deepEqual(runs[1].history, ['set', 'set', 'click', 'go', 'go', 'wait'])
+})
+
+test('both tool sets refuse the same answers: outside what is offered, a password field, an option not offered, another site, extra keys — and each set refuses the other\'s words', async () => {
+  const bad: Record<BrowserOperatorToolset, string[]> = {
+    current: [
+      '{"do":"type","ref":3,"text":"x"}', '{"do":"type","ref":1,"text":"x"}', '{"do":"select","ref":4,"option":"ほかの順"}',
+      '{"do":"go","path":"//evil.example/x"}', '{"do":"click","ref":1,"extra":1}', '{"do":"back","path":"/x"}',
+      '{"do":"set","ref":0,"value":"x"}',
+    ],
+    compact: [
+      '{"do":"set","ref":3,"value":"x"}', '{"do":"set","ref":1,"value":"x"}', '{"do":"set","ref":4,"value":"ほかの順"}',
+      '{"do":"go","path":"//evil.example/x"}', '{"do":"click","ref":1,"extra":1}', '{"do":"go","path":"back","extra":1}',
+      '{"do":"type","ref":0,"text":"x"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"back"}',
+      '{"do":"set","ref":0,"value":"x","text":"y"}', '{"do":"set","ref":0}',
+    ],
+  }
+  for (const toolset of ['current', 'compact'] as const) {
+    for (const answer of bad[toolset]) {
+      const { w, run } = world({ toolset, answers: [answer] })
+      assert.deepEqual(await run(), { kind: 'refused', words: W.failed }, `${toolset} ${answer}`)
+      assert.equal(w.acted.length, 0, `${toolset} ${answer}`)
+      assert.deepEqual(w.finished.map(f => f.reason), ['bad-answer'], `${toolset} ${answer}`)
+    }
   }
 })
 

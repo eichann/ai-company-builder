@@ -41,6 +41,7 @@ import type { BrowserLinesAnswer } from '../electron/features/browser/lines-api'
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import type { BrowserWriteSteps } from '../shared/browser-runner'
 import type { BrowserWriteView } from '../shared/browser-line-writes'
+import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
 import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const HOST = 'shop.example.test'
@@ -470,7 +471,10 @@ test('why a run stopped: a write refused as outside the frames is said first, ov
 function snapshot(extra = ''): BrowserPageSnapshot {
   return readBrowserPageSnapshot(JSON.stringify({
     address: `https://${HOST}/coupons/new`, title: 'クーポン', text: `会員 88123 のクーポン\n${INJECTION}\n${extra}`, truncated: false,
-    elements: [{ ref: 1, role: 'button', name: '保存', logLabel: '保存' }, { ref: 2, role: 'button', name: '自動保存', logLabel: '' }],
+    elements: [
+      { ref: 1, role: 'button', name: '保存', logLabel: '保存' }, { ref: 2, role: 'button', name: '自動保存', logLabel: '' },
+      { ref: 3, role: 'textbox', name: '名前', value: '', logLabel: '名前' },
+    ],
   }), HOST)!
 }
 
@@ -530,13 +534,16 @@ interface WorkWorld {
   /** The bodies sent to the promise routes and each permit's check, in order. */
   promises: unknown[]
   checks: unknown[]
+  /** This PC's tool set (absent: main hands none, so `current`), and the set each operator step was started with. */
+  toolset?: BrowserOperatorToolset
+  toolsets: Array<string | null>
 }
 
 const SCREEN_MARKER = 'ACB-SCREEN-4b9d'
 
 function workWorld(over: Partial<WorkWorld> = {}) {
   const w: WorkWorld = {
-    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {}, images: [], materials: [], continues: 0, promises: [], checks: [],
+    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {}, images: [], materials: [], continues: 0, promises: [], checks: [], toolsets: [],
     frameStart: body => ({ kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000 } }),
     runFinish: async () => ({ kind: 'ok', value: {} }),
@@ -615,6 +622,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async resolve() { return { ok: true, cli: { path: '/bin/claude', pathDirs: [] } } },
     async step(job) {
       w.calls.push(`step ${job.prompt}`)
+      w.toolsets.push(job.toolset ?? null)
       w.images.push(job.image ? new TextDecoder().decode(job.image.data) : null)
       w.materials.push(job.material)
       w.onStep?.(job.prompt)
@@ -632,6 +640,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     writeStartMs: w.writeStartMs ?? 20,
     pressGapMs: w.pressGapMs ?? 50,
     ...(w.now ? { now: w.now } : {}),
+    ...(w.toolset ? { toolset: () => w.toolset! } : {}),
     ...(w.skillSteps ? { skillSteps: async (_root: string, skill: string) => { const t = w.skillSteps?.(skill) ?? null; return t === null ? { kind: 'none' as const } : { kind: 'text' as const, text: t } } } : {}),
   })
   const cards: string[] = []
@@ -1045,6 +1054,25 @@ test('a page write outside the plan during the work is refused; the after-read c
   // Bug 4: the soft words with the company's name for what it is compared to.
   assert.ok(card.checks.some(c => c.label === '「前の回」と違う項目があります。意図した変更か確かめてください。' && c.mark === 'ng'))
   assert.equal(card.sections.find(s => s.heading === CW.writes)?.rows.length, 2)
+})
+
+test('both tool sets: the same write task makes the same actions and the same one write within the frame; a write outside the frames is refused and a word of the other set is asked again in both (agent-browser.md "The operator\'s tool sets")', async () => {
+  const answers: Record<BrowserOperatorToolset, string[]> = {
+    current: ['{"do":"type","ref":3,"text":"冬のクーポン"}', '{"do":"back"}', '{"do":"set","ref":3,"value":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
+    compact: ['{"do":"set","ref":3,"value":"冬のクーポン"}', '{"do":"go","path":"back"}', '{"do":"type","ref":3,"text":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
+  }
+  const runs = []
+  for (const toolset of ['current', 'compact'] as const) {
+    const { w, tool } = workWorld({ toolset, answers: answers[toolset], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }) })
+    const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons', items: [] })
+    assert.deepEqual(w.toolsets, Array(answers[toolset].length).fill(toolset), toolset)
+    // The other set's word was asked again once (the app's fixed words), never acted on.
+    assert.ok(w.materials.some(m => typeof (m as { retry?: unknown }).retry === 'string'), toolset)
+    runs.push({ said, sent: w.site.requests.map(r => r.split(' ').slice(0, 2).join(' ')), acts: w.calls.filter(c => c.startsWith('act ') || c === 'framePermit') })
+  }
+  assert.deepEqual(runs[0].sent, ['POST /coupons'], 'the autosave outside the frames never reached the site')
+  assert.deepEqual(runs[1], runs[0])
+  assert.deepEqual(runs[0].acts, ['act type', 'act back', 'act click', 'act click', 'framePermit'])
 })
 
 test('the incident of 2026-11-27: a write outside the frames, then the operator stuck → the AI and the card say the write did not fit, and the line names its address', async () => {

@@ -16,6 +16,7 @@ import {
 } from '../../../shared/browser-browse'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
 import { createOperatorTrail } from '../../../shared/browser-operator-trail'
+import { DEFAULT_BROWSER_OPERATOR_TOOLSET, readToolsetAnswer, toolsetHistory, type BrowserOperatorToolset } from '../../../shared/browser-operator-toolsets'
 import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome } from '../../../../shared/core/browser-run-log'
 import type { BrowserAiSwitch } from './ai-switch'
@@ -51,6 +52,8 @@ export interface BrowserBrowseDeps {
   log?: Pick<Console, 'warn'>
   /** Ends the server did not hear (a lost `finish`): retried, and flushed before this member's next task. */
   pendingEnds?: PendingEnds
+  /** This PC's tool set for the operator (agent-browser.md "The operator's tool sets"), read once per run; absent: `current`. */
+  toolset?: () => BrowserOperatorToolset
 }
 
 export type BrowserBrowseOutcome =
@@ -155,6 +158,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       if (!(await win.enter(() => deps.stopped(companyId) || !current()))) { reason = 'refused'; return refused(W.failed) }
 
       const history: BrowserBrowseHistoryEntry[] = []
+      // One tool set for the whole run: only what the operator is told and how its answer is read (the same actions after).
+      const toolset = deps.toolset?.() ?? DEFAULT_BROWSER_OPERATOR_TOOLSET
       // The operator's own working memory between its fresh, tool-less steps (never the chat AI's).
       let notes = ''
       // Its trail for the member's card only (outside text: never the chat AI's words or the server's log).
@@ -177,12 +182,13 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         const left = deadline - now()
         if (left <= 0) { outcome = 'stopped'; reason = 'timeout'; return refused(W.interrupted) }
         const step = await operator.step({
-          cli: resolved.cli, model: operator.model, signal: cut.signal, timeoutMs: Math.min(L.roundMs, left), parentEnv, prompt: 'browse',
-          material: browseMaterial({ task: input.task, items: input.items, page, history, notes, round }), image,
+          cli: resolved.cli, model: operator.model, signal: cut.signal, timeoutMs: Math.min(L.roundMs, left), parentEnv, prompt: 'browse', toolset,
+          material: browseMaterial({ task: input.task, items: input.items, page, history: toolsetHistory(toolset, history), notes, round }), image,
         })
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         if (!step.ok) { reason = 'operator-failed'; return refused(W.failed) }
-        const parsed = parseBrowseAnswer(step.text, { snapshot: page, items: input.items.length })
+        const read = readToolsetAnswer(toolset, step.text, page)
+        const parsed = 'problem' in read ? read : parseBrowseAnswer(read.text, { snapshot: page, items: input.items.length })
         if ('problem' in parsed) { reason = 'bad-answer'; return refused(W.failed) }
         const answer = parsed.answer
         if (parsed.notes !== undefined) notes = parsed.notes

@@ -102,6 +102,25 @@ test('この PC: a refused registration shows the server\'s sentence and keeps t
   await expect(pc.getByRole('button', { name: 'この PC を登録する' })).toBeVisible()
 })
 
+// 「係の道具」 (agent-browser.md "The operator's tool sets"): this PC's tool set, today's by default; only the choice is the
+// screen's — that only a known set is stored and what each set does are main's (tests/ipc-app.test.ts, browser-operator-toolsets.test.ts).
+const toolsetSection = (page: import('@playwright/test').Page) => page.getByRole('region', { name: '係の道具' })
+
+test('係の道具: いまの形 by default, まとめた形 saved for this PC when chosen; a failed save says so and the choice stays', async ({ page }) => {
+  const { errors } = await openPreview(page, 'download-folders', { tab: 'browser', browser: '1' })
+  const section = toolsetSection(page)
+  await expect(section.getByRole('radio', { name: /いまの形/ })).toBeChecked()
+  await expect(section.getByText(/AI ができることと、アプリの守りは同じです/)).toBeVisible()
+  await section.getByRole('radio', { name: /まとめた形/ }).check()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { browserToolset?: string }).browserToolset)).toBe('compact')
+  await expect(section.getByRole('radio', { name: /まとめた形/ })).toBeChecked()
+  expect(errors).toEqual([])
+  await openPreview(page, 'download-folders', { tab: 'browser', browser: '1', toolsetFails: '1' })
+  await toolsetSection(page).getByRole('radio', { name: /まとめた形/ }).click()
+  await expect(toolsetSection(page).getByRole('alert')).toHaveText('保存できませんでした。もう一度お試しください。')
+  await expect(toolsetSection(page).getByRole('radio', { name: /いまの形/ })).toBeChecked()
+})
+
 // 「記録する」 (agent-browser.md "Recording"): record, stop, check the lines (ページ → 入力した → 押した → 送った), delete what is not
 // wanted, send. What is kept and that nothing leaves before ［送る］ are main's (tests/browser-recording-app.test.ts).
 const recSection = (page: import('@playwright/test').Page) => page.getByRole('region', { name: '記録する' })

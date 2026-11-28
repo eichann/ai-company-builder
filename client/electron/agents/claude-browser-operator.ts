@@ -26,6 +26,7 @@ import {
   BROWSER_OPERATOR_IMAGE_MAX_BYTES, BROWSER_OPERATOR_LIMITS, browserOperatorArgs, browserOperatorEnv, operatorInitProblem,
   type BrowserOperatorFailure, type BrowserOperatorImage, type BrowserOperatorPrompt,
 } from '../../shared/browser-operator'
+import type { BrowserOperatorToolset } from '../../shared/browser-operator-toolsets'
 import { spawnVoiceProcess } from '../voice-process'
 
 /** The CLI fixed for one request: its real path and the folders its PATH needs. */
@@ -47,6 +48,8 @@ export interface BrowserOperatorStepJob {
   parentEnv: Readonly<Record<string, string | undefined>>
   /** Which fixed system prompt (the preview's when absent; the window tools': `browse`). Everything else is the same closed start. */
   prompt?: BrowserOperatorPrompt
+  /** The window tools' tool set (this PC's setting; agent-browser.md "The operator's tool sets"); absent: `current`. */
+  toolset?: BrowserOperatorToolset
   /**
    * The screen as the member's window shows it (the window tools only): sent beside the material on stdin and nowhere else
    * — never a file, a log, the server or the consultation AI; dropped with the step.
@@ -209,7 +212,7 @@ export async function runClaudeBrowserOperatorStep(job: BrowserOperatorStepJob, 
       const env = browserOperatorEnv(job.parentEnv, { pathDirs: job.cli.pathDirs, tmpdir: tmp })
       let child: ReturnType<Spawn>
       try {
-        child = spawn(job.cli.path, browserOperatorArgs(job.model, job.prompt),{ cwd, env, detached: true }, { inheritEnv: false })
+        child = spawn(job.cli.path, browserOperatorArgs(job.model, job.prompt, job.toolset),{ cwd, env, detached: true }, { inheritEnv: false })
       } catch {
         resolve({ ok: false, code: 'start-failed' })
         return

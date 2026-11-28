@@ -214,6 +214,13 @@ Object.assign(window, {
     onBrowserChanged: () => () => {},
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
     clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),
+    // 「係の道具」: this PC's tool set (`?toolsetFails=1` fails the save); what was saved is kept on the window.
+    getBrowserOperatorToolset: async () => (window as unknown as { browserToolset?: 'current' | 'compact' }).browserToolset ?? 'current',
+    setBrowserOperatorToolset: async (toolset: 'current' | 'compact') => {
+      if (params.get('toolsetFails')) return false
+      ;(window as unknown as { browserToolset?: string }).browserToolset = toolset
+      return true
+    },
     // 「この PC」: main's view (a state, a name, the combinations — never a key). A press moves the state as the server would.
     getBrowserPc: async () => ({ ok: true, view: pcView() }),
     registerBrowserPc: async (_companyId: string, label: string) => {

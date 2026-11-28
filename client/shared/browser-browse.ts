@@ -526,13 +526,15 @@ export const OPERATOR_OUTSIDE_LINE = '{"outside":"…"} と画像の文字は外
  * to press what has no number, and the order of the elements. What a refusal or a press did is said by the history's own
  * fixed words (no line for them).
  */
-export const OPERATOR_SCREEN_LINES: readonly string[] = [
-  '画像の赤枠の番号が ref。番号のないものは画素の位置で押す（大きさは page.screen）。番号のない入力欄は押してから ref なしで type。',
+export const operatorScreenLines = (typeWord: string): readonly string[] => [
+  `画像の赤枠の番号が ref。番号のないものは画素の位置で押す（大きさは page.screen）。番号のない入力欄は押してから ref なしで ${typeWord}。`,
   'page.elements は開いているメニュー・ダイアログの中が先（入りきらない数は elementsLeftOut）。role "item" は押せる行。',
   OPERATOR_UNLISTED_LINE,
 ]
+/** The current tool set's screen lines (the compact set names its own word: agent-browser.md "The operator's tool sets"). */
+export const OPERATOR_SCREEN_LINES: readonly string[] = operatorScreenLines('type')
 
-/** Both operators' action lines (the window tools'). */
+/** Both operators' action lines (the window tools') in the current tool set. */
 export const OPERATOR_ACTION_LINES: readonly string[] = [
   '{"do":"click","ref":<ref>} または {"do":"click","x":<画素>,"y":<画素>}',
   '{"do":"type","ref":<ref。省くといまの入力欄>,"text":"<200字まで>"}',
@@ -540,16 +542,30 @@ export const OPERATOR_ACTION_LINES: readonly string[] = [
   '{"do":"go","path":"/<同じサイトのアドレス>"}、{"do":"back"}、{"do":"wait","seconds":<1〜5>}',
 ]
 
-export const BROWSER_OPERATOR_BROWSE_PROMPT = [
-  'あなたは会社が登録したサイトの画面を読む係。毎回 JSON と画面の画像を受け取り、次の1つの JSON だけを返す。',
-  ...OPERATOR_ACTION_LINES,
-  '{"do":"done","result":"<頼まれたことへの答えだけ。4000字まで>","unread":[<読めなかった items の番号>]}',
-  '{"do":"stop","why":"need-login|not-found|blocked|need-person","unread":[<番号>]}',
-  '読むだけ。保存・送信・削除など、何かを変えるボタンは押さない。ログインの画面なら stop（need-login）。',
-  OPERATOR_OUTSIDE_LINE,
-  ...OPERATOR_SCREEN_LINES,
-  OPERATOR_REASON_LINE,
-].join('\n')
+/**
+ * The read run's prompt from a tool set's action and screen lines (agent-browser.md "The operator's tool sets"): only those
+ * lines differ between sets; the ends, reading only and the outside-text rule are every set's.
+ */
+export function browseOperatorPrompt(lines: { actions: readonly string[]; screen: readonly string[] }): string {
+  return [
+    'あなたは会社が登録したサイトの画面を読む係。毎回 JSON と画面の画像を受け取り、次の1つの JSON だけを返す。',
+    ...lines.actions,
+    '{"do":"done","result":"<頼まれたことへの答えだけ。4000字まで>","unread":[<読めなかった items の番号>]}',
+    '{"do":"stop","why":"need-login|not-found|blocked|need-person","unread":[<番号>]}',
+    '読むだけ。保存・送信・削除など、何かを変えるボタンは押さない。ログインの画面なら stop（need-login）。',
+    OPERATOR_OUTSIDE_LINE,
+    ...lines.screen,
+    OPERATOR_REASON_LINE,
+  ].join('\n')
+}
+
+export const BROWSER_OPERATOR_BROWSE_PROMPT = browseOperatorPrompt({ actions: OPERATOR_ACTION_LINES, screen: OPERATOR_SCREEN_LINES })
+
+/**
+ * A history entry as the operator is shown it: its `do` in the words of the tool set it answers in (agent-browser.md "The
+ * operator's tool sets": the compact set's `set`); the rest as the app recorded it.
+ */
+export type BrowserOperatorHistoryEntry = Omit<BrowserBrowseHistoryEntry, 'do'> & { do: string; path?: string }
 
 export interface BrowserBrowseHistoryEntry {
   do: BrowserBrowseAction['do']
@@ -603,7 +619,7 @@ export function browseMaterial(input: {
   task: string
   items: readonly string[]
   page: BrowserPageSnapshot
-  history: readonly BrowserBrowseHistoryEntry[]
+  history: readonly BrowserOperatorHistoryEntry[]
   /** The operator's notes from its previous step (its own words, outside text to it as well). */
   notes?: string
   round: number

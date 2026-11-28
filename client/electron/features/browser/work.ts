@@ -38,6 +38,7 @@ import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-op
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
 import { answerProblemOf, browserStopScreen, createOperatorTrail, trailForCard, type BrowserStopNext, type BrowserStopScreen, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
+import { DEFAULT_BROWSER_OPERATOR_TOOLSET, readToolsetAnswer, toolsetHistory, type BrowserOperatorToolset } from '../../../shared/browser-operator-toolsets'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter, type PromiseAsk, type WriterPromise } from './frame-writes'
@@ -81,6 +82,11 @@ export interface BrowserWorkDeps {
   pressGapMs?: number
   /** Ends the server did not hear (a lost `end` / `finish`): retried, and flushed before this member's next task. */
   pendingEnds?: PendingEnds
+  /**
+   * This PC's tool set for the operator (agent-browser.md "The operator's tool sets"), read once per request (its preview
+   * and its work use the same); absent: `current`.
+   */
+  toolset?: () => BrowserOperatorToolset
 }
 
 export interface BrowserWorkInput {
@@ -274,6 +280,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     host: string
     win: BrowserBrowseSurface
     operator: PreviewOperator
+    /** The request's tool set: what the operator is told and how its answer is read (agent-browser.md "The operator's tool sets"). */
+    toolset: BrowserOperatorToolset
     cli: PreviewOperatorCli
     parentEnv: Readonly<Record<string, string | undefined>>
     task: string
@@ -348,9 +356,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (left <= 0) return { kind: 'end', reason: 'timeout', end: stopped('timeout') }
       const step = await o.operator.step({
         cli: o.cli, model: o.operator.model, signal: o.cut.signal, timeoutMs: Math.min(BL.roundMs, left), parentEnv: o.parentEnv,
-        prompt: o.phase === 'preview' ? 'work-preview' : 'work',
+        prompt: o.phase === 'preview' ? 'work-preview' : 'work', toolset: o.toolset,
         material: workMaterial({
-          phase: o.phase, request: o.task, person: o.person, skill: o.skill, items: o.items, steps: o.steps, plan: o.plan, frames: o.frames(), page, history,
+          phase: o.phase, request: o.task, person: o.person, skill: o.skill, items: o.items, steps: o.steps, plan: o.plan, frames: o.frames(), page,
+          history: toolsetHistory(o.toolset, history),
           writes: o.writes(), notes, round, rounds: o.budget.steps, retry,
         }),
         image,
@@ -358,7 +367,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       if (!step.ok) return { kind: 'end', reason: 'operator-failed', end: stopped('operator') }
-      const parsed = parseWorkAnswer(step.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
+      const read = readToolsetAnswer(o.toolset, step.text, page)
+      const parsed = 'problem' in read ? read : parseWorkAnswer(read.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
       if ('problem' in parsed) {
         // Out of form: asked again once (the next of the run's steps, the same page, the rule it broke in fixed words);
         // a second slip in a row ends the run, the card's trail naming the rule.
@@ -524,6 +534,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     }
     const operator = deps.operator()
     if (!operator) return said(W.noOperator)
+    // One tool set for the request's preview and work: only what the operator is told and how its answer is read.
+    const toolset = deps.toolset?.() ?? DEFAULT_BROWSER_OPERATOR_TOOLSET
     // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
     const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     const found = await deps.openWindow?.(companyId, host, input.signal)
@@ -651,7 +663,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const previewFinished = { ok: false }
         const previewRan: { runId: string | null } = { runId: null }
         const previewed = await runOperator({
-          phase: 'preview', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: null, items: input.items, steps,
+          phase: 'preview', userId, companyId, host, win, operator, toolset, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: null, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
           cut, current, whyNot, conversation, neverReadFits, writer: null, trail: previewTrail, finished: previewFinished, ran: previewRan,
         })
@@ -830,7 +842,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The plan the person approved on the card goes to the work as its material; none → no preview (a pre-approved Skill).
       const approvedPlan: WorkApprovedPlan | null = plan ? { summary: plan.summary, affects: plan.affects, values: plan.values } : null
       const worked = await runOperator({
-        phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: approvedPlan, items: input.items, steps,
+        phase: 'work', userId, companyId, host, win, operator, toolset, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: approvedPlan, items: input.items, steps,
         adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
         neverReadFits, writer, log: workLog, trail: workTrail, actions, onDeadline: (at: number) => { workUntil.at = at },
       })
@@ -931,6 +943,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     host: string
     win: BrowserBrowseSurface
     operator: PreviewOperator
+    toolset: BrowserOperatorToolset
     cli: PreviewOperatorCli
     task: string
     person: WorkPerson
@@ -995,7 +1008,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         return { kind: 'end', reason, end: { kind: 'stopped', why: 'blocked' } }
       }
       const got = await operate({
-        phase: o.phase, companyId: o.companyId, browseRunId, host: o.host, win: o.win, operator: o.operator, cli: o.cli, parentEnv: deps.parentEnv(),
+        phase: o.phase, companyId: o.companyId, browseRunId, host: o.host, win: o.win, operator: o.operator, toolset: o.toolset, cli: o.cli, parentEnv: deps.parentEnv(),
         task: o.task, person: o.person, skill: o.skill, plan: o.plan, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.seen() ?? [], locked: () => writer?.locked() ?? false, ...(o.actions ? { actions: o.actions } : {}),

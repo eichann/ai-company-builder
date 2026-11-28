@@ -8,6 +8,7 @@ import type { GoogleFeature, GoogleRelayService } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
 import type { WorkSwitch } from '../../../shared/work-switches'
 import type { BrowserRecordingEdit } from '../../../shared/browser-recorder'
+import type { BrowserOperatorToolset } from '../../../shared/browser-operator-toolsets'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
 import type { WritingAudience, WritingStyle } from '../../../../shared/core/writing-style'
@@ -92,6 +93,19 @@ export function getAgentEnvPassthrough(reads: AgentEnvReads = window.electronAPI
 
 export function setAgentEnvPassthrough(names: string[], writes: AgentEnvWrites = window.electronAPI) {
   return writes.setAgentEnvPassthrough(names)
+}
+
+/** Reading this computer's tool set for 「ブラウザ操作」's operator (agent-browser.md "The operator's tool sets"). */
+export type BrowserToolsetReads = ElectronPort<'getBrowserOperatorToolset'>
+/** Changing it on this computer: what the operator is told and how its answer is read, never what it may do. */
+export type BrowserToolsetWrites = ElectronPort<'setBrowserOperatorToolset'>
+
+export function getBrowserOperatorToolset(reads: BrowserToolsetReads = window.electronAPI) {
+  return reads.getBrowserOperatorToolset()
+}
+
+export function setBrowserOperatorToolset(toolset: BrowserOperatorToolset, writes: BrowserToolsetWrites = window.electronAPI) {
+  return writes.setBrowserOperatorToolset(toolset)
 }
 
 export function getFolderSizes(rootPath: string, companyId: string, folder: string, measure: string[], reads: FolderSizeReads = window.electronAPI) {
