@@ -190,6 +190,10 @@
   --color-thing-decision: var(--amber-600);
   --color-thing-project: var(--indigo-600);
   --color-thing-meeting: var(--sky-600);
+  --color-watch-paper: var(--zinc-0);
+  --color-watch-ink: var(--zinc-900);
+  --color-watch-tool: var(--zinc-700);
+  --color-watch-stale: var(--zinc-400);
   --color-scrim: rgba(9, 9, 11, 0.45);
   --color-scrim-palette: rgba(9, 9, 11, 0.2);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -273,6 +277,10 @@
   --color-thing-decision-rgb: 217 119 6;
   --color-thing-project-rgb: 79 70 229;
   --color-thing-meeting-rgb: 2 132 199;
+  --color-watch-paper-rgb: 255 255 255;
+  --color-watch-ink-rgb: 24 24 27;
+  --color-watch-tool-rgb: 63 63 70;
+  --color-watch-stale-rgb: 161 161 170;
 }
 
 .dark {
@@ -354,6 +362,10 @@
   --color-thing-decision: var(--amber-400);
   --color-thing-project: var(--indigo-400);
   --color-thing-meeting: var(--sky-400);
+  --color-watch-paper: var(--zinc-200);
+  --color-watch-ink: var(--zinc-900);
+  --color-watch-tool: var(--zinc-300);
+  --color-watch-stale: var(--zinc-500);
   --color-scrim: rgba(0, 0, 0, 0.6);
   --color-scrim-palette: rgba(0, 0, 0, 0.4);
   --shadow-card: none;
@@ -437,4 +449,8 @@
   --color-thing-decision-rgb: 251 191 36;
   --color-thing-project-rgb: 129 140 248;
   --color-thing-meeting-rgb: 56 189 248;
+  --color-watch-paper-rgb: 228 228 231;
+  --color-watch-ink-rgb: 24 24 27;
+  --color-watch-tool-rgb: 212 212 216;
+  --color-watch-stale-rgb: 113 113 122;
 }

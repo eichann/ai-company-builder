@@ -1,0 +1,77 @@
+/* The watch character (.claude/rules/watch.md). Colours are tokens only: the department colour
+   (`--watch-hue`, set per character from `--data-department-NN`) mixed with the character's paper
+   and ink tokens. States are motion: small (1–2 px), slow, and none under prefers-reduced-motion.
+   Only `working` repeats, for as long as the work lasts; every other motion runs and stops. */
+
+.watch-character {
+  display: block;
+  overflow: visible;
+  --watch-mix: 56%;
+  --watch-c: var(--watch-hue);
+  --watch-body: color-mix(in oklab, var(--watch-c) var(--watch-mix), var(--color-watch-paper));
+  --watch-shade: color-mix(in oklab, var(--watch-c) 78%, var(--color-watch-ink));
+  --watch-tint: color-mix(in oklab, var(--watch-c) 22%, var(--color-watch-paper));
+  --watch-line: color-mix(in oklab, var(--watch-c) 38%, var(--color-watch-ink));
+}
+.dark .watch-character { --watch-mix: 62%; }
+.watch-character[data-state='stale'] { --watch-c: var(--color-watch-stale); }
+
+.watch-character .wc-body { fill: var(--watch-body); stroke: var(--watch-line); stroke-width: 1; stroke-linejoin: round; }
+.watch-character .wc-shade { fill: var(--watch-shade); stroke: var(--watch-line); stroke-width: 0.8; stroke-linejoin: round; }
+.watch-character .wc-shadeFlat { fill: var(--watch-shade); stroke: none; }
+.watch-character .wc-tint { fill: var(--watch-tint); stroke: none; }
+.watch-character .wc-ink { fill: var(--color-watch-ink); stroke: none; }
+.watch-character .wc-paper { fill: var(--color-watch-paper); stroke: var(--watch-line); stroke-width: 0.9; stroke-linejoin: round; }
+.watch-character .wc-paperTool { fill: var(--color-watch-paper); stroke: var(--color-watch-tool); }
+.watch-character .wc-highlight { fill: var(--color-watch-paper); stroke: none; }
+.watch-character .wc-inkLine { fill: none; stroke: var(--color-watch-ink); stroke-linecap: round; stroke-linejoin: round; }
+.watch-character .wc-toolLine { fill: none; stroke: var(--color-watch-tool); stroke-linecap: round; stroke-linejoin: round; }
+.watch-character .wc-hueLine { fill: none; stroke: var(--watch-line); stroke-linecap: round; stroke-linejoin: round; }
+.watch-character .wc-ground { fill: var(--color-text); fill-opacity: 0.1; stroke: none; }
+.watch-character .wc-dot { fill: var(--color-unread); stroke: var(--color-surface); display: none; }
+
+.watch-character g { transform-box: view-box; }
+.watch-character .wc-g-closed { display: none; }
+.watch-character[data-state='noticed'] .wc-dot { display: inline; }
+.watch-character[data-state='stale'] .wc-g-closed { display: inline; }
+.watch-character[data-state='stale'] .wc-g-blink { display: none; }
+
+/* idle: a slow blink, twice, then still */
+.watch-character[data-state='idle'] .wc-g-blink { animation: watch-blink 7s linear 2; }
+/* noticed: leans towards the words once; the dot pulses twice and stays */
+.watch-character[data-state='noticed'] .wc-g-lean { animation: watch-lean 1s ease-out both; }
+.watch-character[data-state='noticed'] .wc-g-look { animation: watch-look 1s ease-out both; }
+.watch-character[data-state='noticed'] .wc-dot { animation: watch-pulse 2.8s ease-in-out 2; }
+/* thinking: looks left and right once, the head tilting a little */
+.watch-character[data-state='thinking'] .wc-g-look { animation: watch-scan 4.4s ease-in-out 1; }
+.watch-character[data-state='thinking'] .wc-g-head { animation: watch-tilt 4.4s ease-in-out 1; }
+/* working: a small bob and the tool moving, while the work lasts */
+.watch-character[data-state='working'] .wc-g-breath { animation: watch-bob 1.5s ease-in-out infinite; }
+.watch-character[data-state='working'] .wc-g-look { transform: translateY(1px); }
+.watch-character[data-state='working'] .wc-g-item { animation: watch-wiggle 1.5s ease-in-out infinite; }
+/* done: two small nods, the face unchanged */
+.watch-character[data-state='done'] .wc-g-nod { animation: watch-nod 2s ease-in-out 1; }
+/* stale: grey, eyes closed, still */
+
+@keyframes watch-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.1); } }
+@keyframes watch-lean { from { transform: rotate(0); } to { transform: rotate(5deg); } }
+@keyframes watch-look { from { transform: translateX(0); } to { transform: translateX(1.2px); } }
+@keyframes watch-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+@keyframes watch-scan { 0%, 12%, 88%, 100% { transform: translateX(-1.5px); } 38%, 62% { transform: translateX(1.5px); } }
+@keyframes watch-tilt { 0%, 12%, 88%, 100% { transform: rotate(-4deg); } 38%, 62% { transform: rotate(4deg); } }
+@keyframes watch-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.9px); } }
+@keyframes watch-wiggle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes watch-nod {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  22% { transform: translateY(1.1px) scaleY(0.97); }
+  44% { transform: translateY(0) scaleY(1); }
+  64% { transform: translateY(0.8px) scaleY(0.98); }
+  84% { transform: translateY(0) scaleY(1); }
+}
+
+/* The state still shows in the posture alone: the noticed lean and look stay as their end frame. */
+@media (prefers-reduced-motion: reduce) {
+  .watch-character, .watch-character * { animation: none !important; }
+  .watch-character[data-state='noticed'] .wc-g-lean { transform: rotate(5deg); }
+  .watch-character[data-state='noticed'] .wc-g-look { transform: translateX(1.2px); }
+}

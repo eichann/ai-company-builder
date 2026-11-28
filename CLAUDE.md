@@ -41,7 +41,7 @@ private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, 
 web-research, tasks, tasks-ui, agent-sandbox, agent-browser, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, security-alerts, records, notifications, google-connector, minutes, calendar,
 connector-roles, writing-style, inbox, slack-connector, identity, plugin-steps, plugin-roles, plugin-frame, doc-frame, plugin-trust,
-shared-core, design-system, testing, deployment
+shared-core, design-system, watch, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the
 matching rule file first.
 
