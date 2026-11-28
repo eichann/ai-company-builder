@@ -830,6 +830,29 @@ test('a fix is refused when the document changed while the AI was asked, and whe
   assert.equal(saved(spliced, view), MEETING.replace('名刺の発注', '名刺の発注（50枚）'))
 })
 
+test('raw HTML is judged as the Markdown reader reads it: a tag broken over lines, in capitals or slipped into a comment is still new HTML', () => {
+  const text = '# メモ\n\n午前に分ける案がある。<!-- 確認中 --> <br>\n\n次の行はそのまま。\n'
+  const { spliced, view } = open(text)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '午前に分ける'))!
+  assert.equal(passage.markdown, '午前に分ける案がある。<!-- 確認中 --> <br>')
+  const refused = { ok: false, reason: 'html' }
+  const cases: Array<[string, string]> = [
+    ['a line break inside the tag', '午前に分ける案があります。<img\nsrc="https://example.com/t.png">'],
+    ['a line break inside an attribute', '午前に分ける案があります。<img src="https://example.com/t.png" alt="a\nb">'],
+    ['capitals', '午前に分ける案があります。<IMG SRC="https://example.com/t.png">'],
+    ['a tag after the passage\'s own comment', '午前に分ける案があります。<!-- 確認中 --><img src="https://example.com/t.png">'],
+    ['a tag inside the passage\'s comment', '午前に分ける案があります。<!-- 確認中 <img src="https://example.com/t.png"> -->'],
+    ['a new comment', '午前に分ける案があります。<!-- 送信先 https://example.com -->'],
+    ['a block of HTML over lines', '午前に分ける案があります。\n\n<div\nstyle="display:none">\n<a href="https://example.com">x</a>\n</div>'],
+    ['a tag in a table cell', '| 案 |\n|---|\n| 午前<Img Src="https://example.com/t.png"> |'],
+  ]
+  for (const [what, fix] of cases) assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, fix), refused, what)
+  // The passage's own HTML may stay, and a tag written as code is words, not HTML.
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります。<!-- 確認中 --> <br>').ok)
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります（`<br>` で改行）。').ok)
+  assert.equal(saved(spliced, view), text, 'nothing was written')
+})
+
 test('a comment\'s quote finds the block holding it; the fix shown under it is never written', async () => {
   const host = document.createElement('div')
   document.body.appendChild(host)

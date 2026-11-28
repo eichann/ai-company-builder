@@ -48,6 +48,26 @@ test('dirty + disk changed → banner (external), edits kept, autosave paused', 
   assert.deepEqual(decideOnDiskEvent(next, 'ai2'), { action: 'conflict', external: { kind: 'changed', diskContent: 'ai2' } })
 })
 
+test('every change or delete from outside counts once (an AI fix asked before it is stale); our own save and the same version again do not', () => {
+  const seen = (f: EditorFileState) => f.outsideChanges ?? 0
+  let f = dirty('v1', 'mine')
+  f = applyDiskDecision(f, decideOnDiskEvent(f, 'ai'))
+  assert.equal(seen(f), 1, 'a change kept beside the edits')
+  f = applyDiskDecision(f, decideOnDiskEvent(f, 'ai'))
+  assert.equal(seen(f), 1, 'the same version again is nothing new')
+  f = applyDiskDecision(f, decideOnDiskEvent(f, 'ai2'))
+  assert.equal(seen(f), 2)
+  f = applyDiskDecision(f, decideOnDiskEvent(f, null))
+  assert.equal(seen(f), 3, 'deleted while the tab holds edits')
+  f = applyDiskDecision(f, decideOnDiskEvent(f, 'mine'))
+  assert.equal(seen(f), 3, 'the disk holding exactly the edits (our own save) changes nothing they show')
+  let c = clean('v1')
+  c = applyDiskDecision(c, decideOnDiskEvent(c, null))
+  assert.equal(seen(c), 1, 'deleted with no edits')
+  c = applyDiskDecision(c, decideOnDiskEvent(c, 'v2'))
+  assert.equal(seen(c), 2, 'back with other text')
+})
+
 test('dirty + our own save event (disk = base or = my edits) is not a conflict', () => {
   assert.deepEqual(decideOnDiskEvent(dirty('v1', 'mine'), 'v1'), { action: 'none' })
   const adopt = decideOnDiskEvent(dirty('v1', 'mine'), 'mine')

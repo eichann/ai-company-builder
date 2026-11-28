@@ -23,6 +23,11 @@ export interface EditorFileState {
   missing?: boolean
   /** Set only while the tab has edits: what happened on disk meanwhile. */
   external?: ExternalChange
+  /**
+   * How many changes and deletes from outside the tab has seen (missing = none). Grows on each, never
+   * goes back: what was asked of the AI before it is stale (files-and-editor.md "Asking the AI to fix a passage").
+   */
+  outsideChanges?: number
 }
 
 export function isDirty(file: Pick<EditorFileState, 'content' | 'originalContent'>): boolean {
@@ -63,11 +68,13 @@ export function decideOnDiskEvent(file: EditorFileState, disk: string | null): D
 
 /** Apply a decision to the tab state (pure). */
 export function applyDiskDecision<T extends EditorFileState>(file: T, decision: DiskEventDecision): T {
+  // Another version or a delete arrived (not our own save, not the loaded version back).
+  const outsideChanges = (file.outsideChanges ?? 0) + 1
   switch (decision.action) {
     case 'none': return file
-    case 'reload': return { ...file, content: decision.content, originalContent: decision.content, missing: false, external: undefined }
-    case 'mark-missing': return { ...file, missing: true }
-    case 'conflict': return { ...file, external: decision.external, missing: decision.external.kind === 'deleted' }
+    case 'reload': return { ...file, content: decision.content, originalContent: decision.content, missing: false, external: undefined, outsideChanges }
+    case 'mark-missing': return { ...file, missing: true, outsideChanges }
+    case 'conflict': return { ...file, external: decision.external, missing: decision.external.kind === 'deleted', outsideChanges }
     case 'clear': return { ...file, external: undefined, missing: false }
     case 'adopt': return { ...file, originalContent: decision.content, missing: false, external: undefined }
   }

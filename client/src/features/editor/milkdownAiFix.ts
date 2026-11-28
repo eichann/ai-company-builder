@@ -38,11 +38,6 @@ function firstTextPos(doc: PMNode, index: number): number {
   try { return start + 1 + Selection.atStart(doc.child(index)).from } catch { return start + 1 }
 }
 
-/** Raw HTML tags and comments of Markdown (a fix may keep the passage's own, never bring new ones). */
-function htmlTags(md: string): string[] {
-  return md.match(/<!--|<\/?[A-Za-z][^<>\n]*>/g) ?? []
-}
-
 /** Where top-level node `index` starts in `doc`. */
 function nodeStart(doc: PMNode, index: number): number {
   let pos = 0
@@ -88,8 +83,9 @@ export function showBelow(view: EditorView, passage: InPlacePassage, element: HT
 export function fixedDocument(view: EditorView, spliced: SplicedDocument, shown: PMNode | null, passage: InPlacePassage, markdown: string) {
   if (spliced.text !== passage.at.text || view.state.doc !== shown) return { ok: false as const, reason: 'changed' as const }
   // Raw HTML the passage did not have is not taken from the AI (the preview never shows it: tracking images, links).
-  const ownTags = new Set(htmlTags(passage.markdown))
-  if (htmlTags(markdown).some(tag => !ownTags.has(tag))) return { ok: false as const, reason: 'html' as const }
+  // Judged by the reader, not a pattern: a tag broken over lines or in capitals is HTML all the same.
+  const ownHtml = new Set(spliced.rawHtml(passage.markdown))
+  if (spliced.rawHtml(markdown).some(part => !ownHtml.has(part))) return { ok: false as const, reason: 'html' as const }
   // A fix that takes the passage away entirely is not a fix the card offers.
   const nodes = markdown.trim() ? spliced.read(markdown) : null
   if (!nodes || nodes.length === 0) return { ok: false as const, reason: 'unwritable' as const }
