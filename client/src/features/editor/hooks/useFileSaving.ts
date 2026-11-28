@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { backupBeforeOverwrite, backupEdits, createDirectory, readFile, writeFile, saveRefusal } from '../api'
 import { EDITOR_EDITS_REASON, EDITOR_LEFT_UNSAVED_REASON, canAutosave, decideCompareChoice, decideSave, isDirty } from '../../../../shared/editor-disk-state'
-import { registerUnsavedEditsKeeper, registerUnsavedEditsSaver } from '../../../shared/lib/unsavedEdits'
+import { registerUnsavedEditsKeeper, registerUnsavedEditsSaver, registerUnsettledEditsCheck } from '../../../shared/lib/unsavedEdits'
 import type { OpenFile } from './useOpenFiles'
 
 export interface ConfirmRequest {
@@ -257,8 +257,10 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     return true
   }
 
-  // The text each tab's edits were last kept with on leaving (path → text).
+  // The text each tab's edits were last kept with on leaving (path → text), and the text
+  // the last leaving round wrote (the tab's state may not show it saved yet).
   const leftKept = useRef(new Map<string, string>())
+  const leftSaved = useRef(new Map<string, string>())
 
   // Leaving (sign-out, closing the window): write every tab with edits, not
   // only the shown one, without asking; what cannot be saved that way (changed
@@ -269,9 +271,11 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     const unregisterSaver = registerUnsavedEditsSaver(async () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
       const left: string[] = []
+      leftSaved.current.clear()
       for (const [path, file] of fileContentsRef.current) {
         if (file.isLoading || !isDirty(file)) continue
-        if (!await saveFile(path, file.content, { interactive: false })) left.push(path)
+        if (await saveFile(path, file.content, { interactive: false })) leftSaved.current.set(path, file.content)
+        else left.push(path)
       }
       return left
     })
@@ -291,7 +295,11 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       // Typing went on while keeping: a tab whose text changed since is not kept.
       return [...keptNow].filter(([path, text]) => fileContentsRef.current.get(path)?.content === text).map(([path]) => path)
     })
-    return () => { unregisterSaver(); unregisterKeeper() }
+    // Every tab, not only those a round named: a saved tab typed in meanwhile is unsettled too.
+    const unregisterCheck = registerUnsettledEditsCheck(() => [...fileContentsRef.current]
+      .filter(([path, file]) => !file.isLoading && isDirty(file) && leftKept.current.get(path) !== file.content && leftSaved.current.get(path) !== file.content)
+      .map(([path]) => path))
+    return () => { unregisterSaver(); unregisterKeeper(); unregisterCheck() }
   }, [saveFile, rootPath, fileContentsRef])
 
   const answerConfirm = (ok: boolean) => { confirmRequest?.resolve(ok); setConfirmRequest(null) }

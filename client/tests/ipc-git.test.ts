@@ -310,6 +310,20 @@ test('git:setupCompanyRemote: join (full or picked departments), owner first pus
   h.server.offline = false
 })
 
+test('「元に戻す」 of a root _metadata.json keeps the member\'s version beside the backup\'s own metadata, and 復元 puts it back', async () => {
+  const repo = path.join(root, 'revert-metadata')
+  commitRepo(h.base, repo, { '_metadata.json': '{"shared":true}\n' })
+  fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), '.backups/\n')
+  fs.writeFileSync(path.join(repo, '_metadata.json'), '{"mine":true}\n')
+  assert.deepEqual(await h.invoke('git:revertFile', repo, '_metadata.json', 'modified'), { success: true })
+  assert.equal(fs.readFileSync(path.join(repo, '_metadata.json'), 'utf-8'), '{"shared":true}\n')
+  const listed = await h.invoke<{ backups: Array<{ id: string; reason: string; files: string[] }> }>('backup:list', repo)
+  const kept = listed.backups.find(b => b.reason === 'before_revert')
+  assert.deepEqual(kept?.files, ['_metadata.json'])
+  assert.equal((await h.invoke<{ success: boolean }>('backup:restore', repo, kept!.id, '_metadata.json')).success, true)
+  assert.equal(fs.readFileSync(path.join(repo, '_metadata.json'), 'utf-8'), '{"mine":true}\n')
+})
+
 test('backup:list / backup:restore: both backup places, newest first, private ids, no way out of either', async () => {
   const repo = path.join(root, 'backups')
   writeFiles(repo, {
