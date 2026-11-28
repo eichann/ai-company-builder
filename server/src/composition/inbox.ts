@@ -22,7 +22,11 @@ import { createInboxService, type InboxDeps } from '../services/inbox'
 import { createPluginBridge, type PluginBridgeDeps } from '../services/plugin-bridge'
 import type { PluginShelf } from '../services/plugin-shelf'
 import type { SlackSignal } from '../services/slack-events'
-import type { ServiceRecordWriter } from '../services/record-engine'
+import type { RecordEngine, ServiceRecordWriter } from '../services/record-engine'
+import { createContactThreads } from '../services/contact-threads'
+
+/** What 「連絡」1枚 asks of the record engine (built before this lane). */
+export type ContactEngine = Pick<RecordEngine, 'actTogether' | 'undoTogether' | 'whoMay'>
 
 export interface InboxLaneDeps {
   conn: Database.Database
@@ -34,6 +38,8 @@ export interface InboxLaneDeps {
   memberships: MembershipRepository
   /** The engine's service writer (records.md "Service writer"): the inbox writes interactions and reply requests. */
   serviceRecords: ServiceRecordWriter
+  /** The engine's own actions and undo, all or none (「連絡」1枚, inbox.md "One contact"); called only after construction. */
+  contactEngine: ContactEngine
   roleOf: (companyId: string, userId: string) => string | null
   taskSettings: (companyId: string) => TaskSettings
   /** 「使う機能」 受信の振り分け・返事のお願い is on (records.md "Features on and off"). */
@@ -126,5 +132,7 @@ export function wireInboxLane(deps: InboxLaneDeps) {
   })
   // A plugin screen's bridge (plan 4b B6 「橋の関所」, plugin-frame.md).
   const pluginBridge = createPluginBridge(deps.bridge)
-  return { identities, inbox, pluginBridge }
+  // 「連絡」1枚 (inbox.md "One contact"): the contact and its 返事のお願い read, finished and taken back together.
+  const contactThreads = createContactThreads({ companyData: deps.companyData, engine: deps.contactEngine })
+  return { identities, inbox, pluginBridge, contactThreads }
 }

@@ -377,6 +377,37 @@ test('保存せずに進む: typing still going on during the last keep is not c
   expect(await closeAnswers(page)).toEqual(['ack'])
 })
 
+test('保存せずに進む: an edit in another tab made during the last keep is saved before the window may close', async ({ page }) => {
+  // The last round kept only the tab it had been told about: a saved tab written to
+  // meanwhile was in no list, and the window closed before its autosave.
+  await open(page)
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFailWrites: Set<string>; __acbHoldBackups: boolean }
+    w.__acbFailWrites.add(p)
+    w.__acbHoldBackups = true
+  }, SCRIPT)
+  const held = () => page.evaluate(() => (window as unknown as { __acbHeldBackups: () => number }).__acbHeldBackups())
+  const release = () => page.evaluate(() => (window as unknown as { __acbReleaseBackup: () => void }).__acbReleaseBackup())
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect.poll(held).toBe(1)
+  await typeAtEnd(page, '\n一つ目') // during the first keep: the last round keeps it again
+  await release()
+  await expect.poll(held).toBe(1)
+  const PROPOSAL = `${ROOT}/営業部/提案書.md`
+  await tab(page, PROPOSAL).click()
+  await typeAtEnd(page, '\n別のタブの追記') // during the last keep, in a tab nobody listed
+  await release()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'close'])
+  const savedBeforeClose = await page.evaluate(() => {
+    const w = window as unknown as { __acbWrites: Array<[string, string]>; __acbWritesAtAnswer: number[] }
+    return w.__acbWrites.slice(0, w.__acbWritesAtAnswer.at(-1))
+  })
+  expect(savedBeforeClose.some(([p, text]) => p === PROPOSAL && text.endsWith('\n別のタブの追記'))).toBe(true)
+  expect((await backups(page)).at(-1)?.content).toContain('一つ目')
+})
+
 test('保存せずに進む: a keep that was skipped (kept nowhere) counts as not kept and is asked about', async ({ page }) => {
   await open(page)
   await page.evaluate(p => {

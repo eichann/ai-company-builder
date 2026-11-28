@@ -214,3 +214,94 @@ export interface InboxReplyCheckResult {
   state: string
   tasks: Array<{ taskId: string; outcome: 'done' | 'open'; ok: boolean; version?: number }>
 }
+
+/**
+ * 「連絡」1枚 (owner decision 2026-11-28, UX stage 2 「5番」): a 来た連絡 (`interaction`) and its 返事のお願い
+ * (`reply_request`) stay two records; the app shows them as one card. Session routes under
+ * `/api/companies/:companyId/inbox/items/:interactionId/…` (inbox.md "One contact"). Additive: an older
+ * app keeps the two records' own actions.
+ */
+
+/** A 返事のお願い of the contact, as its reader sees it. */
+export interface ContactReplyView {
+  id: string
+  title: string
+  state: string | null
+  version: number
+  /** 担当 (a member id), null when none. */
+  assignee: string | null
+  due: string | null
+  /** 返事の目安 (the app shows 「目安：」 when it equals `due`). */
+  guidelineDue: string | null
+  /** 返事待ち: 追いかけの日 (返事の見込み). */
+  waitUntil: string | null
+  /** Drafts of the reply still in 下書き that the member reads (the AI's prepared ones and the card's own). */
+  drafts: Array<{ id: string; version: number }>
+  /** Which of the finishing actions the member may press now (the engine's own answer: from + who). */
+  may: { replied_elsewhere: boolean; close: boolean; drop: boolean }
+}
+
+/** `GET …/inbox/items/:recordId/contact` (an interaction, or a 返事のお願い of it): the card's whole contact. */
+export interface ContactView {
+  interaction: {
+    id: string
+    title: string
+    state: string | null
+    version: number
+    assignee: string | null
+    /** Whether the member may press 「済んだ」 (settle) on it now. */
+    maySettle: boolean
+  }
+  /** Every 返事のお願い of it the member reads, open ones first, then newest. */
+  replyRequests: ContactReplyView[]
+  /** The やること made from it (`interaction` link) that the member reads. */
+  tasks: Array<{ id: string; title: string; state: string | null; version: number; assignee: string | null }>
+  /** More records were linked than the server reads for one card (200 of a kind): the lists may be incomplete. */
+  truncated?: true
+}
+
+/** How the 返事のお願い ends: 「もう返した」, 「終わりにする」 (済んだ・もう待たない), 「返事をしない」 (note required). */
+export type ContactReplyEnd = 'replied_elsewhere' | 'close' | 'drop'
+
+/**
+ * `POST …/inbox/items/:interactionId/finish`: the 返事のお願い's end and — when the contact is the member's to
+ * close (確認待ち) — its 「済んだ」, written together or not at all. Each part carries the version the card read.
+ */
+export interface ContactFinishRequest {
+  interaction: { expectedVersion: number }
+  replyRequest: { id: string; expectedVersion: number; action: ContactReplyEnd; note?: string }
+}
+
+/**
+ * What happened to one part: `done` (written now), `already` (this very change by this member was written by an
+ * earlier press — the request seen twice), `unchanged` (nothing to do: the contact is not in 確認待ち).
+ * `version` is the ledger entry to take back (`done` / `already`), else null.
+ */
+export interface ContactPartResult {
+  recordId: string
+  outcome: 'done' | 'already' | 'unchanged'
+  state: string | null
+  /** The record's version now. */
+  recordVersion: number
+  version: number | null
+}
+
+export interface ContactFinishResult {
+  interaction: ContactPartResult
+  replyRequest: ContactPartResult
+}
+
+/**
+ * `POST …/inbox/items/:interactionId/finish/undo`: take back what one finish wrote, both or neither. `version` is
+ * each part's entry (`ContactPartResult.version`), `expectedVersion` the record's version the card read. Leave out
+ * `interaction` when its part was `unchanged`.
+ */
+export interface ContactUndoRequest {
+  interaction?: { version: number; expectedVersion: number }
+  replyRequest: { id: string; version: number; expectedVersion: number }
+}
+
+export interface ContactUndoResult {
+  interaction: ContactPartResult | null
+  replyRequest: ContactPartResult
+}

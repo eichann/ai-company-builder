@@ -143,6 +143,8 @@ export interface EditorOverwriteBackupMetadata {
   files: string[]
   /** True when kept in .git/acb-private-backups (the file is in a private folder). */
   privateFolder: boolean
+  /** The member's path → its copy's, when kept under another name (a root `_metadata.json`: `backupCopyName`). */
+  copies?: Record<string, string>
 }
 
 export type EditorOverwriteBackupPlan =

@@ -453,6 +453,43 @@ test('editor:backupEdits: the tab\'s edits (never on disk) kept as a version of 
   assert.deepEqual(await h.invoke('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), 'x', 'before_restore'), { success: false, error: 'Unknown reason' })
 })
 
+test('a root _metadata.json of the member\'s is kept beside the backup\'s own metadata, never under it: listed, restored and kept again as the member\'s file', async () => {
+  const company = h.companyDir('metadata-co')
+  await h.invoke('fs:registerAllowedRoot', company)
+  writeFiles(company, { '_metadata.json': '{"arrived":true}' })
+  type Backup = { success: boolean; backupPath?: string }
+  type Listed = { backups: Array<{ id: string; files: string[]; path: string }> }
+  // ［届いた版を採用］ / ［保存せずに進む］: the edits were never on disk, so this copy is their only one.
+  for (const reason of ['editor_edits', 'editor_left_unsaved']) {
+    const kept = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '_metadata.json'), `{"mine":"${reason}"}`, reason)
+    assert.equal(kept.success, true, reason)
+    assert.equal(fs.readFileSync(path.join(kept.backupPath!, '_metadata (member).json'), 'utf-8'), `{"mine":"${reason}"}`, reason)
+    const metadata = JSON.parse(fs.readFileSync(path.join(kept.backupPath!, '_metadata.json'), 'utf-8'))
+    assert.deepEqual([metadata.reason, metadata.files, metadata.copies], [reason, ['_metadata.json'], { '_metadata.json': '_metadata (member).json' }], reason)
+    const id = path.basename(kept.backupPath!)
+    const listed = await h.invoke<Listed>('backup:list', company)
+    assert.deepEqual(listed.backups.find(b => b.id === id)?.files, ['_metadata.json'], reason)
+    const restored = await h.invoke<{ success: boolean; keptPath?: string }>('backup:restore', company, id, '_metadata.json')
+    assert.equal(restored.success, true, reason)
+    assert.equal(fs.readFileSync(path.join(company, '_metadata.json'), 'utf-8'), `{"mine":"${reason}"}`, reason)
+    // 復元 first kept what it replaced (keepCurrentVersion): that copy is the member's file too.
+    assert.equal(fs.readFileSync(path.join(restored.keptPath!, '_metadata (member).json'), 'utf-8'), reason === 'editor_edits' ? '{"arrived":true}' : '{"mine":"editor_edits"}', reason)
+    const replaced = (await h.invoke<Listed>('backup:list', company)).backups.find(b => b.path === restored.keptPath)
+    assert.deepEqual(replaced?.files, ['_metadata.json'], reason)
+  }
+  // A file deeper down named so is no root metadata: kept at its own path.
+  writeFiles(company, { 'sub/_metadata.json': 'deeper' })
+  const deep = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, 'sub', '_metadata.json'), 'deeper edits')
+  assert.equal(fs.readFileSync(path.join(deep.backupPath!, 'sub', '_metadata.json'), 'utf-8'), 'deeper edits')
+  assert.equal(JSON.parse(fs.readFileSync(path.join(deep.backupPath!, '_metadata.json'), 'utf-8')).copies, undefined)
+  // Names an object already has (a plain lookup once found an inherited one) are kept at their own path.
+  for (const name of ['constructor', 'toString', '__proto__']) {
+    const kept = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, name), `edits of ${name}`)
+    assert.equal(kept.success, true, name)
+    assert.equal(fs.readFileSync(path.join(kept.backupPath!, name), 'utf-8'), `edits of ${name}`, name)
+  }
+})
+
 // Fake values only: what the test proves is that none of them reach the renderer.
 const FAKE_ENV = {
   OPENAI_API_KEY: 'sk-FAKE-openai-value-9f3c',

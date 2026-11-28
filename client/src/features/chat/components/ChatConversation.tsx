@@ -16,6 +16,7 @@ import { MINUTES_NEEDS_CLAUDE_TEXT } from '../../../../shared/minutes-app'
 import { pendingReviewOf } from '../reviewRequest'
 import { ReviewActionsContext, type ReviewActions } from '../review-context'
 import { ChatFollowContext } from '../chatFollow'
+import { ReplyPagesContext, type ReplyPages } from '../replyPages'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -49,7 +50,7 @@ import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
 import { AppInstructionChip } from './AppInstructionChip'
 import { TopicChip } from './TopicChip'
-import { patchChatSession } from '../api'
+import { patchChatSession, replyPageStillThere, saveReplyPage } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 import { chatErrorText } from '../chatErrorText'
 import { replyAsksTheMember } from '../aiTurns'
@@ -418,6 +419,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
 
   // 「確認をお願いします」 (ReviewRequestCard): the request in the latest reply waits for the member.
   const pendingReviewId = running ? undefined : pendingReviewOf(messages[messages.length - 1])?.id
+  // ［大きく見る］［ページとして残す］ of a rich reply: only with a today folder (none in a consultation's own window). The
+  // page, the company folder and which consultation go to main, which builds the path (replyPage:save).
+  const replyPages = useMemo<ReplyPages | null>(() => (todayFolder ? {
+    scope: () => `${companyIdRef.current ?? ''}|${appSessionIdRef.current ?? ''}`,
+    save: async html => {
+      const root = companyRootRef.current
+      const folder = todayFolderRef.current?.()
+      const companyId = companyIdRef.current
+      const sessionId = appSessionIdRef.current
+      if (!root || !folder || !companyId || !sessionId) return { success: false, error: '今日のフォルダが見つからないため、ページを残せません。' }
+      return saveReplyPage(root, folder, { companyId, sessionId }, html)
+    },
+    stillThere: filePath => replyPageStillThere(filePath).catch(() => false),
+  } : null), [todayFolder, companyIdRef, companyRootRef, todayFolderRef, appSessionIdRef])
   const reviewActions = useMemo<ReviewActions>(() => ({
     pendingId: pendingReviewId,
     confirm: () => { void handleSend(REVIEW_CONFIRM_MESSAGE) },
@@ -560,6 +575,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         </div>
       ) : (
         <ReviewActionsContext.Provider value={reviewActions}>
+          <ReplyPagesContext.Provider value={replyPages}>
           <ChatFollowContext.Provider value={followIfFollowing}>
           <MessageList
             messages={messages}
@@ -574,6 +590,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             onEditingChange={handleEditingChange}
           />
           </ChatFollowContext.Provider>
+          </ReplyPagesContext.Provider>
         </ReviewActionsContext.Provider>
       )}
 

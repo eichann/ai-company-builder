@@ -156,7 +156,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   refuse a target that exists (`code: 'name_taken'`,
   「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
   `electron/file-guards.ts`), except the same entry under another spelling (a case-only
-  rename) and the review's temporary save file renamed over its own sidecar. `fs:writeFile` is
+  rename) and the review's temporary save file renamed over its own sidecar. A rich reply kept as a page
+  (`replyPage:save`, `chat-ui-and-history.md` "Rich replies: ［大きく見る］…") is created with `wx` too, at a name main
+  chooses (「名前 (2).html」 when taken), in the today folder's `ページ/` only. `fs:writeFile` is
   saving and replaces on purpose (editor, sidecars). The tree checks typed names first
   (`client/shared/file-names.ts`: no `/ \ < > : " | ? *`, control characters, trailing space or
   dot, Windows device names, `.git`, > 255 bytes) and keeps the dialog open with the reason
@@ -307,14 +309,23 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   2026-11-28): each editor's keeper (`registerUnsavedEditsKeeper`, same file) writes them through
   `editor:backupEdits` with reason `editor_left_unsaved` (`.backups/<ts>_editor_left_unsaved/`, or the
   private backups); only a keep with a `backupPath` counts, and only while the tab's text is still what
-  was kept (the dialog has closed, so typing can go on): after the first round every editor saves
-  again and keeps what is unsaved then (a text already kept is not kept twice), and only that round's
-  answer counts. What could not be kept is named again —
+  was kept (the dialog has closed, so typing can go on, **in any tab**). The rounds are
+  `leaveAfterSaving` (`features/editor/leaving.ts`, pure, its steps injected): save every tab, keep what
+  is unsaved (a text already kept is not kept twice), and go on only when `unsettledEdits()` is empty —
+  each editor's synchronous check over **all** its tabs (`registerUnsettledEditsCheck`: dirty and
+  neither written by that round nor kept with exactly its text), read with no await before the answer
+  (code review 2026-11-28: an edit in an already saved tab during the last keep was in no list, and the
+  window closed before its autosave). A tab not kept because it was typed in gets one more round; not
+  kept twice in a row is asked (a tab given up with ［それでも進む］ is not asked about again in that leaving);
+  still typing after 5 rounds is asked again (「保存できていない編集があります」).
+  What could not be kept is named again —
   「バックアップにも残せなかった編集があります」 … 「それでも進む」 / 「キャンセル」 (Enter does not confirm;
   `leaving.ts` `notKeptQuestion`). Tests: `editor-panel.spec.ts` 「a tab that cannot be saved…」 /
   「保存せずに進む when the edits cannot be kept either…」 / 「…typed while the edits are being kept…」 /
-  「…typing still going on during the last keep…」 / 「…a keep that was skipped…」, `src/shared/lib/unsavedEdits.test.ts`,
-  `ipc-fs.test.ts` 「editor:backupEdits…」 (the reason; an unknown one keeps nothing). Sign-out (`AppShell` → `authStore.signOut`, the
+  「…typing still going on during the last keep…」 / 「…a keep that was skipped…」 / 「…an edit in another tab
+  made during the last keep…」 (mutation-checked), `src/features/editor/leaving.test.ts`, `src/shared/lib/unsavedEdits.test.ts`,
+  `ipc-fs.test.ts` 「editor:backupEdits…」 (the reason; an unknown one keeps nothing) / 「a root _metadata.json of the
+  member's…」 (kept beside the backup's own metadata, `sync.md` "Backups"). Sign-out (`AppShell` → `authStore.signOut`, the
   one sign-out: it also closes the company, so the login screen shows), switching company from
   the title bar (`download-choices.md`) and closing the main window go through it. Closing / quitting: main holds the window's close and asks the renderer
   (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`

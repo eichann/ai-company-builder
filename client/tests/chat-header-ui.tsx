@@ -204,7 +204,22 @@ const MEETING_ITEM: TaskListItem = {
   due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
 }
 const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[], deleted: [] as string[] }
+// ?pages=1: a today folder, so a rich reply offers ［大きく見る］［ページとして残す］; what the chat asked main to keep is
+// recorded in __acbChat.pagesSaved (the page's HTML, the folder, the consultation) and answered with a new name each time.
+const pagesOn = params.get('pages') === '1'
+const PREVIEW_TODAY = '営業部/.personal/inbox/日付別/2026/20261128'
+const pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: unknown; html: string }> = []
+// Pages on "disk" (a spec removes one through __acbChat.pagesOnDisk, as the member deleting it would).
+const pagesOnDisk = new Set<string>()
 installElectronAPI({
+  exists: async filePath => pagesOnDisk.has(filePath),
+  saveReplyPage: async (rootPath, todayFolder, consultation, html) => {
+    pagesSaved.push({ rootPath, todayFolder, consultation, html })
+    if ((window as unknown as { __acbPageRefusal?: string }).__acbPageRefusal) return { success: false, error: (window as unknown as { __acbPageRefusal: string }).__acbPageRefusal }
+    const name = pagesSaved.length === 1 ? 'AI の返事.html' : `AI の返事 (${pagesSaved.length}).html`
+    pagesOnDisk.add(`${rootPath}/${todayFolder}/ページ/${name}`)
+    return { success: true, path: `${rootPath}/${todayFolder}/ページ/${name}`, name }
+  },
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   getAiTurnStopConfirmed: async () => true,
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
@@ -373,6 +388,11 @@ const control = {
   aiTurns,
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
+  /** HTML pages the chat asked the editor to show (`editor.viewDocument`). */
+  viewed: [] as string[],
+  /** Rich replies kept as pages (?pages=1), and which are still on "disk". */
+  pagesSaved,
+  pagesOnDisk,
   answered(id: string, response: AgentInteractionResponse) {
     control.answers.push({ id, response })
     const toolCallId = id.replace(/^ask-/, '')
@@ -426,6 +446,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 // The main screen's file opener, as AppShell registers it.
 commands.register('file.open', ({ path }) => { control.opened.push(path) })
+// The editor's HTML viewer, as the editor registers it (?pages=1 only: elsewhere a consultation has no editor).
+if (pagesOn) commands.register('editor.viewDocument', ({ path }) => { control.viewed.push(path) }, { target: 'editor' })
 // What a skill's 実行 (or, later, another feature) runs, for the specs.
 Object.assign(window, { __acbCommands: { run: runCommand } })
 
@@ -501,7 +523,7 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       {params.get('tabs') === '1' && <MiddleTabs />}
       {recordHistory && <OpenRecordStandIn recordId={params.get('focus')} />}
       <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
-        <ChatPanel departmentPath="/tmp/acb-preview" listOpenAtStart={listOpen} aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
+        <ChatPanel departmentPath="/tmp/acb-preview" listOpenAtStart={listOpen} todayFolder={pagesOn ? () => PREVIEW_TODAY : undefined} aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
           focus={params.get('focus') ? { recordId: params.get('focus')!, title: RECORD_TITLES[params.get('focus')!] ?? '見積書を作り直す' } : null} />
       </div>
     </div>,

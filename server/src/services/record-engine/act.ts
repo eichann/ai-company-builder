@@ -10,7 +10,7 @@ import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordFileRepo } from '../../ports/record-files'
 import type { RecordLinkRow, RecordRepository, RecordRow } from '../../ports/records'
 import type { Member } from '../access'
-import { ok, refuse, type Outcome } from '../outcome'
+import { ok, refuse, type Outcome, type Refusal } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../../shared/core/core-types'
@@ -134,6 +134,58 @@ export function writeTitle(records: RecordRepository, recordId: string, title: s
 /** The per-turn cap reached inside the write's transaction: thrown to roll the write back (records.md "The AI at the member's request"). */
 export class AskedLimitReached extends Error {}
 
+/** What an action answers: the record as it is now and the entry written (none for a correction that changed nothing). */
+export type ActAnswer = { record: RecordSummary; entry: LedgerEntry | null }
+
+/** A change checked and computed, not written yet (an action's `prepare`, an undo's). */
+export interface PreparedWrite<T> {
+  /** Nothing to write (a correction that changes nothing): the answer as it is. */
+  unchanged: T | null
+  /** Duty 3, inside the caller's transaction: true written, false the compare-and-set lost, or a refusal. May throw `AskedLimitReached`. */
+  write(): true | false | Refusal
+}
+
+interface PreparedAct extends PreparedWrite<ActAnswer> {
+  /** After the commit: duties 4 and 5, the follow-ups, the answer. */
+  finish(): Promise<ActAnswer>
+}
+
+/** At most this many changes written together (`actTogether`, `undoTogether`). */
+export const ACT_TOGETHER_MAX = 5
+
+/** One of several writes refused inside one transaction: thrown to roll every one back. */
+class WriteTogetherFailed extends Error {}
+
+/**
+ * Every prepared write in one transaction, all or none: the first that is refused or loses its compare-and-set rolls
+ * every one back (also on `AskedLimitReached`, which is thrown on). Null when all were written.
+ */
+export function writeAllOrNone(transactions: EngineContext['transactions'], prepared: ReadonlyArray<PreparedWrite<unknown>>): { step: number; result: false | Refusal } | null {
+  let lost: { step: number; result: false | Refusal } | null = null
+  try {
+    transactions.run(() => {
+      for (const [step, p] of prepared.entries()) {
+        if (p.unchanged) continue
+        const w = p.write()
+        if (w !== true) {
+          lost = { step, result: w }
+          throw new WriteTogetherFailed()
+        }
+      }
+    })
+  } catch (error) {
+    if (!(error instanceof WriteTogetherFailed)) throw error
+  }
+  return lost
+}
+
+/** A refusal about the `step`-th of several changes (`actTogether`, `undoTogether`). */
+export function withStep(r: Refusal, step: number): Refusal {
+  return { ...r, body: { ...r.body, step } }
+}
+
+export const VERSION_CONFLICT_TEXT = 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください'
+
 /** An action called from where its type's `via` does not list (records.md "Where an action may be called from"). */
 export const NOT_VIA = { error: 'この操作はここからはできません。本体の画面から行ってください', code: 'NOT_VIA' } as const
 
@@ -211,7 +263,68 @@ export function acting(ctx: EngineContext) {
     },
 
     /** Run an action of the record's type. */
-    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry | null }>> {
+    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<ActAnswer>> {
+      const prepared = await prepare(member, actor, recordId, actionName, body)
+      if (!prepared.ok) return prepared
+      const p = prepared.value
+      if (p.unchanged) return ok(p.unchanged)
+      let written: boolean | Refusal
+      try {
+        written = transactions.run(() => p.write())
+      } catch (error) {
+        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        throw error
+      }
+      if (written !== true && written !== false) return written
+      if (!written) return conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT')
+      return ok(await p.finish())
+    },
+
+    /**
+     * Several actions, each on its own record, **all or none** (inbox.md "One contact"): every action is checked by
+     * exactly the rules `act` applies (from, who, ai_on_request, the version the caller saw…) before anything is
+     * written; then every state and ledger entry is written in one transaction, each with its own compare-and-set, so
+     * one refused or lost write leaves every record as it was. Only after the commit does each tell whom it names and
+     * run its follow-ups, in the order given. A refusal carries `step`: the index of the action it is about.
+     */
+    async actTogether(member: Member, actor: ActorInput, steps: ReadonlyArray<{ recordId: string; action: string; body: unknown }>): Promise<Outcome<ActAnswer[]>> {
+      if (steps.length === 0 || steps.length > ACT_TOGETHER_MAX) return bad(`steps: 1 to ${ACT_TOGETHER_MAX}`)
+      if (new Set(steps.map(s => s.recordId)).size !== steps.length) return bad('steps: each on another record')
+      const prepared: PreparedAct[] = []
+      for (const [i, s] of steps.entries()) {
+        const r = await prepare(member, actor, s.recordId, s.action, s.body)
+        if (!r.ok) return withStep(r, i)
+        prepared.push(r.value)
+      }
+      let lost: ReturnType<typeof writeAllOrNone>
+      try {
+        lost = writeAllOrNone(transactions, prepared)
+      } catch (error) {
+        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        throw error
+      }
+      if (lost) return withStep(lost.result === false ? conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT') : lost.result, lost.step)
+      // Every one's follow-ups run even when an earlier one's throws (all are written by now); the first error is then
+      // thrown on, as a single action's would be.
+      const answers: ActAnswer[] = []
+      let failure: { error: unknown } | null = null
+      for (const p of prepared) {
+        try {
+          answers.push(p.unchanged ?? await p.finish())
+        } catch (error) {
+          failure ??= { error }
+        }
+      }
+      if (failure) throw failure.error
+      return ok(answers)
+    },
+  }
+
+  /**
+   * Duties 1 and 2 and every check of an action, with the entry it would write: nothing is written here. `write` is
+   * duty 3 (synchronous, inside the caller's transaction); `finish` duties 4 and 5 and the follow-ups after the commit.
+   */
+  async function prepare(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<PreparedAct>> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -510,12 +623,15 @@ export function acting(ctx: EngineContext) {
       }
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number
-      if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
+      if (expected !== current.version) return conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT', { version: current.version })
       // A correction that changes nothing (the same 件名, the same 目的): no entry, no new version, not one of the turn's.
-      if (isCorrection(action) && changes.length === 0) return ok({ record: summaryOf(records, row.id), entry: null })
-      let written: boolean | ReturnType<typeof refuse>
-      try {
-        written = transactions.run(() => {
+      if (isCorrection(action) && changes.length === 0) {
+        const unchanged = { record: summaryOf(records, row.id), entry: null }
+        return ok({ unchanged, write: () => true, finish: async () => unchanged })
+      }
+      return ok({
+        unchanged: null,
+        write: () => {
           // The run's fence again, after the awaits above (attached files): a stop or a re-claim meanwhile writes nothing.
           const fenced = runFenceRefusal(deps, member, actor)
           if (fenced) return fenced
@@ -528,24 +644,19 @@ export function acting(ctx: EngineContext) {
           if (retitled) writeTitle(records, row.id, nextTitle as string, at)
           records.appendLedger(entry)
           return true
-        })
-      } catch (error) {
-        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
-        throw error
-      }
-      if (written !== true && written !== false) return written
-      if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
-
-      // Duty 4: tell whom the action names (and whose turn it now is).
-      // Into a proposal (案): nobody's turn, so only whom the action names.
-      const intoProposal = nextState !== null && (def.proposalStates ?? []).includes(nextState)
-      tell(member, [...action.notify.map(n => nextFields[n]), ...(intoProposal ? [] : [nextFields.next_actor])], { type: row.type, entry, fields: nextFields })
-      try { deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the follow-up is the service's; the action stands */ }
-      // Duty 5: the milestone line.
-      if (action.historyLine) historyLine(member, row, action.label, actor, note, at)
-      // A lane's reaction to the action (plan C5), after it was written.
-      await ctx.afterAction(member, actor, { recordId: row.id, type: row.type, action: actionName, toState: nextState })
-      return ok({ record: summaryOf(records, row.id), entry })
-    },
+        },
+        finish: async () => {
+          // Duty 4: tell whom the action names (and whose turn it now is).
+          // Into a proposal (案): nobody's turn, so only whom the action names.
+          const intoProposal = nextState !== null && (def.proposalStates ?? []).includes(nextState)
+          tell(member, [...action.notify.map(n => nextFields[n]), ...(intoProposal ? [] : [nextFields.next_actor])], { type: row.type, entry, fields: nextFields })
+          try { deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the follow-up is the service's; the action stands */ }
+          // Duty 5: the milestone line.
+          if (action.historyLine) historyLine(member, row, action.label, actor, note, at)
+          // A lane's reaction to the action (plan C5), after it was written.
+          await ctx.afterAction(member, actor, { recordId: row.id, type: row.type, action: actionName, toState: nextState })
+          return { record: summaryOf(records, row.id), entry }
+        },
+      })
   }
 }

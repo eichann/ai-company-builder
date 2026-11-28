@@ -58,6 +58,32 @@ export function registerUnsavedEditsKeeper(keeper: UnsavedEditsKeeper): () => vo
   return () => { keepers.delete(keeper) }
 }
 
+// The last word before leaving: typing goes on while tabs are saved and kept (in any
+// tab, also one already saved), so the caller asks, synchronously, which tabs hold
+// text that is neither on disk nor kept exactly as it is now. Only an empty answer
+// lets it go on; a check that throws counts as every unsaved tab.
+type UnsettledEditsCheck = () => string[]
+const checks = new Set<UnsettledEditsCheck>()
+
+/** Register an editor's check while it is mounted; returns the unregister function. */
+export function registerUnsettledEditsCheck(check: UnsettledEditsCheck): () => void {
+  checks.add(check)
+  return () => { checks.delete(check) }
+}
+
+/** The tabs (paths) whose text is, right now, neither saved nor kept in the backups as it is. */
+export function unsettledEdits(): string[] {
+  const left: string[] = []
+  for (const check of [...checks]) {
+    try {
+      left.push(...check())
+    } catch {
+      left.push(...dirty)
+    }
+  }
+  return [...new Set(left)]
+}
+
 /** Keep the edits of `paths` in the backups; resolves to the paths whose edits could not be kept. */
 export async function keepUnsavedEdits(paths: readonly string[]): Promise<string[]> {
   const kept = new Set<string>()

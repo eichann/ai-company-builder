@@ -244,14 +244,20 @@ one sync keeps local. Tests: `client/tests/sync/large-files.test.ts`.
   backup folder sync copies the member's files into: one function names the copy
   (`backupCopyName`, `sync/backup-names.ts`: a root segment `_metadata[ (member)…].json` gets one
   more ` (member)`, so a member's own `_metadata (member).json` does not meet the copy either),
-  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`) and the recovery
-  copy, which record each renamed copy in the metadata's `copies` (member's path → copy). The
+  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`), the recovery
+  copy and every keep of `features/backups/keep-current.ts` (`_editor_overwrite`, `_editor_edits`,
+  `_editor_left_unsaved`, `_before_restore`, `_before_revert`, in `.backups/` and the private backups
+  alike — code review 2026-11-28: a root `_metadata.json`'s unsaved edits, kept on ［届いた版を採用］ or
+  ［保存せずに進む］, were overwritten by the backup's own metadata while the keep answered success), which
+  record each renamed copy in the metadata's `copies` (member's path → copy). The shape of a backup
+  folder is otherwise unchanged (the reason the smallest fix was chosen: older apps and older backups
+  read it as before; an older keep's lost copy is not recoverable and 復元 keeps refusing it). The
   backup list shows the member's path and 復元 reads the copy through `copies` only — never guessed
   from names, so older backups keep their meaning; a backup's root `_metadata.json` without an entry
   is never restored (it is the backup's own file). The list hides only the root `_metadata.json`. A member's
   `_metadata.json` was once overwritten by the conflict backup's metadata (code review 2026-11-22).
   Scenario: 「a member's own top-level _metadata.json survives a conflict backup…」
-  (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」.
+  (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」 (older backups without `copies`) and 「「元に戻す」 of a root _metadata.json…」, `ipc-fs.test.ts` 「a root _metadata.json of the member's…」.
 - A working folder (a company without the shared folder, no sync) has two kinds: `<ts>_skill_edit/`
   (reason `skill_edit`, `files`: the Skill folder the member moved aside with 「会社の版に戻す」) and
   `<ts>_skill_outputs/` (reason `skill_outputs`, `files`: what 外して出す moved out of a Skill; on a
