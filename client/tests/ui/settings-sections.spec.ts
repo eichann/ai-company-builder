@@ -101,3 +101,16 @@ test('what is typed and not saved is asked from outside the settings: a kept .en
   expect(await page.evaluate(() => (window as unknown as { __acbEnvUpdates?: unknown[] }).__acbEnvUpdates)).toEqual([{ OPENAI_API_KEY: SECRET }])
   expectNoPageErrors(state)
 })
+
+test('まとめて貼り付ける: やめる drops the pasted lines, so the next 保存 writes only what is shown', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'envkeys' })
+  await settings(page).getByRole('button', { name: 'まとめて貼り付ける' }).click()
+  await settings(page).getByLabel('.env に追加する内容').fill('HIDDEN_TOKEN=should-not-be-written')
+  await expect(nav(page).getByRole('button', { name: /API キー・環境変数（この PC）.*未保存/ })).toBeVisible()
+  await settings(page).getByRole('button', { name: 'まとめて貼り付けるのをやめる' }).click()
+  await settings(page).getByLabel('OpenAI', { exact: true }).fill(SECRET)
+  await settings(page).getByRole('button', { name: '保存', exact: true }).click()
+  await expect(settings(page).getByRole('button', { name: '保存しました' })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { __acbEnvUpdates?: unknown[] }).__acbEnvUpdates)).toEqual([{ OPENAI_API_KEY: SECRET }])
+  expectNoPageErrors(state)
+})

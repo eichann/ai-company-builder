@@ -78,7 +78,8 @@ export function SettingsPanel({ onClose, initialTab, focusService, mineRows, uns
   }
 
   if (!currentCompany) return null
-  const unsavedIds = new Set<SettingsSectionId>([...(env.dirty ? ['envkeys' as const] : []), ...(gitignore.dirty ? ['gitignore' as const] : [])])
+  // Marked 未保存 (and 詳しい設定 kept open) for anything typed there, a name or a paste without a value too.
+  const unsavedIds = new Set<SettingsSectionId>([...(env.unsaved.pending() ? ['envkeys' as const] : []), ...(gitignore.dirty ? ['gitignore' as const] : [])])
 
   return (
     // The shared frame (design-system.md, P2d): its surface, scrim and keys — Tab stays inside, Esc

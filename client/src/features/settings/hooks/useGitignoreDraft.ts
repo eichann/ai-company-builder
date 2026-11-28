@@ -10,6 +10,7 @@ export function useGitignoreDraft(companyId: string, rootPath: string) {
   const [saved, setSaved] = useState('')
   const [editable, setEditable] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [read, setRead] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Read when the section is first shown (a callback ref: the renderer's effect count is capped).
@@ -19,15 +20,18 @@ export function useGitignoreDraft(companyId: string, rootPath: string) {
     loadedFor.current = rootPath
     void canEditCompanyGitignore(companyId).then(setEditable)
     void readGitignore(rootPath)
-      .then(text => { setContent(text || ''); setSaved(text || '') })
+      .then(text => { setContent(text || ''); setSaved(text || ''); setRead(true) })
       .catch(e => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
       .finally(() => setLoading(false))
   }, [companyId, rootPath])
 
-  const dirty = editable && content !== saved
+  // Editable once the role and the file have both arrived: an edit typed before the file would be
+  // overwritten by it, and a save after a failed read would replace the file with only that edit.
+  const canEdit = editable && read
+  const dirty = canEdit && content !== saved
 
   const save = async (): Promise<string | null> => {
-    if (!editable || !dirty) return null
+    if (!dirty) return null
     if (!await writeGitignore(rootPath, content)) return '保存に失敗しました'
     setSaved(content)
     return null
@@ -36,8 +40,8 @@ export function useGitignoreDraft(companyId: string, rootPath: string) {
   const unsaved: UnsavedChanges = { pending: () => (dirty ? '同期しないファイル（.gitignore）の変更' : null), save }
 
   return {
-    loadRef, loading, content, editable, dirty, error, unsaved, save, setError,
-    edit: (text: string) => { if (editable) setContent(text) },
+    loadRef, loading, content, editable: canEdit, dirty, error, unsaved, save, setError,
+    edit: (text: string) => { if (canEdit) setContent(text) },
   }
 }
 

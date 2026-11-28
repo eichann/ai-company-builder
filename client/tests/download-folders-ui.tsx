@@ -350,7 +350,12 @@ Object.assign(window, {
       ;(window as unknown as { __acbRoleAnswered: boolean }).__acbRoleAnswered = true
       return { success: true, data: [{ id: 'demo', name: COMPANY_NAME, slug: 'demo', ownerId: 'u1', repoPath: null, role, createdAt: '', updatedAt: '' }] }
     },
-    readFile: async () => '.backups/\n.env*\nnode_modules/\n',
+    // ?gitignore=slow: the file arrives after the member's role (an admin's editor must wait for it); fail: it cannot be read.
+    readFile: async () => {
+      if (params.get('gitignore') === 'slow') await sleep(1500)
+      if (params.get('gitignore') === 'fail') throw new Error('読み込めませんでした')
+      return '.backups/\n.env*\nnode_modules/\n'
+    },
     writeFile: async (p: string, content: string) => {
       ;((window as unknown as { __acbWrites: unknown[] }).__acbWrites ??= []).push([p, content])
       return true

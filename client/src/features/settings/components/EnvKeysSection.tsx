@@ -98,7 +98,8 @@ export function EnvKeysSection({ env, companyId, rootPath, onOpenOwnKeys }: Prop
             </Card>
 
             <Card className="p-5">
-              <button type="button" aria-expanded={pasteOpen} onClick={() => setPasteOpen(v => !v)}
+              {/* やめる also drops what was pasted: hidden lines must not be written by the next 保存. */}
+              <button type="button" aria-expanded={pasteOpen} onClick={() => { if (pasteOpen) env.setPasted(''); setPasteOpen(!pasteOpen) }}
                 className="text-body font-medium text-link hover:text-link-hover focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring">
                 {pasteOpen ? 'まとめて貼り付けるのをやめる' : 'まとめて貼り付ける'}
               </button>

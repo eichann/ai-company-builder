@@ -156,6 +156,22 @@ test.describe('settings', () => {
     await page.getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as unknown as { __acbWrites?: unknown[] }).__acbWrites)).toEqual([['/Users/demo/会社/.gitignore', 'node_modules/\n*.tmp\n']])
   })
+
+  // An admin's editor opens only once the file itself arrived: typing before it would be overwritten,
+  // and saving after a failed read would replace the company's file with just that text.
+  test('同期しないファイル: an admin edits only after the file arrived; never after a failed read', async ({ page }) => {
+    const textarea = () => page.getByRole('textbox', { name: '.gitignore の内容' })
+    await openPreview(page, 'download-folders', { role: 'admin', tab: 'gitignore', gitignore: 'slow' })
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __acbRoleAnswered?: boolean }).__acbRoleAnswered)).toBe(true)
+    await expect(textarea()).not.toBeEditable()
+    await expect(textarea()).toHaveValue(/node_modules\//)
+    await expect(textarea()).toBeEditable()
+
+    await openPreview(page, 'download-folders', { role: 'admin', tab: 'gitignore', gitignore: 'fail' })
+    await expect(page.getByText('読み込めませんでした')).toBeVisible()
+    await expect(textarea()).not.toBeEditable()
+    await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  })
 })
 
 test.describe('file tree', () => {
