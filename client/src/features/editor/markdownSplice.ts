@@ -236,23 +236,12 @@ export class SplicedDocument {
   }
 
   /**
-   * Ways to write `changed` over `region`, smallest first; each first in the file's own way of
-   * writing a list's bullet and a divider (the editor writes `*` and `***`). Each is read back.
+   * What the editor writes newly (never the file's own bytes kept around it), in the file's way: a
+   * list's bullet the region's own (`-` / `+`), in a region without a list (one made by 「- 」 or the
+   * 「/」 list) the file's first, else `-` (the editor writes `*`); a divider the file's first, else
+   * `---` (the editor writes `***`). Both ways are offered, styled first: each is read back.
    */
-  private *candidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
-    const style = this.fileStyle(region)
-    for (const c of this.plainCandidates(region, before, changed, gFirst, gLast)) {
-      const styled = style(c)
-      if (styled !== c) yield styled
-      yield c
-    }
-  }
-
-  /**
-   * A list's bullet: the region's own (`-` / `+`); in a region without a list (one made by 「- 」 or
-   * the 「/」 list) the file's first, else `-`. A divider: the file's first, else `---`.
-   */
-  private fileStyle(region: string): (written: string) => string {
+  private fileStyle(region: string): (written: string) => string[] {
     const STAR_ITEM = /^([ \t]*)\*(?=[ \t])/gm
     const STARS = /^\*\*\*([ \t]*)$/gm
     const own = /^[ \t]*([+-])[ \t]/m.exec(region)?.[1]
@@ -264,12 +253,14 @@ export class SplicedDocument {
     return written => {
       let out = bullet && bullet !== '*' ? written.replace(STAR_ITEM, `$1${bullet}`) : written
       if (!keepStars) out = out.replace(STARS, `${divider}$1`)
-      return out
+      return out === written ? [written] : [out, written]
     }
   }
 
-  private *plainCandidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
+  /** Ways to write `changed` over `region`, smallest first. */
+  private *candidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
     const codec = this.codec
+    const styled = this.fileStyle(region)
     const docOf = (ns: PMNode[]) => this.docType.type.create(this.docType.attrs, ns)
     const para = this.docType.type.schema.nodes.paragraph
     const lf = lfRegion(region)
@@ -282,8 +273,8 @@ export class SplicedDocument {
     if (n > 0 && changed.length > n && region.trim() !== '') {
       const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
       const md = (ns: PMNode[]) => codec.serialize(docOf(ns)).replace(/\s+$/, '').replace(/\r?\n/g, eol)
-      if (sameNodes(before, changed.slice(0, n))) yield region + eol + eol + md(changed.slice(n))
-      else if (sameNodes(before, changed.slice(changed.length - n))) yield md(changed.slice(0, changed.length - n)) + eol + eol + region
+      if (sameNodes(before, changed.slice(0, n))) for (const m of styled(md(changed.slice(n)))) yield region + eol + eol + m
+      else if (sameNodes(before, changed.slice(changed.length - n))) for (const m of styled(md(changed.slice(0, changed.length - n)))) yield m + eol + eol + region
     }
     // 1. Typing inside a block: the same small text change made in the file's own bytes. The
     // smallest text block that changed is written alone first, so a table's or list's re-padding
@@ -311,7 +302,7 @@ export class SplicedDocument {
       pairs.push([b, a])
     }
     pairs.push([codec.serialize(docOf(before)), codec.serialize(docOf(changed))])
-    for (const [b, a] of pairs) for (const patched of textPatches(lf.text, b, a)) yield back(patched)
+    for (const [b, a] of pairs) for (const patched of textPatches(lf.text, b, a, styled)) yield back(patched)
     // 2. A table's cells, rows or columns: only those cells / lines, keeping the file's padding.
     const patched = table()
     if (patched !== null) yield back(patched)
@@ -325,7 +316,7 @@ export class SplicedDocument {
     const trailing = gFirst < 0 && rewritten !== '' ? (/\n$/.test(this.body) || this.body === '' ? '\n' : '') : ''
     // New lines as the region writes them (CRLF only where the region has nothing else).
     const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
-    yield (rewritten + trailing).replace(/\r?\n/g, eol)
+    for (const out of styled((rewritten + trailing).replace(/\r?\n/g, eol))) yield out
   }
 
   /** The written region reads back as exactly what the screen shows. */
@@ -560,7 +551,7 @@ function lfRegion(region: string): { text: string; converted: boolean } {
  * (as much as is the same in both writings, up to 16 on each side, the match unique) and make the
  * same change there. Whole lines added go under the same line of the source, in its indentation.
  */
-export function textPatches(source: string, before: string, after: string): string[] {
+export function textPatches(source: string, before: string, after: string, styled: (added: string) => string[] = a => [a]): string[] {
   const out: string[] = []
   // A change the editor wrote as "replace the padding space with 。" is first tried as "add 。".
   const trimmed = textPatch(source, before, after, true)
@@ -568,14 +559,15 @@ export function textPatches(source: string, before: string, after: string): stri
   const exact = textPatch(source, before, after)
   if (exact !== null) out.push(exact)
   const lines = linePatch(source, before, after)
-  if (lines !== null) out.push(lines)
+  // Whole new lines are the editor's writing: offered in the file's way first (the source's lines untouched).
+  if (lines !== null) for (const added of styled(lines.added)) out.push(lines.before + added + lines.after)
   return out
 }
 
 const LIST_MARKER = /^([*+-]|\d+[.)])(?=\s)/
 const itemText = (line: string) => line.trim().replace(/^([*+-]|\d+[.)])\s+/, '').trim()
 
-function linePatch(source: string, before: string, after: string): string | null {
+function linePatch(source: string, before: string, after: string): { before: string; added: string; after: string } | null {
   const bl = before.replace(/\s+$/, '').split('\n')
   const al = after.replace(/\s+$/, '').split('\n')
   // Lines compared without their list markers: the editor renumbers the items after a new one.
@@ -611,7 +603,8 @@ function linePatch(source: string, before: string, after: string): string | null
     }
     return srcIndent + rest
   })
-  return [...src.slice(0, at + 1), ...rebased, ...src.slice(at + 1)].join('\n')
+  const rest = src.slice(at + 1)
+  return { before: `${src.slice(0, at + 1).join('\n')}\n`, added: rebased.join('\n'), after: rest.length ? `\n${rest.join('\n')}` : '' }
 }
 
 /** The one text block that differs between two runs of nodes, descending while only one child differs. */

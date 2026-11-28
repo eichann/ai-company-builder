@@ -677,3 +677,12 @@ test('a line typed under a block the editor writes otherwise (a `----` heading) 
   view.dispatch(view.state.tr.insertText('新しい段落', view.state.selection.from))
   assert.equal(saved(spliced, view), SKILL.replace('手順\n----\n', '手順\n----\n\n新しい段落\n'))
 })
+
+test('the file\'s own bullet is used only for what is newly written: a typed character leaves every marker as it was', () => {
+  for (const text of ['- 親\n  * 子\n', '+ 一\n\n  * 二\n', '- 一\n\n***\n\n二\n']) {
+    const { spliced, view } = open(text)
+    insertAfter(view, text.includes('親') ? '親' : '一', 'X')
+    const written = saved(spliced, view)
+    assert.deepEqual(changedLines(text, written), { removed: 1, added: 1 }, written)
+  }
+})
