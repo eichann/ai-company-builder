@@ -6,7 +6,7 @@ import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
 import type { ContactView } from '../../../shared/contact-card'
 import { inboxView } from './model'
-import { besideCardOf, foldKinds, INBOX_PAGE, kindCounts, kindOf, limitShowing, narrowed, orderOf, paged, sectionsOf, withLingering } from './workModel'
+import { besideCardOf, foldKinds, INBOX_PAGE, kindCounts, kindOf, limitShowing, narrowed, orderOf, paged, sectionsOf, showsKindChips, withLingering } from './workModel'
 
 const AT = (minute: number) => new Date(Date.UTC(2026, 10, 27, 1, minute)).toISOString() // 2026-11-27 10:mm in Japan
 const turn = (id: string, type: string, state: string | null, due: string | null = null): TurnItem => ({ id, type, title: id, state, due })
@@ -156,4 +156,17 @@ test('only a card opens beside the list (approval, mail, plan, contact); a recor
   assert.deepEqual(besideCardOf(of('record:outbound_message-1')), { kind: 'mail', id: 'outbound_message-1' })
   assert.equal(besideCardOf(of('record:task-1')), null)
   assert.equal(besideCardOf(v.waiting.find(i => i.stop)!), null)
+})
+
+test('the kind chips hide only while the look has nothing at all under 「すべて」; a chosen kind keeps them to go back (20番-8)', () => {
+  const empty = sectionsOf(inboxView(state([], [])), 'new', NONE)
+  assert.equal(showsKindChips('all', empty), false)
+  assert.equal(showsKindChips('approval', empty), true)
+  // A 新着 opened here is counted nowhere (its count is 0) but is still a row: the chips stay.
+  const a = notice('request_done', 'task-a', 9)
+  const s = state([], [a])
+  const opened = inboxView(s).news[0]
+  const lingering = sectionsOf(inboxView(readAll(s, opened.unreadNoticeIds)), 'new', new Set([opened.key]))
+  assert.equal(kindCounts(lingering).all, 0)
+  assert.equal(showsKindChips('all', lingering), true)
 })

@@ -147,6 +147,12 @@ one place an added agent brings its own controls; everything else asks the regis
   「（まだ何も書いていません）」 only while the member has sent nothing; a consultation already had with no
   words to show (one the app started) has no line — never an invitation to start. A new consultation is
   titled 「新しい相談」 (`chat.newChat`; saved titles stay). Test: `src/features/chat/conversation-line.test.ts`.
+- **Empty words** (owner decision 2026-11-28, 20番-8): the line under the search box is 「N件の相談」, 「N件」 while
+  searching, and nothing for an empty list, which 「まだ相談はありません。」 already says (`listCountText`,
+  `conversationRows.ts`). A conversation the member has not written in yet shows one line under the greeting
+  (`EMPTY_CONVERSATION_HINT`, `ChatMessageList.tsx`, the consultation named by `THING_NAMES`): where to write, and that
+  it stays in the list; it goes with the first message. Tests: `src/features/chat/conversation-rows.test.ts`,
+  `tests/ui/chat-panel.spec.ts` 「a first day…」.
 - Each group heading except あなたの番 folds its rows (owner, 2026-10-30): a button with
   `aria-expanded` and a chevron, the count still shown. あなたの番 never folds, so what the AI waits
   for cannot be folded away; a folded group with an unread reply shows 新着 on its heading.

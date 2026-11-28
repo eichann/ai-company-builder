@@ -360,3 +360,20 @@ test('narrowed to a kind, あなた待ち\'s count is a part: never a second red
   await expect(count(page, 'あなた待ち')).toHaveText('1')
   await expect(heading).not.toHaveClass(/text-danger-text/)
 })
+
+test('a first day: one line says what comes here, the kind chips are hidden while all of them are 0, and come back with the first row', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { empty: '1' })
+  await expect(page.locator('[data-inbox-purpose]')).toHaveText('ここには、あなたが動かすもの（承認・送る前の確認・止まった仕事）と、新しい知らせが届きます。')
+  await expect(page.getByRole('group', { name: '種類で絞る' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'あなた待ち' })).toContainText('あなたを待っているものはありません。')
+  // Only on the look with nothing at all: 確認したもの keeps its own words.
+  await chip(page, /^確認したもの/).click()
+  await expect(page.locator('[data-inbox-purpose]')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('with rows, the line is not said and the kind chips stay', async ({ page }) => {
+  await openPreview(page, 'inbox')
+  await expect(page.locator('[data-inbox-purpose]')).toHaveCount(0)
+  await expect(page.getByRole('group', { name: '種類で絞る' })).toBeVisible()
+})
