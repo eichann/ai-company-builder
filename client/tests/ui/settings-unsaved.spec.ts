@@ -81,3 +81,15 @@ test('nothing unsaved: closing asks nothing', async ({ page }) => {
   await expect(ask(page)).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+test('a name refused while saving on the way out: the settings stay open with the reason', async ({ page }) => {
+  const { state, settings } = await open(page, 'aienv')
+  const names = settings.getByLabel('AIに追加で渡す環境変数の名前')
+  await expect(names).toHaveValue('CRM_BASE_URL')
+  await names.fill('CRM_BASE_URL\nGITHUB_TOKEN')
+  await settings.getByRole('button', { name: '閉じる' }).click()
+  await ask(page).getByRole('button', { name: '保存して閉じる' }).click()
+  await expect(settings.getByText('秘密情報の可能性がある名前のため追加しませんでした：GITHUB_TOKEN')).toBeVisible()
+  await expect(settings).toBeVisible()
+  expectNoPageErrors(state)
+})

@@ -295,7 +295,8 @@ Object.assign(window, {
     } : {}),
     // 設定 →「AIに渡す環境変数」 (tab=aienv; the administrator guide's 15節): one name passed on already.
     getAgentEnvPassthrough: async () => ['CRM_BASE_URL'],
-    setAgentEnvPassthrough: async (names: string[]) => ({ names, invalid: [], denied: [] }),
+    // As main does: a secret-looking name (…_TOKEN) is refused, the others kept.
+    setAgentEnvPassthrough: async (names: string[]) => ({ names: names.filter(n => !n.endsWith('_TOKEN')), invalid: [], denied: names.filter(n => n.endsWith('_TOKEN')) }),
     // ?manual=1: settings →「定期の仕事」 (chapter 26).
     ...(MANUAL ? {
       getMyJobs: async () => ({ success: true, jobs: manualJobs() }),

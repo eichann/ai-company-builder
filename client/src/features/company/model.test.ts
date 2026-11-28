@@ -37,15 +37,19 @@ test('「新しい会社を作成」 is hidden only when the server says the acc
 })
 
 test('この PC に置く部署: nothing chosen downloads nothing yet (never 「すべて」); 「すべて」 is its own choice', () => {
-  const depts: PickableDepartment[] = [{ id: 'a', name: '営業部', folder: '営業部' }, { id: 'b', name: '総務部', folder: '総務部' }]
+  const ALL = { all: true } as const
+  const one = (folder: string) => ({ folder })
+  const depts: PickableDepartment[] = [{ id: 'a', name: '営業部', folder: '営業部' }, { id: 'b', name: '総務部', folder: '総務部' }, { id: 'c', name: 'all', folder: 'all' }]
   assert.equal(pickedDownload(depts, NOTHING_PICKED), null)
-  const all = togglePick(NOTHING_PICKED, 'all')
+  const all = togglePick(NOTHING_PICKED, ALL)
   assert.equal(pickedDownload(depts, all), 'all')
   // Choosing a department leaves 「すべて」; the list's order, whatever the order of the presses.
-  const some = togglePick(togglePick(all, '総務部'), '営業部')
+  const some = togglePick(togglePick(all, one('総務部')), one('営業部'))
   assert.deepEqual(pickedDownload(depts, some), ['営業部', '総務部'])
-  assert.equal(pickedDownload(depts, togglePick(togglePick(togglePick(NOTHING_PICKED, '営業部'), '営業部'), '総務部'))?.toString(), '総務部')
+  assert.deepEqual(pickedDownload(depts, togglePick(togglePick(togglePick(NOTHING_PICKED, one('営業部')), one('営業部')), one('総務部'))), ['総務部'])
+  // A department named 「all」 is that department, never 「すべて」.
+  assert.deepEqual(pickedDownload(depts, togglePick(NOTHING_PICKED, one('all'))), ['all'])
   // 「すべて」 after some: everything, the single picks dropped; pressed again: nothing chosen.
-  assert.equal(pickedDownload(depts, togglePick(some, 'all')), 'all')
-  assert.equal(pickedDownload(depts, togglePick(togglePick(some, 'all'), 'all')), null)
+  assert.equal(pickedDownload(depts, togglePick(some, ALL)), 'all')
+  assert.equal(pickedDownload(depts, togglePick(togglePick(some, ALL), ALL)), null)
 })

@@ -24,10 +24,10 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
       </ScreenHeading>
 
       <div role="group" aria-label="この PC に置く部署" className="space-y-2 max-h-80 overflow-y-auto">
-        <Option label="すべての部署" detail={`${departments.length} 部署`} picked={pick.all} onPress={() => setPick(p => togglePick(p, 'all'))} />
+        <Option label="すべての部署" detail={`${departments.length} 部署`} picked={pick.all} onPress={() => setPick(p => togglePick(p, { all: true }))} />
         {departments.map(dept => (
           <Option key={dept.id} label={dept.name} detail={`${dept.folder}/`} mono picked={!pick.all && pick.folders.has(dept.folder)}
-            onPress={() => setPick(p => togglePick(p, dept.folder))} />
+            onPress={() => setPick(p => togglePick(p, { folder: dept.folder }))} />
         ))}
       </div>
 

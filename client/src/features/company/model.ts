@@ -33,12 +33,15 @@ export type DepartmentPick = { all: true } | { all: false; folders: ReadonlySet<
 
 export const NOTHING_PICKED: DepartmentPick = { all: false, folders: new Set() }
 
-/** A press on 「すべての部署」 (`'all'`) or on one department: choosing one leaves 「すべて」, and the other way round. */
-export function togglePick(pick: DepartmentPick, press: 'all' | string): DepartmentPick {
-  if (press === 'all') return pick.all ? NOTHING_PICKED : { all: true }
+/**
+ * A press on 「すべての部署」 or on one department (tagged: a department may be named anything, `all` included):
+ * choosing one leaves 「すべて」, and the other way round.
+ */
+export function togglePick(pick: DepartmentPick, press: { all: true } | { folder: string }): DepartmentPick {
+  if ('all' in press) return pick.all ? NOTHING_PICKED : { all: true }
   const folders = new Set(pick.all ? [] : pick.folders)
-  if (folders.has(press)) folders.delete(press)
-  else folders.add(press)
+  if (folders.has(press.folder)) folders.delete(press.folder)
+  else folders.add(press.folder)
   return { all: false, folders }
 }
 

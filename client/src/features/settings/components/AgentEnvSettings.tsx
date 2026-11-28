@@ -39,7 +39,8 @@ export function AgentEnvSettings({ unsavedRef }: { unsavedRef?: Ref<UnsavedChang
       setText(result.names.join('\n'))
       setRefused({ invalid: result.invalid, denied: result.denied })
       setStatus('saved')
-      return null
+      // Names refused: stay where the reason shows ('' = the section says it), never leave as if all were saved.
+      return result.invalid.length > 0 || result.denied.length > 0 ? '' : null
     } catch {
       setStatus('error')
       return '保存できませんでした。もう一度お試しください'
