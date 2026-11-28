@@ -62,9 +62,14 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   `git:inspectCompanyFolder` before the screen offers ［始める］ (`checkCompanyPlace`, read-only); a
   refusal (another company's folder, the member's own files) shows its reason there with
   「置き場所を変えてください」 and ［始める］ stays disabled; `git:setupCompanyRemote` still checks again
-  as the backstop. Only the latest place's answer counts. A setup that fails returns to the join
-  screen, which checks the place again. Tests: `src/features/company/model.test.ts`,
+  as the backstop. **［始める］ asks the place again** and starts only when it is still what the
+  screen showed (`samePlaceCheck`: the same kind and, for a first download, the same department
+  list) — an existing folder emptied while the screen was open would otherwise download everything
+  unasked; anything else is shown with 「置き場所の様子が変わりました…」. Only the latest company's and
+  place's answer counts (a slow check of an earlier one is dropped). A setup that fails returns to
+  the join screen, which checks the place again. Tests: `src/features/company/model.test.ts`,
   `tests/ui/company-selector.spec.ts` 「the join screen…」「one company and 所属…」「置き場所を変えたいとき…」,
+  「the place is asked again at 始める…」「only the latest place counts…」 (each mutation-checked),
   `tests/ipc-app.test.ts` 「first setup without choices…」.
 - In a **fresh folder** without 所属 the member picks departments before the join screen, and may change
   the 所属 there with 変える (`DepartmentPicker`, 「この PC に置く部署を選ぶ」: it decides what this PC

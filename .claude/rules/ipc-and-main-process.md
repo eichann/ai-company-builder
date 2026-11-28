@@ -363,15 +363,18 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   pressed with that host on screen (an address that cannot be accepted sends none). The renderer
   passes the address it showed (`acceptServer(shown)`) only as a confirmation: main refuses
   (`APP_LINK_CHANGED`) when it differs from the one it holds, or is missing, so a newer link that
-  arrived between the screen's last look (every 1.5 s) and the press is never used. 「つながない」
-  stays beside the host until it is accepted. The sign-in screen of a configured app shows its
+  arrived between the screen's last look (every 1.5 s) and the press is never used. A newer link
+  seen while the form is up is not a quiet update: the form starts again (`key` = the address, so
+  the typed password is gone) under 「つなぎ先が変わりました…」. 「つながない」 stays beside the host
+  until it is accepted, and a look that started before it is not applied after it. The sign-in screen of a configured app shows its
   host the same way. Before sign-in nothing names the company (owner decision 6): the host is the
   check, the company's name shows only on the join screen after sign-in (`download-choices.md`).
   With no server and no link, the first screen waits for the link (「招待のメールから始めます」);
   typing the address (`config:validateServerUrl`, then `setServerUrl`) is its side path
   「招待のメールが見当たらないとき」. Tests: `tests/app-link.test.ts` (mutation-checked: the shown
   address), `ipc-app.test.ts` 「an invitation link (open-url) never points…」,
-  `tests/ui/sign-in.spec.ts` (accept before sign-in, the address on screen, a newer link refused).
+  `tests/ui/sign-in.spec.ts` (accept before sign-in, the address on screen, a newer link refused,
+  a newer link while typing clears the form).
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);

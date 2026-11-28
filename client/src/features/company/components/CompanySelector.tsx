@@ -12,7 +12,7 @@ import type { CompanyInfo } from '../../../../shared/ipc-contract'
 import { chooseFolder, getCompanyServer, getDefaultParentFolder } from '../api'
 import { checkCompanyPlace, openCompanyWithoutFolder } from '../folderSetup'
 import {
-  companyToJoinWithoutChoosing, firstDepartmentChoice, joinStart, needsDepartmentChoice, offersCompanyCreation,
+  companyToJoinWithoutChoosing, firstDepartmentChoice, joinStart, needsDepartmentChoice, offersCompanyCreation, samePlaceCheck,
   type DepartmentChoice, type PlaceCheck, type SelectorView, type SetupKind,
 } from '../model'
 import { hasRememberedCompany } from '../restore-company'
@@ -49,7 +49,7 @@ export function CompanySelector() {
   const [choice, setChoice] = useState<DepartmentChoice>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Only the latest place's answer counts (a slow check of an earlier place is dropped).
+  // Only the latest company's and place's answer counts (a slow check of an earlier one is dropped).
   const checkRun = useRef(0)
 
   async function checkPlace(company: CompanyInfo, next: JoinPlace | null, keptChoice: DepartmentChoice) {
@@ -68,6 +68,7 @@ export function CompanySelector() {
 
   // The join screen with the automatic place; nothing is put on this PC before ［始める］.
   async function beginJoin(company: CompanyInfo) {
+    const run = ++checkRun.current
     setSelected(company)
     setChoice(null)
     setError(null)
@@ -78,6 +79,7 @@ export function CompanySelector() {
         getCompanyServer().catch(() => null),
         getDefaultParentFolder().catch(() => null),
       ])
+      if (run !== checkRun.current) return
       setHost(hostOf(server))
       const automatic = parent?.success && parent.folder ? { path: `${parent.folder}/${company.name}`, automatic: true } : null
       await checkPlace(company, automatic, null)
@@ -96,18 +98,33 @@ export function CompanySelector() {
   }
 
   async function startJoin() {
-    if (!selected || !place) return
+    if (!selected || !place || !check) return
     const start = joinStart(check, choice)
     if (!start) return
     setError(null)
-    if (start.kind === 'working') {
-      setBusy(true)
-      const opened = await openCompanyWithoutFolder(selected, place.path).finally(() => setBusy(false))
-      if ('error' in opened) setError(opened.error)
-      else addCompany(opened.company)
-      return
+    setBusy(true)
+    try {
+      if (start.kind === 'working') {
+        const opened = await openCompanyWithoutFolder(selected, place.path)
+        if ('error' in opened) setError(opened.error)
+        else addCompany(opened.company)
+        return
+      }
+      // The screen may have been open a while: the place is asked again, and anything other than
+      // what the member confirmed (an existing folder emptied, files put in) is shown, not set up.
+      const run = ++checkRun.current
+      const again = await checkCompanyPlace(selected, place.path)
+      if (run !== checkRun.current) return
+      if (!samePlaceCheck(check, again)) {
+        setCheck(again)
+        setError('置き場所の様子が変わりました。内容をもう一度確かめてください。')
+        if (needsDepartmentChoice(again, choice)) setView('departments')
+        return
+      }
+      startSetup(selected, place.path, start.folders, start.kind)
+    } finally {
+      setBusy(false)
     }
-    startSetup(selected, place.path, start.folders, start.kind)
   }
 
   function startSetup(company: CompanyInfo, companyPath: string, folders: string[], kind: SetupKind) {

@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   companyToJoinWithoutChoosing, firstDepartmentChoice, joinStart, membershipFolders, needsDepartmentChoice, NOTHING_PICKED,
-  offersCompanyCreation, pickedDownload, togglePick, type PickableDepartment, type PlaceCheck,
+  offersCompanyCreation, pickedDownload, samePlaceCheck, togglePick, type PickableDepartment, type PlaceCheck,
 } from './model.ts'
 
 const departments: PickableDepartment[] = [
@@ -76,4 +76,14 @@ test('この PC に置く部署: nothing chosen downloads nothing yet (never 「
   // 「すべて」 after some: everything, the single picks dropped; pressed again: nothing chosen.
   assert.equal(pickedDownload(depts, togglePick(some, ALL)), 'all')
   assert.equal(pickedDownload(depts, togglePick(togglePick(some, ALL), ALL)), null)
+})
+
+test('a place is started only as it was shown: another kind or another department list is not the same place', () => {
+  const fresh: PlaceCheck = { kind: 'firstSetup', departments, mine: [] }
+  assert.equal(samePlaceCheck({ kind: 'reopen' }, { kind: 'reopen' }), true)
+  assert.equal(samePlaceCheck(fresh, { ...fresh, mine: ['営業部'] }), true)
+  // An existing folder emptied meanwhile (it would download everything), or files put in.
+  assert.equal(samePlaceCheck({ kind: 'reopen' }, fresh), false)
+  assert.equal(samePlaceCheck(fresh, { kind: 'error', message: '別の会社のフォルダです。' }), false)
+  assert.equal(samePlaceCheck(fresh, { kind: 'firstSetup', departments: departments.slice(1), mine: [] }), false)
 })

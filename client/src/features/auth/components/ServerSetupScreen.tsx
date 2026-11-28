@@ -25,14 +25,28 @@ export function ServerSetupScreen({ onComplete }: Props) {
   const [accepted, setAccepted] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [typing, setTyping] = useState(false)
+  // A newer link replaced the address on screen: the form starts again (password cleared) with a notice.
+  const [changed, setChanged] = useState(false)
   const offerTimer = useRef<number | null>(null)
+  const lastOffer = useRef<string | null>(null)
+  // つながない bumps it: a look that started before is not applied after (the address would come back).
+  const looks = useRef(0)
   const watchOffer = useCallback((node: HTMLDivElement | null) => {
     if (offerTimer.current !== null) {
       window.clearInterval(offerTimer.current)
       offerTimer.current = null
     }
     if (!node) return
-    const check = () => { getAppLinkServerOffer().then(o => setOffer(o?.server ?? null)).catch(() => {}) }
+    const check = () => {
+      const look = looks.current
+      getAppLinkServerOffer().then(o => {
+        if (look !== looks.current) return
+        const next = o?.server ?? null
+        if (lastOffer.current && next && next !== lastOffer.current) setChanged(true)
+        lastOffer.current = next
+        setOffer(next)
+      }).catch(() => {})
+    }
     check()
     offerTimer.current = window.setInterval(check, OFFER_CHECK_MS)
   }, [])
@@ -55,7 +69,11 @@ export function ServerSetupScreen({ onComplete }: Props) {
   }
 
   async function declineOffer() {
+    looks.current++
     await dismissAppLinkServer().catch(() => {})
+    looks.current++
+    lastOffer.current = null
+    setChanged(false)
     setOffer(null)
   }
 
@@ -65,7 +83,10 @@ export function ServerSetupScreen({ onComplete }: Props) {
       // Once connected the offer is gone from main: nothing more to watch.
       <div ref={accepted ? undefined : watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center" data-app-link-offer>
         <SignInForm
+          // Another address is another form: nothing typed for the one before is kept.
+          key={server}
           server={server}
+          notice={changed && !accepted ? 'つなぎ先が変わりました。新しい招待のリンクが届いたためです。つなぎ先を確かめてから、もう一度入れてください。' : null}
           title="ログインして参加"
           note="招待されたメールアドレスでログインします"
           busy={busy}

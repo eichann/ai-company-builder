@@ -139,6 +139,18 @@ export function joinStart(check: PlaceCheck | null, choice: DepartmentChoice): J
   return { kind: 'firstSetup', folders: choice === 'all' || choice === null ? [] : choice }
 }
 
+/**
+ * Whether a place still is what the join screen showed: the same kind and, for a first download,
+ * the same departments (a choice made against another list is not reused silently).
+ */
+export function samePlaceCheck(shown: PlaceCheck, now: PlaceCheck): boolean {
+  if (shown.kind !== now.kind) return false
+  if (shown.kind === 'error' && now.kind === 'error') return shown.message === now.message
+  if (shown.kind !== 'firstSetup' || now.kind !== 'firstSetup') return true
+  const folders = (c: { departments: PickableDepartment[] }) => c.departments.map(d => d.folder).join('\n')
+  return folders(shown) === folders(now)
+}
+
 /** The department names a choice stands for, in the list's order (for the join screen's row). */
 export function chosenDepartmentNames(departments: readonly PickableDepartment[], choice: DepartmentChoice): string[] {
   if (choice === 'all') return departments.map(d => d.name)

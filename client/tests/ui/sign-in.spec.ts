@@ -95,3 +95,14 @@ test('the login screen of a configured app shows where the password goes', async
   await expect(page.getByRole('region', { name: 'つなぎ先' })).toContainText('acb.example.com')
   await expect(page.getByRole('button', { name: 'つながない' })).toHaveCount(0)
 })
+
+test('a newer link while the member types: the new address is said, and what was typed for the old one is cleared', async ({ page }) => {
+  await openPreview(page, 'sign-in', { screen: 'offer', accept: 'ok', signin: 'ok' })
+  await page.getByLabel('メールアドレス').fill('yamada@example.com')
+  await page.getByLabel('パスワード').fill('secret-pw')
+  await page.evaluate(() => (window as unknown as { __acbSignIn: Control }).__acbSignIn.offer('https://other.example.com'))
+  await expect(page.getByRole('region', { name: 'つなぎ先' })).toContainText('other.example.com')
+  await expect(page.getByText(/つなぎ先が変わりました。/)).toBeVisible()
+  await expect(page.getByLabel('パスワード')).toHaveValue('')
+  expect(await callsOf(page, 'acceptAppLinkServer')).toEqual([])
+})

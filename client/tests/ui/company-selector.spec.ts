@@ -224,7 +224,8 @@ test('a failed first download says why and does not open an empty company; 戻�
   await button(page, '戻る').click()
   await expect(joinHeading(page)).toBeVisible()
   await expect(opened(page)).toHaveCount(0)
-  await expect.poll(() => callsOf(page, 'gitInspectCompanyFolder')).toHaveLength(2)
+  // Looked at when shown, again at 始める, and again on the way back.
+  await expect.poll(() => callsOf(page, 'gitInspectCompanyFolder')).toHaveLength(3)
   expect(await callsOf(page, 'readDirectory')).toEqual([])
 })
 
@@ -286,4 +287,40 @@ test('switched to from the title bar: the selector starts at that company\'s joi
   await button(page, '会社の一覧に戻る').click()
   await expect(page.getByRole('heading', { name: '会社を選択' })).toBeVisible()
   expectNoPageErrors(state)
+})
+
+test('the place is asked again at 始める: a place that changed while the screen was open is shown, not set up', async ({ page }) => {
+  // This company's folder when the screen opened; emptied before 始める (it would have downloaded everything unasked).
+  await open(page, { folder: 'clone', folderAfter: 'empty' })
+  await chooseCompany(page)
+  await expect(page.getByRole('heading', { name: '阿部商店 を開きます' })).toBeVisible()
+  await startButton(page).click()
+  // Now a first download without 所属: the departments are asked, nothing was set up.
+  await expect(page.getByRole('heading', { name: 'この PC に置く部署を選ぶ' })).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+  await button(page, '戻る').click()
+  await expect(page.getByText('置き場所の様子が変わりました。内容をもう一度確かめてください。')).toBeVisible()
+  await expect(startButton(page)).toBeDisabled()
+})
+
+test('only the latest place counts: a slow check of a place chosen before is not applied', async ({ page }) => {
+  await open(page, { mine: 'd1', hold: '2' })
+  await chooseCompany(page)
+  await expect(place(page)).toHaveText(AUTO)
+  await button(page, '変える').last().click()
+  await button(page, '別の場所に作る（フォルダを選ぶ）').click()
+  await expect(place(page)).toHaveText('/Users/demo/作業/阿部商店')
+  // Its check is still running when another place is chosen.
+  await button(page, '変える').last().click()
+  await button(page, 'この PC にすでにある会社のフォルダを使う').click()
+  await expect(place(page)).toHaveText('/Users/demo/作業')
+  await expect(page.getByText('ここに会社のフォルダを作ります')).toBeVisible()
+  // The earlier place's answer (a refusal) arrives late: it is not applied to the place on screen.
+  await page.evaluate(() => (window as unknown as { __acbCompany: Control & { release: () => void } }).__acbCompany.release())
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)))
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(place(page)).toHaveText('/Users/demo/作業')
+  await startButton(page).click()
+  await expect(opened(page)).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', ['営業部']]])
 })

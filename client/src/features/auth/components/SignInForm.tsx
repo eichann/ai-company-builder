@@ -9,12 +9,14 @@ function hostOf(server: string): string {
   try { return new URL(server).host } catch { return server }
 }
 
-export function SignInForm({ server, title, note, aside, busy, onSignIn }: {
+export function SignInForm({ server, title, note, notice, aside, busy, onSignIn }: {
   /** The server's origin (https://…): its host is shown large. */
   server: string
   title: string
   /** Under the title. */
   note: string
+  /** Said above the address (it changed since the screen first showed). */
+  notice?: string | null
   /** Under the host's explanation (つながない on an invitation's address). */
   aside?: ReactNode
   busy: boolean
@@ -42,6 +44,10 @@ export function SignInForm({ server, title, note, aside, busy, onSignIn }: {
         <h1 className="text-page font-bold text-text mb-1">{title}</h1>
         <p className="text-text-muted">{note}</p>
       </div>
+
+      {notice && (
+        <div role="status" data-server-changed className="mb-3 rounded-control border border-warning-border bg-warning-bg p-3 text-body text-warning-text">{notice}</div>
+      )}
 
       <section aria-label="つなぎ先" className="mb-5 rounded-control border border-[color:var(--color-border)] bg-bg p-4">
         <div className="flex items-center gap-1.5 text-small text-text-muted">
