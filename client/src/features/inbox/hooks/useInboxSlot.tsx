@@ -20,7 +20,8 @@ import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, 
 import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
 import { WorkThroughBar, WorkThroughNotice } from '../../../shared/ui/WorkThrough'
 import { commandArea } from '../../../shared/commands/commands'
-import { endedWords, orderOf as listOrder, setWorkNotice, undoOfEnded, type WorkUndoAnswer } from '../../../shared/lib/workThrough'
+import type { WorkUndoAnswer } from '../../../shared/lib/workThrough'
+import { finishBeside, INBOX_WORK_KEY, openBeside, type Beside } from '../besideDone'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 
 interface InboxSlotInput {
@@ -60,15 +61,6 @@ interface InboxSlotInput {
   /** 「連絡」1枚's ports (a preview hands fakes); absent = the main process. */
   contactPorts?: { reads?: ContactReads; writes?: ContactWrites }
 }
-
-/**
- * The card shown beside the list: the row it belongs to (null: a draft opened from a contact's card), its title, and
- * where that row stood when opened (the next one's place if the row leaves the list before the card's press answers).
- */
-type Beside = BesideCard & { rowKey: string | null; title: string; readKey: string; at: number }
-
-/** The list worked through (tasks-ui.md "Working through a list"): one per screen, like the やること list's. */
-export const INBOX_WORK_KEY = 'inbox'
 
 const BESIDE_WORDS: Record<BesideCard['kind'], { title: string; note: string }> = {
   approval: { title: '承認のお願い', note: '一覧からは承認できません。中身・相手・いつ反映されるかを確かめてから押してください。' },
@@ -150,7 +142,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     if (needed > limit) flushSync(() => setLimit(needed))
     const card = besideCardOf(item)
     // Each opening reads a contact again (the card shows what is true now before anything is pressed).
-    setBeside(card ? { ...card, rowKey: item.key, title: item.title, readKey: `open${Date.now()}`, at: Math.max(0, order.indexOf(item.key)) } : null)
+    setBeside(card ? openBeside(card, { rowKey: item.key, title: item.title, readKey: `open${Date.now()}`, at: Math.max(0, order.indexOf(item.key)) }) : null)
     const a = item.action
     switch (a.kind) {
       case 'openRecord': onOpenRecord(a.recordId); break
@@ -167,26 +159,12 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   if (!companyId || !available) return undefined
 
   /**
-   * The card beside the list was finished there (approved, sent, 済んだ…): the next row takes its place, and the list says
-   * so with ［取り消す］ when the press can be taken back (tasks-ui.md "Working through a list"). The last one: the card goes.
+   * The one way every card beside the list (approval, mail, browser plan, 連絡) tells the list it was finished there
+   * (`finishBeside`: the next row, or nothing in another company era than the card's).
    */
-  const besideDone = (done: Beside, undo?: () => Promise<WorkUndoAnswer>) => {
-    setPlanReadKey(k => k + 1)
-    // `ended` moves on only while that card's row is the one shown; a press answered after the member opened another
-    // card changes nothing on screen (that other card stays as it is).
-    const next = done.rowKey ? work.ended(done.rowKey, done.title, undo) : null
-    if (next === 'next') return
-    const current = besideNow.current
-    const stillShown = !!current && current.kind === done.kind && current.id === done.id
-    // The list read again before the press answered and the row is already gone: the row now in its place comes next.
-    const now = listOrder(INBOX_WORK_KEY)
-    if (next === null && stillShown && done.rowKey && !now.includes(done.rowKey) && now.length > 0) {
-      work.show(now[Math.min(done.at, now.length - 1)])
-      setWorkNotice(INBOX_WORK_KEY, { text: endedWords(done.title, false), undo: undo ? undoOfEnded(INBOX_WORK_KEY, done.rowKey, done.title, undo, work.show) : null })
-      return
-    }
-    if (stillShown) setBeside(null)
-  }
+  const doneOf = (done: Beside) => (undo?: () => Promise<WorkUndoAnswer>) => finishBeside(done, undo, {
+    ended: work.ended, show: work.show, current: () => besideNow.current, close: () => setBeside(null), readPlansAgain: () => setPlanReadKey(k => k + 1),
+  })
   // A row's own button (［AI に読ませる］, ［読まない］…) is the member acting on it: its news is seen too.
   const pressButton = (item: InboxItem, button: InboxRowButton) => {
     setError(null)
@@ -229,16 +207,17 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const chooseKind = (k: InboxKind) => { setKind(k); newLook() }
   const closeBeside = () => { setBeside(null); setPlanReadKey(k => k + 1) }
 
-  const besideCard = beside && (beside.kind === 'approval'
-    ? renderApprovalCard(beside.id, () => besideDone(beside))
+  const onDone = beside && doneOf(beside)
+  const besideCard = beside && onDone && (beside.kind === 'approval'
+    ? renderApprovalCard(beside.id, () => onDone())
     : beside.kind === 'browser'
-    ? browserPlans?.renderCard(beside.id, () => besideDone(beside))
+    ? browserPlans?.renderCard(beside.id, () => onDone())
     : beside.kind === 'contact'
     ? <ContactCard key={beside.id} companyId={companyId} contactId={beside.id} store={contacts} readKey={beside.readKey} writes={contactPorts?.writes} reads={contactPorts?.reads} nameOf={memberName}
         onOpenTask={id => { setBeside(null); onOpenRecord(id) }} onOpenRecord={id => { setBeside(null); onOpenRecord(id) }}
-        onCheckDraft={id => setBeside({ kind: 'mail', id, rowKey: null, title: beside.title, readKey: beside.readKey, at: beside.at })}
-        onFinished={u => besideDone(beside, u ?? undefined)} />
-    : renderMailDraft(beside.id, () => besideDone(beside)))
+        onCheckDraft={id => setBeside({ ...beside, kind: 'mail', id, rowKey: null })}
+        onFinished={u => onDone(u ?? undefined)} />
+    : renderMailDraft(beside.id, () => onDone()))
   const words = beside ? BESIDE_WORDS[beside.kind] : null
   // The card beside the list (owner decision 2026-11-28, 11番): 「3 / 11」, ［前の件］［次の件］ and ［閉じる］ over it.
   const besidePane = beside && words && (
