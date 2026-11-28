@@ -1,13 +1,14 @@
+// The first screen while the app has no server (UX review 20, owner decisions 2026-11-28):
+// it waits for the invitation's 「アプリを開く」; typing the address is the side path for when
+// the mail cannot be found. An address a link brought is shown on the sign-in form, and
+// ［ログイン］ is the member's press that connects to it (ipc-and-main-process.md "The
+// invitation's 「アプリを開く」"): main uses only the address it holds, and only while it is
+// still the one this screen shows.
 import { useCallback, useRef, useState } from 'react'
-import {
-  Globe,
-  ArrowRight,
-  SpinnerGap,
-  WarningCircle,
-  CheckCircle,
-  Buildings,
-} from '@phosphor-icons/react'
+import { ArrowRight, Buildings, CheckCircle, Globe, SpinnerGap, WarningCircle } from '@phosphor-icons/react'
+import { useAuthStore } from '../../../stores/authStore'
 import { acceptAppLinkServer, dismissAppLinkServer, getAppLinkServerOffer, setServerUrl, validateServerUrl } from '../api'
+import { SignInForm } from './SignInForm'
 
 const OFFER_CHECK_MS = 1500
 
@@ -16,15 +17,14 @@ interface Props {
 }
 
 export function ServerSetupScreen({ onComplete }: Props) {
-  const [url, setUrl] = useState('')
-  const [isValidating, setIsValidating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [validated, setValidated] = useState(false)
+  const signIn = useAuthStore(s => s.signIn)
   // The address an invitation's 「アプリを開く」 brought (main holds it; asked again every 1.5 s
   // while this screen shows, so a link clicked now appears without a restart).
   const [offer, setOffer] = useState<string | null>(null)
-  const [offerBusy, setOfferBusy] = useState(false)
-  const [offerError, setOfferError] = useState<string | null>(null)
+  // The offered address once ［ログイン］ connected to it: the form stays on it while sign-in is retried.
+  const [accepted, setAccepted] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [typing, setTyping] = useState(false)
   const offerTimer = useRef<number | null>(null)
   const watchOffer = useCallback((node: HTMLDivElement | null) => {
     if (offerTimer.current !== null) {
@@ -37,172 +37,173 @@ export function ServerSetupScreen({ onComplete }: Props) {
     offerTimer.current = window.setInterval(check, OFFER_CHECK_MS)
   }, [])
 
-  async function acceptOffer() {
-    setOfferBusy(true)
-    setOfferError(null)
+  async function connectAndSignIn(shown: string, email: string, password: string): Promise<string | null> {
+    setBusy(true)
     try {
-      const result = await acceptAppLinkServer()
-      if (result.success) onComplete()
-      else setOfferError(result.error ?? 'つなげませんでした。')
-    } catch {
-      setOfferError('つなげませんでした。もう一度押してください。')
+      if (accepted !== shown) {
+        const result = await acceptAppLinkServer(shown).catch(() => null)
+        if (!result?.success) return result?.error ?? 'つなげませんでした。もう一度押してください。'
+        setAccepted(shown)
+      }
+      const signedIn = await signIn(email, password)
+      if (!signedIn.success) return signedIn.error || 'ログインできませんでした'
+      onComplete()
+      return null
     } finally {
-      setOfferBusy(false)
+      setBusy(false)
     }
   }
 
   async function declineOffer() {
     await dismissAppLinkServer().catch(() => {})
     setOffer(null)
-    setOfferError(null)
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setIsValidating(true)
-
-    try {
-      let normalizedUrl = url.trim()
-      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
-        normalizedUrl = 'https://' + normalizedUrl
-      }
-      normalizedUrl = normalizedUrl.replace(/\/+$/, '')
-
-      const result = await validateServerUrl(normalizedUrl)
-
-      if (result.valid) {
-        await setServerUrl(normalizedUrl)
-        setValidated(true)
-        setTimeout(() => onComplete(), 500)
-      } else {
-        setError(result.error || 'Validation failed')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setIsValidating(false)
-    }
-  }
-
-  if (offer) {
-    const host = new URL(offer).host
+  const server = accepted ?? offer
+  if (server) {
     return (
-      <div ref={watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center">
-        <div className="w-full max-w-md p-8 space-y-5" data-app-link-offer>
-          <div className="text-center">
-            <Buildings size={56} className="mx-auto mb-3 text-primary" weight="duotone" />
-            <h1 className="text-xl font-bold text-text mb-1">招待のリンクから開きました</h1>
-            <p className="text-text-muted text-sm">次の会社のサーバーにつなぎます。</p>
-          </div>
-          <div className="rounded-control border border-[color:var(--color-border)] bg-bg p-4 text-center">
-            <div className="text-lg font-semibold text-text break-all" aria-label="つなぐサーバー">{host}</div>
-            <div className="mt-1 text-xs text-text-muted break-all">{offer}</div>
-          </div>
-          <p className="text-xs text-text-muted">
-            招待のメールのページで［アプリを開く］を押したときだけ、［つなぐ］を押してください。心当たりがないときは［つながない］を押してください。
-          </p>
-          {offerError && (
-            <div role="alert" className="flex items-center gap-2 p-3 rounded-control bg-danger-bg border border-danger-border">
-              <WarningCircle size={20} className="text-danger-text flex-shrink-0" />
-              <span className="text-sm text-danger-text">{offerError}</span>
-            </div>
+      // Once connected the offer is gone from main: nothing more to watch.
+      <div ref={accepted ? undefined : watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center" data-app-link-offer>
+        <SignInForm
+          server={server}
+          title="ログインして参加"
+          note="招待されたメールアドレスでログインします"
+          busy={busy}
+          aside={accepted ? null : (
+            <>
+              心当たりがないときは
+              <button type="button" onClick={() => void declineOffer()} disabled={busy} className="text-link hover:underline">つながない</button>
+              を押してください。
+            </>
           )}
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => void declineOffer()}
-              disabled={offerBusy}
-              className="flex-1 rounded-control border border-[color:var(--color-border)] px-4 py-3 text-text-muted hover:text-text"
-            >
-              つながない
-            </button>
-            <button
-              type="button"
-              onClick={() => void acceptOffer()}
-              disabled={offerBusy}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-disabled text-on-primary rounded-control px-4 py-3 font-medium"
-            >
-              {offerBusy ? <SpinnerGap size={20} className="animate-spin" /> : <>つなぐ<ArrowRight size={20} /></>}
-            </button>
-          </div>
-        </div>
+          onSignIn={(email, password) => connectAndSignIn(server, email, password)}
+        />
       </div>
     )
   }
 
   return (
     <div ref={watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center">
-      <div className="w-full max-w-md p-8">
-        <div className="text-center mb-8">
-          <Buildings size={64} className="mx-auto mb-4 text-primary" weight="duotone" />
-          <h1 className="text-2xl font-bold text-text mb-2">
-            AI Company Builder
-          </h1>
-          <p className="text-text-muted">
-            接続先サーバーのURLを入力してください
-          </p>
-        </div>
+      {typing
+        ? <TypedAddress onBack={() => setTyping(false)} onComplete={onComplete} />
+        : <WaitForInvitation onNoMail={() => setTyping(true)} />}
+    </div>
+  )
+}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-text-muted mb-2">
-              サーバーURL
-            </label>
-            <div className="relative">
-              <Globe
-                size={20}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
-              />
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com"
-                className="w-full bg-bg border border-border-control rounded-control pl-10 pr-4 py-3 text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
-                autoFocus
-              />
-            </div>
-            <p className="mt-2 text-xs text-text-muted">
-              招待のメールのページで［アプリを開く］を押すと、アドレスは自動で入ります。そうでないときは、管理者から共有されたサーバーのURLを入力してください
-            </p>
+function WaitForInvitation({ onNoMail }: { onNoMail: () => void }) {
+  const steps = ['届いた招待のメールを開きます', 'メールのページで［アプリを開く］を押します', 'この画面が、自分で次に進みます']
+  return (
+    <div className="w-full max-w-md p-8 space-y-5">
+      <div className="text-center">
+        <Buildings size={56} className="mx-auto mb-3 text-primary" weight="duotone" />
+        <h1 className="text-page font-bold text-text mb-1">AI Company Builder へようこそ</h1>
+        <p className="text-text-muted">招待のメールから始めます</p>
+      </div>
+      <ol className="space-y-2">
+        {steps.map((step, i) => (
+          <li key={step} className="flex items-center gap-3 rounded-control border border-[color:var(--color-border)] px-4 py-3 text-body text-text">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-selected-bg text-selected-text">{i + 1}</span>
+            {step}
+          </li>
+        ))}
+      </ol>
+      <p role="status" className="flex items-center justify-center gap-2 text-body text-text-muted">
+        <SpinnerGap size={16} className="animate-spin" />
+        招待のリンクを待っています
+      </p>
+      <div className="border-t border-[color:var(--color-border)] pt-4 text-center">
+        <button type="button" onClick={onNoMail} className="text-body text-link hover:underline">
+          招待のメールが見当たらないとき
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The side path: the member types the address (main checks it answers as ACB before it is saved). */
+function TypedAddress({ onBack, onComplete }: { onBack: () => void; onComplete: () => void }) {
+  const [url, setUrl] = useState('')
+  const [isValidating, setIsValidating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [validated, setValidated] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setIsValidating(true)
+    try {
+      let normalizedUrl = url.trim()
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = 'https://' + normalizedUrl
+      }
+      normalizedUrl = normalizedUrl.replace(/\/+$/, '')
+      const result = await validateServerUrl(normalizedUrl)
+      if (result.valid) {
+        await setServerUrl(normalizedUrl)
+        setValidated(true)
+        setTimeout(() => onComplete(), 500)
+      } else {
+        setError(result.error || 'このアドレスにつながりませんでした')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'このアドレスにつながりませんでした')
+    } finally {
+      setIsValidating(false)
+    }
+  }
+
+  return (
+    <div className="w-full max-w-md p-8">
+      <div className="text-center mb-8">
+        <Buildings size={56} className="mx-auto mb-3 text-primary" weight="duotone" />
+        <h1 className="text-page font-bold text-text mb-1">会社のアドレスを入れます</h1>
+        <p className="text-text-muted">招待のメールのページか、管理者から聞いたアドレスを入れてください</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <label className="block">
+          <span className="block text-body text-text-muted mb-2">会社のアドレス</span>
+          <span className="relative block">
+            <Globe size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://example.com"
+              className="w-full bg-bg border border-border-control rounded-control pl-10 pr-4 py-3 text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
+              autoFocus
+            />
+          </span>
+        </label>
+
+        {error && (
+          <div role="alert" className="flex items-center gap-2 p-3 rounded-control bg-danger-bg border border-danger-border">
+            <WarningCircle size={20} className="text-danger-text flex-shrink-0" />
+            <span className="text-body text-danger-text">{error}</span>
           </div>
+        )}
 
-          {error && (
-            <div className="flex items-center gap-2 p-3 rounded-control bg-danger-bg border border-danger-border">
-              <WarningCircle size={20} className="text-danger-text flex-shrink-0" />
-              <span className="text-sm text-danger-text">{error}</span>
-            </div>
-          )}
+        {validated && (
+          <div className="flex items-center gap-2 p-3 rounded-control bg-success-bg border border-success-border">
+            <CheckCircle size={20} className="text-success-text flex-shrink-0" />
+            <span className="text-body text-success-text">つながりました</span>
+          </div>
+        )}
 
-          {validated && (
-            <div className="flex items-center gap-2 p-3 rounded-control bg-success-bg border border-success-border">
-              <CheckCircle size={20} className="text-success-text flex-shrink-0" />
-              <span className="text-sm text-success-text">接続確認完了</span>
-            </div>
-          )}
-
+        <div className="flex gap-3">
+          <button type="button" onClick={onBack} className="flex-1 rounded-control bg-bg hover:bg-surface-sunken text-text px-4 py-3">
+            戻る
+          </button>
           <button
             type="submit"
             disabled={isValidating || !url.trim() || validated}
-            className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-control px-4 py-3 transition-colors font-medium"
+            className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-control px-4 py-3 transition-colors font-medium"
           >
-            {isValidating ? (
-              <SpinnerGap size={20} className="animate-spin" />
-            ) : validated ? (
-              <>
-                <CheckCircle size={20} />
-                接続完了
-              </>
-            ) : (
-              <>
-                接続
-                <ArrowRight size={20} />
-              </>
-            )}
+            {isValidating ? <SpinnerGap size={20} className="animate-spin" /> : <>次へ<ArrowRight size={20} /></>}
           </button>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   )
 }

@@ -45,6 +45,13 @@ export type MembershipReads = ElectronPort<'getMyDepartments'>
  */
 export type DefaultFolderWrites = ElectronPort<'getDefaultParentFolder'>
 
+/** Which company server this computer talks to (its host is shown on the join screen). */
+export type CompanyServerReads = ElectronPort<'getServerUrl'>
+
+export function getCompanyServer(reads: CompanyServerReads = window.electronAPI) {
+  return reads.getServerUrl()
+}
+
 export function getMyDepartments(companyId: string, reads: MembershipReads = window.electronAPI) {
   return reads.getMyDepartments(companyId)
 }

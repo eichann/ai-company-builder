@@ -1,29 +1,32 @@
-// Choosing a company and setting its folder up (download-choices.md "First setup").
-// A member's first time asks nothing when it can (管理画面の見直し 2-2): the only company
-// opens by itself in ~/AI Company Builder/<会社名>, downloading the departments they belong
-// to (所属). Any refusal (a folder of their own there, no 所属) falls back to asking.
-import { useState } from 'react'
+// Choosing a company and setting its folder up (download-choices.md "First setup"). The PC's
+// layout is not asked up front (UX review 20): the place is decided automatically
+// (~/AI Company Builder/<会社名>), the departments are the member's 所属, and the member confirms
+// both once on the join screen with ［始める］. The only company skips the list but still waits
+// for that press. A refused place (another company's folder, the member's own files) says why on
+// the join screen and nothing is set up until another place is chosen.
+import { useRef, useState } from 'react'
 import { SignOut, SpinnerGap } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import type { CompanyInfo } from '../../../../shared/ipc-contract'
-import { chooseFolder, getDefaultParentFolder } from '../api'
-import { openCompanyWithoutFolder, opensWithoutSharedFolder, prepareCompanyFolder } from '../folderSetup'
-import { companyToOpenWithoutChoosing, offersCompanyCreation, type PickableDepartment, type SelectorView, type SetupKind } from '../model'
+import { chooseFolder, getCompanyServer, getDefaultParentFolder } from '../api'
+import { checkCompanyPlace, openCompanyWithoutFolder } from '../folderSetup'
+import {
+  companyToJoinWithoutChoosing, firstDepartmentChoice, joinStart, needsDepartmentChoice, offersCompanyCreation,
+  type DepartmentChoice, type PlaceCheck, type SelectorView, type SetupKind,
+} from '../model'
 import { hasRememberedCompany } from '../restore-company'
 import { useCompanies } from '../hooks/useCompanies'
 import { useFolderSetup } from '../hooks/useFolderSetup'
 import { CompanyList } from './CompanyList'
 import { CreateCompanyForm } from './CreateCompanyForm'
 import { DepartmentPicker } from './DepartmentPicker'
-import { FolderChoice, NewFolderChoice } from './FolderChoice'
+import { JoinScreen, type JoinPlace } from './JoinScreen'
 import { SetupProgress } from './SetupProgress'
 
-/** The picker's company folder, its departments, and where its 戻る goes. */
-interface PickerState {
-  folder: string
-  departments: PickableDepartment[]
-  backView: SelectorView
+function hostOf(server: string | null): string | null {
+  if (!server) return null
+  try { return new URL(server).host } catch { return null }
 }
 
 export function CompanySelector() {
@@ -31,52 +34,80 @@ export function CompanySelector() {
   const { user, signOut, refreshUser } = useAuthStore()
   const canCreate = offersCompanyCreation(user)
   const list = useCompanies(companies => {
-    // Switched to from the title bar, not known on this computer yet: its folder choice.
+    // Switched to from the title bar, not known on this computer yet: its join screen.
     const chosen = companies.find(c => c.id === useAppStore.getState().companyToChoose)
-    if (chosen) { select(chosen); return }
-    const only = user ? companyToOpenWithoutChoosing(companies, hasRememberedCompany(user.id)) : null
-    if (only) void openWithoutChoosing(only)
+    if (chosen) { void beginJoin(chosen); return }
+    const only = user ? companyToJoinWithoutChoosing(companies, hasRememberedCompany(user.id)) : null
+    if (only) void beginJoin(only)
   })
   const setup = useFolderSetup(addCompany)
   const [view, setView] = useState<SelectorView>('list')
-  // Opening the only company by itself (until it shows a step or falls back to asking).
-  const [opening, setOpening] = useState<string | null>(null)
   const [selected, setSelected] = useState<CompanyInfo | null>(null)
+  const [host, setHost] = useState<string | null>(null)
+  const [place, setPlace] = useState<JoinPlace | null>(null)
+  const [check, setCheck] = useState<PlaceCheck | null>(null)
+  const [choice, setChoice] = useState<DepartmentChoice>(null)
   const [error, setError] = useState<string | null>(null)
-  // The folder 新しく作成 makes the company folder in.
-  const [parentFolder, setParentFolder] = useState('')
-  const [isPreparing, setIsPreparing] = useState(false)
-  const [picker, setPicker] = useState<PickerState | null>(null)
+  const [busy, setBusy] = useState(false)
+  // Only the latest place's answer counts (a slow check of an earlier place is dropped).
+  const checkRun = useRef(0)
 
-  function select(company: CompanyInfo) {
-    setSelected(company)
-    setView('clone')
+  async function checkPlace(company: CompanyInfo, next: JoinPlace | null, keptChoice: DepartmentChoice) {
+    const run = ++checkRun.current
+    setPlace(next)
+    setCheck(null)
+    if (!next) return
+    const checked = await checkCompanyPlace(company, next.path)
+    if (run !== checkRun.current) return
+    setCheck(checked)
+    const nextChoice = keptChoice ?? firstDepartmentChoice(checked)
+    setChoice(nextChoice)
+    // No 所属 known: the departments are asked first, then the join screen.
+    if (needsDepartmentChoice(checked, nextChoice)) setView('departments')
   }
 
-  async function prepare(company: CompanyInfo, companyPath: string, backView: SelectorView) {
-    setIsPreparing(true)
+  // The join screen with the automatic place; nothing is put on this PC before ［始める］.
+  async function beginJoin(company: CompanyInfo) {
+    setSelected(company)
+    setChoice(null)
     setError(null)
-    // A company without the shared folder: a plain working folder, nothing downloaded (no picker, no setup screen).
-    if (opensWithoutSharedFolder(company)) {
-      const opened = await openCompanyWithoutFolder(company, companyPath).finally(() => setIsPreparing(false))
-      if ('error' in opened) {
-        setError(opened.error)
-        setView(backView)
-      } else addCompany(opened.company)
+    setView('join')
+    setBusy(true)
+    try {
+      const [server, parent] = await Promise.all([
+        getCompanyServer().catch(() => null),
+        getDefaultParentFolder().catch(() => null),
+      ])
+      setHost(hostOf(server))
+      const automatic = parent?.success && parent.folder ? { path: `${parent.folder}/${company.name}`, automatic: true } : null
+      await checkPlace(company, automatic, null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 「置き場所を変えたいとき」: a new folder inside a picked one, or a folder the company already has here.
+  async function changePlace(how: 'new' | 'existing') {
+    if (!selected) return
+    const picked = await chooseFolder()
+    if (!picked) return
+    setError(null)
+    await checkPlace(selected, { path: how === 'new' ? `${picked}/${selected.name}` : picked, automatic: false }, choice)
+  }
+
+  async function startJoin() {
+    if (!selected || !place) return
+    const start = joinStart(check, choice)
+    if (!start) return
+    setError(null)
+    if (start.kind === 'working') {
+      setBusy(true)
+      const opened = await openCompanyWithoutFolder(selected, place.path).finally(() => setBusy(false))
+      if ('error' in opened) setError(opened.error)
+      else addCompany(opened.company)
       return
     }
-    const next = await prepareCompanyFolder(companyPath, company.id).finally(() => setIsPreparing(false))
-    if (next.kind === 'pick') {
-      setPicker({ folder: companyPath, departments: next.departments, backView })
-      setView('departments')
-    } else if (next.kind === 'mine') {
-      startSetup(company, companyPath, next.folders, 'firstSetup')
-    } else if (next.kind === 'error') {
-      setError(next.message)
-      setView(backView)
-    } else {
-      startSetup(company, companyPath, [], next.kind)
-    }
+    startSetup(selected, place.path, start.folders, start.kind)
   }
 
   function startSetup(company: CompanyInfo, companyPath: string, folders: string[], kind: SetupKind) {
@@ -84,48 +115,25 @@ export function CompanySelector() {
     void setup.run(company, companyPath, folders, kind)
   }
 
-  // The only company, nothing remembered: its folder in the default place, no questions.
-  // A refusal there (the member's own files) lands on the folder choice with the reason.
-  async function openWithoutChoosing(company: CompanyInfo) {
-    setOpening(company.name)
-    setSelected(company)
-    try {
-      const parent = await getDefaultParentFolder().catch(() => null)
-      if (!parent?.success || !parent.folder) {
-        setView('clone')
-        return
-      }
-      setParentFolder(parent.folder)
-      await prepare(company, `${parent.folder}/${company.name}`, 'clone')
-    } finally {
-      setOpening(null)
-    }
+  function backToList() {
+    checkRun.current++
+    setView('list')
+    setSelected(null)
+    setPlace(null)
+    setCheck(null)
+    setError(null)
   }
 
-  // 既存のフォルダを開く: the chosen folder itself is the company folder. It is
-  // not 新しく作成's parent: a refused folder must not be preselected there.
-  async function openExistingFolder(company: CompanyInfo) {
-    const path = await chooseFolder()
-    if (!path) return
-    await prepare(company, path, 'clone')
-  }
-
-  async function pickParentFolder() {
-    const path = await chooseFolder()
-    if (path) setParentFolder(path)
-  }
-
-  if (list.isLoading || opening) {
+  if (list.isLoading) {
     return (
-      <div className="h-full bg-[var(--color-surface)] flex flex-col items-center justify-center gap-4">
+      <div className="h-full bg-[var(--color-surface)] flex items-center justify-center">
         <SpinnerGap size={48} className="animate-spin text-primary" />
-        {opening && <p className="text-text-muted">{opening}を準備しています</p>}
       </div>
     )
   }
 
   return (
-    <div className="h-full bg-[var(--color-surface)] flex items-center justify-center">
+    <div className="h-full bg-[var(--color-surface)] flex items-center justify-center overflow-y-auto">
       <div className="w-full max-w-xl p-8">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
@@ -155,9 +163,9 @@ export function CompanySelector() {
         {view === 'list' && (
           <CompanyList
             companies={list.companies}
-            error={error ?? list.loadError}
+            error={list.loadError}
             canCreate={canCreate}
-            onSelect={select}
+            onSelect={company => void beginJoin(company)}
             onCreate={() => setView('create')}
           />
         )}
@@ -165,41 +173,33 @@ export function CompanySelector() {
         {view === 'create' && canCreate && (
           <CreateCompanyForm
             // The first company of a fresh server: its creator may not make another.
-            onCreated={company => { list.add(company); select(company); void refreshUser() }}
+            onCreated={company => { list.add(company); void beginJoin(company); void refreshUser() }}
             onBack={() => setView('list')}
           />
         )}
 
-        {view === 'clone' && selected && (
-          <FolderChoice
+        {view === 'join' && selected && (
+          <JoinScreen
             company={selected}
-            withoutSharedFolder={opensWithoutSharedFolder(selected)}
+            host={host}
+            place={place}
+            check={check}
+            choice={choice}
             error={error}
-            isPreparing={isPreparing}
-            onOpenExisting={() => openExistingFolder(selected)}
-            onCreateNew={() => setView('openExisting')}
-            onBack={() => { setView('list'); setSelected(null); setParentFolder(''); setError(null) }}
+            busy={busy}
+            onChangeDepartments={() => setView('departments')}
+            onChangePlace={how => void changePlace(how)}
+            onStart={() => void startJoin()}
+            onBack={backToList}
           />
         )}
 
-        {view === 'openExisting' && selected && (
-          <NewFolderChoice
-            company={selected}
-            error={error}
-            parentFolder={parentFolder}
-            isPreparing={isPreparing}
-            onPickParent={pickParentFolder}
-            onStart={() => { if (parentFolder) void prepare(selected, `${parentFolder}/${selected.name}`, 'openExisting') }}
-            onBack={() => { setView('clone'); setParentFolder(''); setError(null) }}
-          />
-        )}
-
-        {view === 'departments' && selected && picker && (
+        {view === 'departments' && selected && check?.kind === 'firstSetup' && (
           <DepartmentPicker
-            departments={picker.departments}
-            onBack={() => setView(picker.backView)}
-            // 「すべての部署」 is the setup's full download (no folder list); a list downloads only those.
-            onDownload={folders => startSetup(selected, picker.folder, folders === 'all' ? [] : folders, 'firstSetup')}
+            departments={check.departments}
+            initial={choice}
+            onBack={() => setView('join')}
+            onChoose={folders => { setChoice(folders); setView('join') }}
           />
         )}
 
@@ -209,7 +209,12 @@ export function CompanySelector() {
             step={setup.step}
             error={setup.error}
             receivedBytes={setup.receivedBytes}
-            onBack={() => { setView('clone'); setup.clearError() }}
+            // Back to the same join screen; the place is checked again (the failed setup may have left it different).
+            onBack={() => {
+              setup.clearError()
+              setView('join')
+              if (selected) void checkPlace(selected, place, choice)
+            }}
           />
         )}
       </div>

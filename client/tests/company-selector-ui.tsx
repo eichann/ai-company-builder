@@ -6,7 +6,7 @@
 //   ?depts=0                 the company has no departments (no picker); ?depts=fail the list cannot be read
 //   ?pick=cancel             the folder dialog is cancelled
 //   ?setup=fail|manual       the download fails / waits for window.__acbCompany.finishSetup()
-//   ?companies=one           the member belongs to one company (it opens by itself)
+//   ?companies=one           the member belongs to one company (its join screen shows without the list)
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
 //   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 //   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
@@ -73,6 +73,7 @@ useAuthStore.setState({
 if (params.get('choose')) useAppStore.setState({ companyToChoose: params.get('choose') })
 
 installElectronAPI({
+  getServerUrl: async () => (MANUAL ? 'https://kensho-a.acb-cloud.example' : 'https://acb.example.com'),
   getCompanies: async () => {
     calls.push(['getCompanies'])
     return params.get('companies') === 'error' ? { success: false, error: '会社の一覧を読めませんでした' } : { success: true, data: companies }

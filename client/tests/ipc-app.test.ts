@@ -495,7 +495,7 @@ test('an invitation link (open-url) never points an app that has a server at ano
   app.emit('open-url', { preventDefault: () => { prevented = true } }, 'ai-company-builder://open?server=https%3A%2F%2Fother.example.com')
   assert.equal(prevented, true)
   assert.equal(await h.invoke('appLink:serverOffer'), null)
-  assert.equal((await h.invoke<{ success: boolean }>('appLink:acceptServer')).success, false)
+  assert.equal((await h.invoke<{ success: boolean }>('appLink:acceptServer', 'https://other.example.com')).success, false)
   assert.equal(await h.invoke('config:getServerUrl'), SERVER_URL)
 })
 

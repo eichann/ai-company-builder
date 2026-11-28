@@ -42,33 +42,46 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 
 ## First setup (`sync/first-setup.ts`, `features/company-setup/ipc.ts`)
 
-- **A member's first time asks nothing when it can** (2026-11-02, 管理画面の見直し 2-2):
-  the departments they belong to (所属: `department_members`, set by the invitation or the
-  admin; `companySetup:myDepartments` reads each department's members with the session, any
-  unreadable one → "unknown") are downloaded without the picker (`membershipFolders`,
-  `folderSetup.ts` `kind: 'mine'`); unknown or none → the picker as below, never "everything".
-  Only on this first-setup path: an existing clone's exclusions are never changed, so no sync
-  behaviour changes. A member with exactly one company and no remembered company
-  (`companyToOpenWithoutChoosing`, `hasRememberedCompany`) gets it opened by itself in
-  `~/AI Company Builder/<会社名>` (`companySetup:defaultParentFolder`: created, registered like
-  a picked folder); that folder still goes through `git:inspectCompanyFolder`, and a refusal
-  (the member's own files there) lands on the folder choice with the reason. Tests:
-  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「one company…」,
+- **A member's first time asks one confirmation, and nothing about the PC's layout** (2026-11-02,
+  管理画面の見直し 2-2; UX review 20, owner decisions 5 and 2026-11-28): after a company is chosen
+  (or the only one, without the list: `companyToJoinWithoutChoosing`, unless a company is
+  remembered, `hasRememberedCompany`), the **join screen** 「〇〇 に参加します」 (`JoinScreen`,
+  `CompanySelector`) shows the company with its server's host, the departments for this PC and
+  the place, and nothing is put on this PC before its ［始める］ — also for the only company with
+  所属 (it used to open by itself). The departments start as the ones the member belongs to (所属:
+  `department_members`, set by the invitation or the admin; `companySetup:myDepartments` reads each
+  department's members with the session, any unreadable one → "unknown"; `membershipFolders`,
+  `firstDepartmentChoice`); unknown or none → the picker below comes first, never "everything", and
+  ［始める］ waits until a choice is made (`joinStart`, `needsDepartmentChoice`). Only on this
+  first-setup path: an existing clone's exclusions are never changed, so no sync behaviour changes.
+  **The place is decided automatically**: `~/AI Company Builder/<会社名>`
+  (`companySetup:defaultParentFolder`: created, registered like a picked folder), for every company
+  chosen (not only the only one). 「置き場所を変えたいとき（任意）」 offers the two former ways:
+  「別の場所に作る（フォルダを選ぶ）」 (= `<picked>/<company>`) and 「この PC にすでにある会社のフォルダを使う」
+  (= the picked folder). Every place — automatic or picked — is checked by
+  `git:inspectCompanyFolder` before the screen offers ［始める］ (`checkCompanyPlace`, read-only); a
+  refusal (another company's folder, the member's own files) shows its reason there with
+  「置き場所を変えてください」 and ［始める］ stays disabled; `git:setupCompanyRemote` still checks again
+  as the backstop. Only the latest place's answer counts. A setup that fails returns to the join
+  screen, which checks the place again. Tests: `src/features/company/model.test.ts`,
+  `tests/ui/company-selector.spec.ts` 「the join screen…」「one company and 所属…」「置き場所を変えたいとき…」,
   `tests/ipc-app.test.ts` 「first setup without choices…」.
-- In a **fresh folder** the member picks departments first (`DepartmentPicker`, 「この PC に置く部署を選ぶ」:
-  it decides what this PC downloads, not who belongs — UX review 2026-11-28). 「すべての部署」 is an
+- In a **fresh folder** without 所属 the member picks departments before the join screen, and may change
+  the 所属 there with 変える (`DepartmentPicker`, 「この PC に置く部署を選ぶ」: it decides what this PC
+  downloads, not who belongs — UX review 2026-11-28; it starts from the join screen's choice and hands it
+  back: ［すべての部署にする］ / ［選んだ部署にする（N）］, nothing downloads before ［始める］). 「すべての部署」 is an
   option of its own at the top; choosing a department leaves it and the other way round
   (`togglePick` / `pickedDownload` in `features/company/model.ts`). **Nothing chosen downloads nothing
   yet**: the button says 「部署を選んでください」 and is disabled — it is never read as 「すべて」. Then
   `git:setupCompanyRemote` → `checkoutSelectedDepartments`: `fetch --filter=blob:none` → persist
   the exclusions (the departments *not* picked) and set the patterns → checkout (downloads only
   the checked-out blobs, in one batch). 「すべての部署」 sends no list → full clone (main's contract
-  unchanged). When the company's department list cannot be read, the first setup stops with
-  `DEPARTMENTS_UNREAD` on the folder choice (`folderSetup.ts`) instead of downloading everything; a company that
+  unchanged). When the company's department list cannot be read, the join screen says
+  `DEPARTMENTS_UNREAD` (`folderSetup.ts`) and ［始める］ waits, instead of downloading everything; a company that
   answers no departments still opens whole. Existing clones are never converted to partial clones. Tests:
   `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「「すべての部署」 is chosen on purpose…」, 「the departments cannot be read…」.
-- Both selector paths (「既存のフォルダを開く」 = the folder, 「新しく作成」 = `<folder>/<company>`)
-  first ask `git:inspectCompanyFolder` (`sync/company-folder.ts`, read-only; renderer
+- Every place (the automatic one, 「この PC にすでにある会社のフォルダを使う」 = the folder, 「別の場所に作る」 =
+  `<folder>/<company>`) is first asked of `git:inspectCompanyFolder` (`sync/company-folder.ts`, read-only; renderer
   `src/features/company/folderPlan.ts`):
   - empty folder (OS files such as `.DS_Store` ignored), or this company's origin with nothing
     checked out → picker + partial setup;
@@ -82,7 +95,9 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   the folder itself, never re-pointing a parent repository's origin. Offline only a clone of
   this company opens.
 - The setup screen shows bytes received (`setup:progress`, same pack-size watcher as
-  `sparse:progress`); reopening a clone does not say 「初回」.
+  `sparse:progress`) in members' words (owner decision 9): 「準備しています」, steps 「会社のフォルダを用意しています」
+  and 「会社のファイルを受け取っています（N MB 受け取りました）」, then 「準備ができました」 — never 「セットアップ」,
+  「フォルダ構造」 or 「同期設定」; reopening a clone says 「会社のフォルダを開いています」, not 「初めて」.
 - After login the remembered company (`localStorage lastCompany:<userId>`) opens directly:
   `src/features/company/restore-company.ts` registers its folder as an allowed root **before** `fs:exists`
   (main answers only for registered roots; checking first always said "missing").
@@ -98,8 +113,8 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   meanwhile. Every company opened is remembered per member (`companyFolder:<userId>:<companyId>`,
   App.tsx) and reopens through the same checks as after sign-in (`reopen.ts` over
   `restore-company.ts`: access, folder registered, exists, `none` working folder, kind from the
-  server). Not remembered, or `forget` → the selector starts at that company's folder choice
-  (`appStore.chooseCompany` / `companyToChoose`; never a download in a default place by itself).
+  server). Not remembered, or `forget` → the selector starts at that company's join screen
+  (`appStore.chooseCompany` / `companyToChoose`; nothing is downloaded before its ［始める］).
   `App.tsx` keys `AppShell` by company id, so nothing of the last company's screen stays mounted.
   Tests: `src/features/company/switching.test.ts`, `tests/ui/company-switcher.spec.ts`,
   `company-selector.spec.ts` 「switched to from the title bar…」.
@@ -214,7 +229,8 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
 ## Companies without the shared company folder
 
 Nothing is downloaded or left out: the company opens in a plain working folder with a folder per
-department (`companySetup:openWorkingFolder`, no picker, no setup screen; the folder choice says
+department (`companySetup:openWorkingFolder` at ［始める］, which checks the place itself — nothing is
+inspected before —; no picker, no setup screen; the join screen says
 「この会社では、ファイルはこの PC の中だけに置かれます…」 and, below it, the backup note
 `WORKING_FOLDER_BACKUP_NOTE` (`client/shared/company-folder.ts`, owner 2026-11-07: the files exist
 only on this PC and are not kept on the server — back them up with the PC's own backup; records

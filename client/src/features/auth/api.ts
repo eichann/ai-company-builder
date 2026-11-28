@@ -20,7 +20,8 @@ export type AppLinkReads = ElectronPort<'getAppLinkServerOffer'>
 /**
  * Using that address (main checks it answers as an ACB server, then makes it this computer's
  * server: sign-in sends the password there from now on) or forgetting it. The renderer never
- * names the address: main uses the one the link brought.
+ * names the address: main uses the one the link brought, and only when it is still the one
+ * the screen showed (`shown`; a newer link in between is refused).
  */
 export type AppLinkWrites = ElectronPort<'acceptAppLinkServer' | 'dismissAppLinkServer'>
 
@@ -56,8 +57,8 @@ export function getAppLinkServerOffer(reads: AppLinkReads = window.electronAPI) 
   return reads.getAppLinkServerOffer()
 }
 
-export function acceptAppLinkServer(writes: AppLinkWrites = window.electronAPI) {
-  return writes.acceptAppLinkServer()
+export function acceptAppLinkServer(shown: string, writes: AppLinkWrites = window.electronAPI) {
+  return writes.acceptAppLinkServer(shown)
 }
 
 export function dismissAppLinkServer(writes: AppLinkWrites = window.electronAPI) {

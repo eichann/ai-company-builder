@@ -1,9 +1,13 @@
 import type { ReactNode } from 'react'
-import { Check, CheckCircle, FolderOpen, GitBranch, SpinnerGap } from '@phosphor-icons/react'
+import { Check, CheckCircle, CloudArrowDown, FolderOpen, SpinnerGap } from '@phosphor-icons/react'
 import { formatBytes } from '../../../shared/lib/download-selection'
 import type { SetupKind, SetupStep } from '../model'
 
-/** The setup screen: a first download says it can take a while and shows the bytes received. */
+/**
+ * The setup screen: a first download says it can take a while and shows the bytes received.
+ * In the members' words, not the builders' (UX review 20, owner decision 9): no 「セットアップ」,
+ * 「フォルダ構造」 or 「同期設定」.
+ */
 export function SetupProgress({ kind, step, error, receivedBytes, onBack }: {
   kind: SetupKind
   step: SetupStep
@@ -24,15 +28,15 @@ export function SetupProgress({ kind, step, error, receivedBytes, onBack }: {
         </div>
         <h1 className="text-2xl font-bold text-text mb-2">
           {step === 'done'
-            ? (reopen ? '準備完了' : 'セットアップ完了')
-            : (reopen ? 'フォルダを開いています...' : 'セットアップ中...')}
+            ? '準備ができました'
+            : (reopen ? '会社のフォルダを開いています' : '準備しています')}
         </h1>
         <p className="text-text-muted">
           {step === 'done'
-            ? '準備が整いました'
+            ? 'まもなく始まります'
             : kind === 'firstSetup'
-              ? '初回のみ。会社のファイルが多いと、ダウンロードに数分かかることがあります'
-              : 'サーバーの最新の内容を確認しています'}
+              ? '初めてのときだけです。会社のファイルが多いと、数分かかることがあります'
+              : 'いちばん新しい内容を確かめています'}
         </p>
       </div>
 
@@ -50,17 +54,17 @@ export function SetupProgress({ kind, step, error, receivedBytes, onBack }: {
           active={step === 'folder'}
           finished={step === 'git' || step === 'done'}
           idleIcon={<FolderOpen size={16} className="text-zinc-400" />}
-          title="フォルダ構造を作成"
-          detail="部署フォルダの初期化"
+          title={reopen ? '会社のフォルダを確かめています' : '会社のフォルダを用意しています'}
+          detail={reopen ? 'この PC にあるフォルダを使います' : '部署のフォルダも用意します'}
         />
         <StepRow
           active={step === 'git'}
           finished={step === 'done'}
-          idleIcon={<GitBranch size={16} className="text-zinc-400" />}
-          title="同期設定"
+          idleIcon={<CloudArrowDown size={16} className="text-zinc-400" />}
+          title={reopen ? 'いちばん新しい内容を受け取っています' : '会社のファイルを受け取っています'}
           detail={step === 'git' && receivedBytes > 0
-            ? `ダウンロード中… ${formatBytes(receivedBytes)} 受信`
-            : 'サーバーとの接続を確立'}
+            ? `${formatBytes(receivedBytes)} 受け取りました`
+            : '会社のサーバーにつないでいます'}
         />
       </div>
     </div>

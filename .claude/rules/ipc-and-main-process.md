@@ -355,10 +355,23 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   *offers* a server: `features/app-link/link.ts` passes an https origin alone (http only on
   loopback; no credentials, path, query or fragment, one `server`), `features/app-link/ipc.ts`
   holds it only while the app has no server (a link never switches a configured app), and
-  `appLink:acceptServer` takes no argument — it saves the address main holds, after the member
-  saw it on the server screen (`ServerSetupScreen`, host shown large) and pressed 「つなぐ」 and
-  that server answered `/api/config` as ACB. Tests: `tests/app-link.test.ts` (mutation-checked),
-  `ipc-app.test.ts` 「an invitation link (open-url) never points…」.
+  `appLink:acceptServer` saves the address main holds — never one the renderer names — after the
+  member saw it and pressed ［ログイン］ and that server answered `/api/config` as ACB. ［つなぐ］ is
+  part of ［ログイン］ (UX review 20, owner decision 4, 2026-11-28): the offered address is shown as
+  「つなぎ先」 (host large) above the email and password (`SignInForm`, in `ServerSetupScreen`);
+  ［ログイン］ first accepts the address, then signs in, so no password is sent before the member
+  pressed with that host on screen (an address that cannot be accepted sends none). The renderer
+  passes the address it showed (`acceptServer(shown)`) only as a confirmation: main refuses
+  (`APP_LINK_CHANGED`) when it differs from the one it holds, or is missing, so a newer link that
+  arrived between the screen's last look (every 1.5 s) and the press is never used. 「つながない」
+  stays beside the host until it is accepted. The sign-in screen of a configured app shows its
+  host the same way. Before sign-in nothing names the company (owner decision 6): the host is the
+  check, the company's name shows only on the join screen after sign-in (`download-choices.md`).
+  With no server and no link, the first screen waits for the link (「招待のメールから始めます」);
+  typing the address (`config:validateServerUrl`, then `setServerUrl`) is its side path
+  「招待のメールが見当たらないとき」. Tests: `tests/app-link.test.ts` (mutation-checked: the shown
+  address), `ipc-app.test.ts` 「an invitation link (open-url) never points…」,
+  `tests/ui/sign-in.spec.ts` (accept before sign-in, the address on screen, a newer link refused).
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);

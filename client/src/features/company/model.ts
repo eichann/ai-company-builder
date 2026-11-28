@@ -11,8 +11,11 @@ export function offersCompanyCreation(user: Pick<AuthUser, 'canCreateCompany'> |
   return user?.canCreateCompany !== false
 }
 
-/** list → (create →) folder choice (clone: 既存 / 新しく; openExisting: 新しく作成) → departments → setup. */
-export type SelectorView = 'list' | 'create' | 'clone' | 'openExisting' | 'departments' | 'setup'
+/**
+ * list → (create →) join (「〇〇 に参加します」: the company, the departments for this PC and the
+ * place, confirmed with one ［始める］; departments = the picker, from join or before it) → setup.
+ */
+export type SelectorView = 'list' | 'create' | 'join' | 'departments' | 'setup'
 
 /** What the setup screen is doing: a first download, reopening a clone, or the owner's first upload. */
 export type SetupKind = Exclude<FolderSetupPlan['kind'], 'error'>
@@ -86,10 +89,59 @@ export function membershipFolders(departments: PickableDepartment[], myDepartmen
 }
 
 /**
- * The company opened without choosing (2-2 「会社が1つなら選ばせない」): the only one, unless
- * a company is remembered for this member (App.tsx restores that one; starting another setup
- * beside it would race it).
+ * The company shown for joining without choosing it from the list (2-2 「会社が1つなら選ばせない」):
+ * the only one, unless a company is remembered for this member (App.tsx restores that one;
+ * starting another setup beside it would race it). It is not opened by itself: the member
+ * still presses ［始める］ once on the join screen (UX review 20, owner decision 5).
  */
-export function companyToOpenWithoutChoosing<T>(companies: readonly T[], remembered: boolean): T | null {
+export function companyToJoinWithoutChoosing<T>(companies: readonly T[], remembered: boolean): T | null {
   return !remembered && companies.length === 1 ? companies[0] : null
+}
+
+/**
+ * What the place on the join screen is (folderSetup.ts `checkCompanyPlace`, before anything in it
+ * changes): a folder for a first download (with the company's departments and the member's 所属),
+ * this company's existing folder (opens as it is), the owner's first upload, the working folder of
+ * a company without the shared folder (main checks it when ［始める］ is pressed), or refused.
+ */
+export type PlaceCheck =
+  | { kind: 'firstSetup'; departments: PickableDepartment[]; mine: string[] }
+  | { kind: 'reopen' }
+  | { kind: 'upload' }
+  | { kind: 'working' }
+  | { kind: 'error'; message: string }
+
+/** The departments chosen for this PC on the join screen: every one, these folders, or not yet. */
+export type DepartmentChoice = 'all' | string[] | null
+
+/** The choice the join screen starts with: the member's 所属, else nothing (the picker asks first). */
+export function firstDepartmentChoice(check: PlaceCheck): DepartmentChoice {
+  return check.kind === 'firstSetup' && check.mine.length > 0 ? check.mine : null
+}
+
+/** Whether the picker comes before ［始める］ can be pressed: a first download with departments, none chosen. */
+export function needsDepartmentChoice(check: PlaceCheck, choice: DepartmentChoice): boolean {
+  return check.kind === 'firstSetup' && check.departments.length > 0 && choice === null
+}
+
+/**
+ * What ［始める］ does, or null while it cannot be pressed (the place refused or not checked, or
+ * no departments chosen yet). A first download takes only the chosen folders (none = a company
+ * without departments, or 「すべて」: the whole company); an existing folder keeps its own choices.
+ */
+export type JoinStart = { kind: SetupKind; folders: string[] } | { kind: 'working' }
+
+export function joinStart(check: PlaceCheck | null, choice: DepartmentChoice): JoinStart | null {
+  if (!check || check.kind === 'error') return null
+  if (check.kind === 'working') return { kind: 'working' }
+  if (check.kind !== 'firstSetup') return { kind: check.kind, folders: [] }
+  if (needsDepartmentChoice(check, choice)) return null
+  return { kind: 'firstSetup', folders: choice === 'all' || choice === null ? [] : choice }
+}
+
+/** The department names a choice stands for, in the list's order (for the join screen's row). */
+export function chosenDepartmentNames(departments: readonly PickableDepartment[], choice: DepartmentChoice): string[] {
+  if (choice === 'all') return departments.map(d => d.name)
+  const chosen = new Set(choice ?? [])
+  return departments.filter(d => chosen.has(d.folder)).map(d => d.name)
 }

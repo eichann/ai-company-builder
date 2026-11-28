@@ -141,7 +141,7 @@ function App() {
 
   // Show login screen if not authenticated
   if (!user) {
-    return <LoginScreen />
+    return <LoginScreen serverUrl={serverUrl} />
   }
 
   // Show company selector if no company selected
