@@ -547,9 +547,12 @@ pressing each record's own action.
   server's to show** (independent review: a 返事のお願い the member still reads must not vanish for the session): each id
   of the gone group that the answer lists is forgotten (`lift`; its notice's own row comes back with the server's title for
   it — never through the contact's view), unless a newer read wrote that id since or the era or company changed; the ids it
-  does not list stay `gone`. Nothing is read again for a lifted id (no loop: a new notice about it reads it as usual).
+  does not list stay `gone`. A read that got no answer (`NO_NOTICES`: offline…) is asked once more at the store's next `want` (back
+  online, the panel shown again, a new notice; never on a timer). Nothing is read again for a lifted id (no loop: a new
+  notice about it reads it as usual).
   Tests: `contactStore.test.ts` 「a contact gone after the notices were read…」, 「…asks for the notices again…」, 「the notices
-  read again after the 404…」, 「a read of the notices that did not happen…」; `client/tests/notifications.test.ts` 「「read
+  read again after the 404…」, 「a read of the notices that did not happen…」, 「an older read of the notices landing after a second 404…」, 「the notices not read
+  again (offline) are asked once more…」; `client/tests/notifications.test.ts` 「「read
   again now」…」 (only a look started after the ask, never what was kept, never another company); `contact-card.spec.ts`
   「taken off the contact's 「この人たちだけ」…」 (新着 and 確認したもの, `#refreshes`) — mutation-checked.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in

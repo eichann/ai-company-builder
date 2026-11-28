@@ -51,6 +51,9 @@ export const rowContact = (e: ContactEntry | undefined): ContactView | 'gone' | 
  */
 export type NoticesAgain = (companyId: string) => Promise<ReadonlySet<string> | null>
 
+/** A contact's ids that went `gone` together (one 404), the read's era and its mark in `written`. */
+interface GoneGroup { companyId: string; started: CompanyEra; ids: readonly string[]; mark: number }
+
 /** `onGone`: a contact became not the member's to read — the notices on screen are older than that and are read again. */
 export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA, onGone?: NoticesAgain): ContactStore {
   let entries = new Map<string, ContactEntry>()
@@ -61,6 +64,8 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
   const written = new Map<string, number>()
   /** Each id's contact group (every id one shown contact answered for; the same set object for all of them). */
   const groups = new Map<string, Set<string>>()
+  /** Gone groups whose notices could not be read again yet (offline): asked again at the next `want`. */
+  let unlifted: GoneGroup[] = []
   let company: string | null = null
   let seq = 0
   const listeners = new Set<() => void>()
@@ -69,7 +74,7 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
   const forCompany = (companyId: string) => {
     if (company === companyId) return
     company = companyId
-    entries = new Map(); asked.clear(); newest.clear(); written.clear(); groups.clear()
+    entries = new Map(); asked.clear(); newest.clear(); written.clear(); groups.clear(); unlifted = []
   }
 
   /** The ids as one group, merged with the groups any of them was in already. */
@@ -107,7 +112,7 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
         const ids = [...groupOf(recordId)]
         const mark = seq
         for (const id of ids) { written.set(id, mark); entries.set(id, gone); groups.delete(id) }
-        if (onGone) lift(companyId, started, ids, mark, onGone(companyId))
+        if (onGone) lift({ companyId, started, ids, mark }, onGone(companyId))
       } else {
         // Not read: asked again the next time the names are (a reconnect, the panel shown again) — never on a timer.
         asked.delete(recordId)
@@ -120,17 +125,20 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
 
   /**
    * After the notices were read again: an id of the gone group the server still lists is forgotten (its notice is a plain
-   * row again, the server's to show), unless a read since wrote it or the company or era changed.
+   * row again, the server's to show), unless a read since wrote it or the company or era changed. Not read (offline): asked
+   * once more at the next `want` (back online, the panel shown again, a new notice) — never on a timer.
    */
-  function lift(companyId: string, started: CompanyEra, ids: readonly string[], mark: number, again: Promise<ReadonlySet<string> | null>) {
+  function lift(gone: GoneGroup, again: Promise<ReadonlySet<string> | null>) {
+    const { companyId, started, ids, mark } = gone
     void again.then(listed => {
-      if (!listed || !era.holds(started) || company !== companyId) return
+      if (!era.holds(started) || company !== companyId) return
+      if (!listed) { unlifted.push(gone); return }
       const back = ids.filter(id => listed.has(id) && entries.get(id)?.kind === 'gone' && written.get(id) === mark)
       if (back.length === 0) return
       entries = new Map(entries)
       for (const id of back) entries.delete(id)
       notify()
-    }, () => {})
+    }, () => { if (era.holds(started) && company === companyId) unlifted.push(gone) })
   }
 
   return {
@@ -138,6 +146,7 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
     view: id => shownView(entries.get(id)),
     want(companyId, wanted) {
       forCompany(companyId)
+      if (onGone && unlifted.length > 0) for (const gone of unlifted.splice(0)) lift(gone, onGone(companyId))
       for (const w of wanted.slice(0, CONTACT_ROW_READS)) {
         const at = w.lastIndexOf('@')
         const id = at < 0 ? w : w.slice(0, at)

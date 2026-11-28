@@ -173,3 +173,35 @@ test('a read of the notices that did not happen (null), or a read of the contact
   await settle()
   assert.equal(offline.entry(I)?.kind, 'gone')
 })
+
+test('an older read of the notices landing after a second 404 of the same id never lifts it (only its own 404\'s read may)', async () => {
+  const asks: Array<ReturnType<typeof later<ReadonlySet<string> | null>>> = []
+  const store = createContactStore(async () => GONE, undefined, () => { const a = later<ReadonlySet<string> | null>(); asks.push(a); return a.promise })
+  store.want('co-a', [`${R}@1`])
+  await settle()
+  store.want('co-a', [`${R}@2`])
+  await settle()
+  asks[0].answer(new Set([R]))
+  await settle()
+  assert.equal(store.entry(R)?.kind, 'gone')
+  asks[1].answer(new Set([R]))
+  await settle()
+  assert.equal(store.entry(R), undefined)
+})
+
+test('the notices not read again (offline) are asked once more at the next look (back online, the panel shown), then lifted', async () => {
+  let online = false
+  let asked = 0
+  const store = createContactStore(async () => GONE, undefined, async () => { asked++; return online ? new Set([R]) : null })
+  store.want('co-a', [`${R}@1`])
+  await settle()
+  assert.deepEqual([asked, store.entry(R)?.kind], [1, 'gone'])
+  online = true
+  store.want('co-a', [`${R}@1`])
+  await settle()
+  assert.deepEqual([asked, store.entry(R)?.kind], [2, undefined])
+  // Nothing left to ask: the next look asks nothing.
+  store.want('co-a', [`${R}@1`])
+  await settle()
+  assert.equal(asked, 2)
+})
