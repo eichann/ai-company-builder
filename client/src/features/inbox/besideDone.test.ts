@@ -4,18 +4,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { endCompanyEra } from '../../shared/lib/companyEra'
-import { forgetAllWork, noticeOf, publishOrder } from '../../shared/lib/workThrough'
+import { endedWords, forgetAllWork, noticeOf, publishOrder, setWorkNotice } from '../../shared/lib/workThrough'
 import { finishBeside, INBOX_WORK_KEY, openBeside, type Beside, type BesideDoneDeps } from './besideDone'
 import type { BesideCard } from './workModel'
 
 /** What appStore's `leaveCompanyOnScreen` does on another company or a sign-out. */
 const leaveCompany = () => { endCompanyEra(); forgetAllWork() }
 
-/** The slot's list moves, recorded: `ended` answers as the real one does (`last` for the row shown, else null). */
+/** The slot's list moves, recorded: `ended` acts as the real one does for the row shown (says the line, answers `last`). */
 function listOf(shown: string | null, beside: () => Beside | null) {
   const calls: string[] = []
   const deps: BesideDoneDeps = {
-    ended: rowKey => { calls.push(`ended ${rowKey}`); return rowKey === shown ? 'last' : null },
+    ended: (rowKey, title) => {
+      calls.push(`ended ${rowKey}`)
+      if (rowKey !== shown) return null
+      setWorkNotice(INBOX_WORK_KEY, { text: endedWords(title, true), undo: null })
+      return 'last'
+    },
     show: id => { calls.push(`show ${id}`) },
     current: beside,
     close: () => { calls.push('close') },
