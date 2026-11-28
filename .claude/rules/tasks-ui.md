@@ -277,7 +277,15 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
   Enter on a row shows its item and moves the focus into it; Esc in the item puts the focus back on its row. With
   nothing of the list shown, ↓ / ↑ go back to **the place** (the last item shown from that list — by a key or a
   click, `show`), else the first / last. Another company or a sign-out forgets every list's order, place and notice
-  (`forgetAllWork`, `appStore` beside `forgetAllShown`): a 取り消す of the last company never shows on the next one.
+  (`forgetAllWork`, `appStore` `leaveCompanyOnScreen` beside `forgetAllShown`): a 取り消す of the last company never shows on the next one.
+  **It also ends the company era** (`src/shared/lib/companyEra.ts`: `currentCompanyEra` / `inEra` / `endCompanyEra`, one
+  counter for the company and session on screen, ended only by `leaveCompanyOnScreen`; code review 2026-11-28: a 取り消す
+  answered after the switch showed the old item and put 「『…』を元に戻しました」 — the last company's 件名 — on the new
+  list). Work started for a list takes the era when it starts and, when its answer comes back in another era, changes
+  nothing on screen (shows no item, says nothing); the request itself was the last company's and stays so. 取り消す is
+  `undoOfEnded` (`workThrough.ts`; pressed in another era it does nothing). **The inbox (段2) uses the same era** for
+  what it starts, never a check of its own. Tests: `workThrough.test.ts` 「取り消す answered after another company…」 /
+  「取り消す kept on screen past a company change…」, `src/stores/appStore.test.ts` (which changes end the era) — mutation-checked.
 - **Finishing the item shown** (the card's end button, the list's ☑ on that row; `TaskCard` / `RecordCard` /
   `TaskListPanel` hand `onEnded` / `onCompleted` an `undo` of that one-step press's entry): the next item (the one
   after it; the last one → the one before) takes its place, and the list says 「『…』を片づけました。次の件です」 with
