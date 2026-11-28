@@ -164,14 +164,22 @@ export function proposalDeliverableFolder(candidateId: string): string {
 }
 
 /**
+ * Every place a candidate's job may read (`grant.reads.paths`): its read places, then the check's place — the one list the
+ * definition grants and the card shows as 読む場所, so what the member confirms is what the AI may read.
+ */
+export function proposalReadPaths(input: JobCandidateInput): string[] {
+  return [...new Set([...input.reads, ...(input.check.kind === 'new_files' ? [input.check.path] : [])])]
+}
+
+/**
  * The definition a candidate becomes (schema 4, not yet parsed — the server runs `parseJobDefinition` on it): the signed-in
  * member as the responsible person, the Skill the server pinned, the reads and the check's place read, the one やること it
  * creates at its end (`records`, `creates: ['task']`), the record reads / minutes / mail drafts only as chosen, at most one
  * run a day.
  */
 export function proposalDefinition(input: JobCandidateInput, pinned: { actingUser: string; procedure: JobProcedure; skillName: string; candidateId: string }): Record<string, unknown> {
-  const reads = [...new Set([...input.reads, ...(input.check.kind === 'new_files' ? [input.check.path] : [])])]
-  const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(input.deliverable !== null ? ['files_write'] : []), ...(input.mailDrafts ? ['outbound_draft'] : [])]
+  const reads = proposalReadPaths(input)
+  const tools =['records', ...(reads.length > 0 ? ['files_read'] : []), ...(input.deliverable !== null ? ['files_write'] : []), ...(input.mailDrafts ? ['outbound_draft'] : [])]
   const routes = [
     ...(input.readRecords ? JOB_PROPOSAL_RECORD_ROUTES : []),
     ...(input.check.kind === 'new_meetings' ? [JOB_MINUTES_ROUTE] : []),

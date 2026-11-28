@@ -66,6 +66,36 @@ test('a change whose answer was lost is judged by reading the candidate: made �
   await expect(card.getByText(/まだ直っていません/)).toHaveCount(0)
 })
 
+// 読む場所 says every place the AI will be able to read (grant.reads.paths), the check's own place included — never 「なし」
+// while the check's place is read (Codex review of UX stage 3, P2). Only the places added besides it can be taken off.
+const readsRow = (page: Page) => chatCard(page).locator('div', { has: page.locator('dt', { hasText: /^読む場所$/ }) }).locator('dd')
+
+test('読む場所 shows the check\'s place the AI reads, even when nothing else is read: never 「なし」', async ({ page }) => {
+  await page.goto(`${PAGE}?reads=none`)
+  const row = readsRow(page)
+  await expect(row).toContainText('営業部/訪問メモ')
+  await expect(row).toContainText('確かめる場所')
+  await expect(row).not.toContainText('なし')
+  await expect(row.getByRole('button', { name: '「営業部/訪問メモ」を外す' })).toHaveCount(0)
+})
+
+test('読む場所: the places added besides the check\'s can be taken off, the check\'s place cannot; it follows a new check place', async ({ page }) => {
+  await page.goto(PAGE)
+  const card = chatCard(page)
+  const row = readsRow(page)
+  await expect(row).toContainText('営業部/提案書')
+  await expect(row).toContainText('営業部/訪問メモ')
+  await expect(row.getByRole('button', { name: '「営業部/提案書」を外す' })).toBeVisible()
+  await expect(row.getByRole('button', { name: '「営業部/訪問メモ」を外す' })).toHaveCount(0)
+  // The check looks somewhere else: the AI reads that place instead, and 読む場所 says so.
+  await card.getByRole('button', { name: '確かめる場所を直す' }).click()
+  await card.getByRole('combobox', { name: '確かめる場所' }).selectOption('営業部/資料')
+  await expect(card.getByText(/直した案をサーバーで確かめました/)).toBeVisible()
+  await expect(row).toContainText('営業部/資料')
+  await expect(row).not.toContainText('営業部/訪問メモ')
+  await expect(row.getByRole('button', { name: '「営業部/資料」を外す' })).toHaveCount(0)
+})
+
 test('a place the server refuses goes back, and the card names no place in its reason', async ({ page }) => {
   await page.goto(PAGE)
   const card = chatCard(page)
