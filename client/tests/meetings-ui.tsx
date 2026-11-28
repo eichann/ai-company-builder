@@ -10,6 +10,7 @@
 // 「やることを足す」 answers 「似ている」 for a title close to a proposal (the server decides in the app).
 // `?three=1`: a server that keeps a series' three choices (`seriesChoice`). `?autoread=new`: the member
 // never chose 「届いた議事録を AI が自動で読む」 and starts at 自動では読まない (else the server does not answer it).
+// `?card=fail|off|throw`: main's answer to the card (failed / an older server / no answer).
 // `?clock=1`: the server's clock asked 定例ミーティング for 鈴木さん, its organiser, not started yet (`?clock=taken`: a
 // press then answers 409 MEETING_NOT_WAITING, someone's reading having started meanwhile).
 const CLOCK = new URLSearchParams(location.search).get('clock')
@@ -31,7 +32,7 @@ import { renderMeetingPanel } from '../src/app/meetingCard'
 import { renderRecordBundleField } from '../src/app/recordBundleField'
 import { recordDetailOf } from '../shared/record-details'
 import { summaryView } from '../shared/record-views'
-import { MEETING_NO_ACCESS_TEXT } from '../shared/minutes-app'
+import { MEETING_NO_ACCESS_TEXT, MINUTES_OFFLINE_TEXT } from '../shared/minutes-app'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
@@ -60,6 +61,8 @@ for (let n = 0; n < flood; n++) {
 }
 const autoSeries = new Set<string>()
 const THREE = params.get('three') === '1'
+// How main answers the card (`?card=fail|off|throw`, or `__acbMeetings.cardAnswer` later): null = the meeting.
+let cardAnswer: 'fail' | 'off' | 'throw' | null = (['fail', 'off', 'throw'] as const).find(k => k === params.get('card')) ?? null
 const seriesOff = new Set<string>()
 let autoRead = { mode: 'off' as 'outside' | 'all' | 'off', chosen: false }
 const before = new Map<string, Meeting>()
@@ -108,6 +111,9 @@ const move = (id: string, patch: Partial<Meeting>) => { const m = find(id); befo
 installElectronAPI({
   getMeetingArrivals: async () => ({ available: true, items: meetings.map(m => ({ ...arrivalOf(m), made: m.state === 'read' ? madeOf(detailOf(m)) : null })) }),
   getMeetingCardState: async (_c, id) => {
+    if (cardAnswer === 'fail') return { success: false, error: MINUTES_OFFLINE_TEXT }
+    if (cardAnswer === 'off') return { success: false, error: '' }
+    if (cardAnswer === 'throw') throw new Error('main did not answer')
     const m = find(id)
     const d = detailOf(m)
     return { success: true, ...(params.get('renew') === '1' ? { renewGoogle: true as const } : {}), meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
@@ -177,6 +183,9 @@ installElectronAPI({
 })
 ;(window as unknown as { __acbMeetings: unknown }).__acbMeetings = {
   finish: (id: string) => move(id, { state: 'read' }),
+  // Main's next answers to the card; `reread` says the meetings may have changed (the card reads again).
+  cardAnswer: (kind: 'fail' | 'off' | 'throw' | null) => { cardAnswer = kind },
+  reread: () => tell(),
   // The member chose elsewhere (Settings, another PC): the server now holds it.
   chooseAutoRead: (mode: 'outside' | 'all' | 'off') => { autoRead = { mode, chosen: true } },
 }

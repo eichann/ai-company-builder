@@ -17,7 +17,7 @@ export function renderMeetingPanel(companyId: string, meetingId: string, opts: {
   const { parts } = opts
   return (
     <MeetingPanel key={meetingId} companyId={companyId} meetingId={meetingId} members={opts.members} onConsult={opts.onConsult} onChanged={opts.onChanged}
-      summary={parts.summary} outputs={parts.outputs} bundle={parts.bundle}
+      summary={parts.summary} hasSummary={parts.hasSummary} outputs={parts.outputs} bundle={parts.bundle}
       renderReview={review => (
         <MinutesReview companyId={companyId} review={review} busy={false} onMeetingCard made={parts.tasks}
           onAct={async (id, action, at, note) => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }}

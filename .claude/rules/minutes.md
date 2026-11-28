@@ -432,18 +432,28 @@ or the decision service stops calling it, or another module uses the older per-m
 - **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, which hands it the card's
   parts — `MeetingCardParts` — composed in `src/app/meetingCard.tsx` with the tasks feature's
   `MinutesReview`, `onMeetingCard`: no second summary). **Each thing once, in this order** (owner
-  2026-11-05, 「ごちゃついてるな」): title, when, people (+ 見られる人); 要約; 決めたこと and **one list**
+  2026-11-05, 「ごちゃついてるな」; the buttons moved up 2026-11-28, UX review): title, when, people (+ 見られる人);
+  **the main buttons right under them** (［AI に読ませる］ unless it is asked in the summary's place, ［この会議について相談する］,
+  ［招待する］) with the card's load: 「会議の情報を読み込んでいます…」, a failure in main's words with ［もう一度］
+  (`role="alert"`; the buttons come once it is read), main's empty error (an older server, records off, an unknown state)
+  as a plain note that the buttons are not available here — never a failure —, and a failed read again keeps
+  what was shown with 「最新の状態を読み込めませんでした…」［もう一度］ (`nextMeetingCardLoad` in `model.ts`, the
+  latest read wins in `useMeetingCardState`); 要約 — **a meeting not read yet** (arrived / skipped / failed, no
+  summary) shows there 「AI はまだ議事録を読んでいません…」 with the card's only ［AI に読ませる］ (`hasSummary` in
+  `MeetingCardParts`); 決めたこと and **one list**
   「やることの案」 (「やること」 with no proposal left: the proposals with their buttons, put-away ones with
   ［戻す］, then the other tasks made from the meeting, each once; its 「議事録を確認する」 only on the
-  right; under it 「＋ やることを足す」 — a task of the meeting made by hand, `tasks-ui.md` "Similar items"), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
+  right; under it 「＋ やることを足す」 — a task of the meeting made by hand, `tasks-ui.md` "Similar items"), the series' automatic reading
+  (the one-time offer below, or the three choices) after the main buttons and the lists, then the 案件 field. The buttons:
+  ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
   the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members — and, when the server says the member may (`maySets`:
   the record's 責任者, a 部署の管理役, an owner / admin), 「まとまりや部署で招待する」 with `INVITE_SETS_NOTE`
   「…オーナーや管理者も、入れなければ見られません。」, the list's groups / departments named, not offered; 「招待した人は
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
-  一度招待すると、取り消すことはできません。」) and the 案件 field; then 「つながっているもの」 (the documents
+  一度招待すると、取り消すことはできません。」); then 「つながっているもの」 (the documents
   and the calendar day: 「Google で開く」), 経緯. The offer comes once per meeting (localStorage
   `meeting-auto-offered:<company>`) for a series: 「この定例は次から自動で読みますか？」. No band 「AI が反映
-  しました」 here: the chip says it. An older server (no card state): no buttons, plain lists. 見られる人:
+  しました」 here: the chip says it. An older server (no card state): no buttons, plain lists, and the note above. 見られる人:
   `meetingSeenWords` 「参加者のうち ACB の人 N人・招待した人 N人」 (another place keeps the server's phrase).
 - **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): one element. While none is linked and the
   server says the member may choose, the field itself asks 「どの〇〇の会議ですか？」 (or 「『…』の会議ですか？」
@@ -481,7 +491,8 @@ or the decision service stops calling it, or another module uses the older per-m
   (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
   (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
   view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link, ［はい］ too;
-  the card's order wide and narrow, each thing once; reading not counted as 新着, finished 新着 again; `?flood=12`:
+  the card's order wide and narrow, each thing once; the card's load — failed with ［もう一度］, kept on a failed read
+  again, 「使えない」 apart, the unread meeting's ［AI に読ませる］ in the summary's place; reading not counted as 新着, finished 新着 again; `?flood=12`:
   one row each, 「すべて確認した」 to 0 with nothing sent),
   `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 

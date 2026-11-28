@@ -66,6 +66,8 @@ interface Props {
 /** The card's parts the screen places around a meeting's own buttons and proposals. */
 export interface MeetingCardParts {
   summary: ReactNode
+  /** The AI's summary is there (a meeting not read yet has none: its card asks for the reading in that place). */
+  hasSummary: boolean
   /** 決めたこと and やること as plain lists, where the screen has no proposals to show. */
   outputs: ReactNode
   /** The 案件・プロジェクト field. */
@@ -289,7 +291,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     const tasks = linked.filter(r => r.thing === 'task' && !r.minutesReview)
     const summary = <MeetingSummary m={detail} />
     const outputs = <MeetingOutputs decisions={decisions} tasks={tasks} />
-    body = renderMeeting ? renderMeeting(record, { summary, outputs, bundle: field, tasks, onChanged: onReload }) : <>{summary}{outputs}{field}</>
+    body = renderMeeting ? renderMeeting(record, { summary, hasSummary: !!detail.summary, outputs, bundle: field, tasks, onChanged: onReload }) : <>{summary}{outputs}{field}</>
   } else if (detail?.kind === 'incoming') {
     from = <IncomingLine m={detail} />
     actions = <>{incoming}{detail.open && <OpenButton link={detail.open} />}</>
