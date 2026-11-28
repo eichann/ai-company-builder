@@ -57,6 +57,9 @@ test('the one parser judges a compact answer: a password field, a wrong role, an
   assert.deepEqual(parse('compact', '{"do":"set","ref":0,"value":"a","text":"b"}'), { problem: 'keys' })
   assert.deepEqual(parse('compact', '{"do":"go","path":"back","x":1}'), { problem: 'keys' })
   assert.deepEqual(parse('compact', 'text {"do":"set","ref":0,"value":"a"}'), { problem: 'not-json' })
+  // A `__proto__` key stays a plain key (never the object's prototype) and is refused as an extra key.
+  assert.deepEqual(parse('compact', '{"do":"set","ref":0,"value":"a","__proto__":{"text":"b"}}'), { problem: 'keys' })
+  assert.deepEqual(parse('compact', '{"do":"go","path":"back","__proto__":{"path":"/x"}}'), { problem: 'keys' })
 })
 
 test('each set knows only its own words', () => {
@@ -80,7 +83,7 @@ test('the history is shown in the set\'s words; the rest of each entry unchanged
   ]
   assert.deepEqual(toolsetHistory('current', history), history)
   assert.deepEqual(toolsetHistory('compact', history), [
-    { do: 'set', ref: 0, outcome: 'ok', typed: 'value-cut' }, { do: 'set', ref: 1, outcome: 'ok' }, { do: 'go', outcome: 'ok' },
+    { do: 'set', ref: 0, outcome: 'ok', typed: 'value-cut' }, { do: 'set', ref: 1, outcome: 'ok' }, { do: 'go', outcome: 'ok', path: 'back' },
     { do: 'click', ref: 3, outcome: 'refused', why: 'moved' },
   ])
 })

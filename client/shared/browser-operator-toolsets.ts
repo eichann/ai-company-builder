@@ -45,7 +45,7 @@ export type BrowserToolsetPrompt = 'browse' | 'work-preview' | 'work'
 /** The compact set's action lines: one word to put a value in, `go` for back too. */
 const COMPACT_ACTION_LINES: readonly string[] = [
   '{"do":"click","ref":<ref>} か {"do":"click","x":<画素>,"y":<画素>}',
-  '{"do":"set","ref":<ref。省くといまの入力欄>,"value":"<入れる文字か、options のどれか>"}',
+  '{"do":"set","ref":<ref。省くといまの入力欄>,"value":"<入れる文字（200字まで）か、options のどれか>"}',
   '{"do":"go","path":"/<同じサイトのアドレス>|back"}、{"do":"wait","seconds":<1〜5>}',
 ]
 
@@ -107,8 +107,11 @@ const HISTORY_WORDS: Readonly<Record<BrowserOperatorToolset, Partial<Record<Brow
   compact: { type: 'set', select: 'set', back: 'go' },
 }
 
-/** The history as the operator of a set is shown it: each `do` in its set's words, the rest unchanged. */
+/**
+ * The history as the operator of a set is shown it: each `do` in its set's words, the rest unchanged (a compact `back` as
+ * the `go` it wrote: `path: "back"`, so it reads as its own answer).
+ */
 export function toolsetHistory(set: BrowserOperatorToolset, history: readonly BrowserBrowseHistoryEntry[]): BrowserOperatorHistoryEntry[] {
   const words = HISTORY_WORDS[set]
-  return history.map(h => ({ ...h, do: words[h.do] ?? h.do }))
+  return history.map(h => ({ ...h, do: words[h.do] ?? h.do, ...(set === 'compact' && h.do === 'back' ? { path: 'back' } : {}) }))
 }

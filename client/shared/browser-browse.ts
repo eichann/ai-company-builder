@@ -565,7 +565,7 @@ export const BROWSER_OPERATOR_BROWSE_PROMPT = browseOperatorPrompt({ actions: OP
  * A history entry as the operator is shown it: its `do` in the words of the tool set it answers in (agent-browser.md "The
  * operator's tool sets": the compact set's `set`); the rest as the app recorded it.
  */
-export type BrowserOperatorHistoryEntry = Omit<BrowserBrowseHistoryEntry, 'do'> & { do: string }
+export type BrowserOperatorHistoryEntry = Omit<BrowserBrowseHistoryEntry, 'do'> & { do: string; path?: string }
 
 export interface BrowserBrowseHistoryEntry {
   do: BrowserBrowseAction['do']

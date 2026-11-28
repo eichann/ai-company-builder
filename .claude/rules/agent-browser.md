@@ -5033,8 +5033,9 @@ every set's. Playwright-MCP-like and both computer-use-like sets come after the 
   「係の道具」 (`BrowserToolsetSection`, shown with a site): 「いまの形」／「まとめた形」, saying that what the AI may do and the
   app's guards are the same and only how it is told changes. Read **once per request** (`toolset` dep of
   `wireBrowserBrowse` / `wireBrowserWork`, from main): a write task's preview and work use the same set.
-- **Measured**: the compact prompts are 53 characters shorter each (read 853 → 800, write preview 1356 → 1303, write
-  1331 → 1278; the action lines 250 → 197). The completion regression runs in both sets on the real window and prints
+- **Measured**: the compact prompts are 45 characters shorter each (read 853 → 808, write preview 1356 → 1311, write
+  1331 → 1286; the action lines 250 → 205). The compact history shows a back as the answer it wrote (`go`, `path:
+  "back"`). The completion regression runs in both sets on the real window and prints
   each set's operator steps, work steps and stops (`t.diagnostic`); a scripted operator takes the same number of steps
   in both (it measures that the sets behave alike, not a model's choices — those are the owner's trial on the real app).
 - **Said**: the retry words (`BROWSER_ANSWER_PROBLEM_WORDS`) still name today's keys (`option`, `text`) when a compact
