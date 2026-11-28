@@ -12,6 +12,7 @@ import {
   type ResolutionEntry,
   type Review,
   type ReviewComment,
+  type ReviewSaveFailure,
 } from '../model'
 import {
   deleteReviewFile,
@@ -24,16 +25,6 @@ import {
   updateMyReplies,
   writeReviewRequestFile,
 } from '../api'
-
-/**
- * A save that failed after its retries. `comment` / `reply`: the member's text
- * stays in its input, pressing the button again retries. `other`: `retry` runs
- * the same action again.
- */
-export interface ReviewSaveFailure {
-  kind: 'comment' | 'reply' | 'other'
-  retry?: () => void
-}
 
 /**
  * `reading`: how this kind of document is read for its review (「位置不明」, the snapshot); Markdown's

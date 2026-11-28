@@ -13,6 +13,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { EDITOR_SELECTION } from '../src/app/editorSelection'
+import { EDITOR_REVIEW_FRAME } from '../src/app/editorReviewFrame'
 import { commandArea, useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
@@ -113,7 +114,7 @@ export function Preview() {
   return (
     <main className="min-h-screen bg-bg text-text">
       <div style={{ height: 480, width: 800 }} {...commandArea('list', 'around')}>
-        <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={[MEETING, NOTES]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} inPlaceEditing />
+        <TabbedEditorPanel selection={EDITOR_SELECTION} reviewFrame={EDITOR_REVIEW_FRAME} openFiles={[MEETING, NOTES]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} inPlaceEditing />
       </div>
       <WindowCloseGuard />
     </main>

@@ -1,5 +1,5 @@
 import { WarningCircle, X } from '@phosphor-icons/react'
-import type { ReviewSaveFailure } from '../hooks/useMarkdownReview'
+import type { ReviewSaveFailure } from '../model'
 
 // Wording for members who are not engineers: what happened, that nothing they
 // wrote is lost, and the one thing to do.

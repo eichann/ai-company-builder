@@ -676,7 +676,8 @@ document's scripts can never read its review.
 - **On screen** (`HtmlDocumentPane`): the review's banners above the toolbar, ［レビュー履歴］ and
   ［レビューする］ in it, the side panel beside the document, the comment box **over the side panel,
   never over the document** (the view is drawn above the page), 「変更を確認」 in place of the document
-  (its view closes meanwhile). doc-review's components and hook as they are; doc-review imports
+  (its view closes meanwhile). doc-review's components and hook as they are, handed in through the
+  editor's review frame slot (`files-and-editor.md` "The review frame"); doc-review imports
   nothing of the viewer.
 - **Not protected (honestly)**: the document can change what is selected at the moment the member
   releases the mouse (its scripts can set the selection), so the quote in the comment box may be words

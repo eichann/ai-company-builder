@@ -19,6 +19,7 @@ import { ExternalCompareView } from './ExternalCompareView'
 import { LocalImage, PdfPreview, VideoPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
 import type { SelectionSlot } from '../selectionSlot'
+import type { ReviewFrameSlot } from '../reviewFrameSlot'
 import { HtmlDocumentPane } from './HtmlDocumentPane'
 import { HtmlSourceBar } from './HtmlViewToggle'
 
@@ -58,6 +59,8 @@ interface TabbedEditorPanelProps {
   inPlaceEditing?: boolean
   /** What the screen plugs into the selected words (the review's comment box: selectionSlot.ts). */
   selection?: SelectionSlot
+  /** What the screen plugs in around a document: the review's state, banners, history, side panel and diff (reviewFrameSlot.ts). */
+  reviewFrame: ReviewFrameSlot
 }
 
 export function TabbedEditorPanel({
@@ -83,6 +86,7 @@ export function TabbedEditorPanel({
   notice: topNotice,
   inPlaceEditing = false,
   selection,
+  reviewFrame,
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
@@ -112,7 +116,7 @@ export function TabbedEditorPanel({
   const files = useOpenFiles(fileTabs, shownFile, reviewReloadRef, setError)
   const { fileContents, setContent } = files
   const activeFile = shownFile ? fileContents.get(shownFile) : null
-  const { review, textSelection } = useEditorReview(shownFile, activeFile?.content || '')
+  const { review, textSelection } = useEditorReview(reviewFrame, shownFile,activeFile?.content || '')
   reviewReloadRef.current = review.reload
 
   const saving = useFileSaving({
@@ -271,6 +275,7 @@ export function TabbedEditorPanel({
       <div className="flex-1 overflow-hidden min-w-0">
         {activeFile && activeFilePath && activeFile.comparing && activeFile.external?.kind === 'changed' ? (
           <ExternalCompareView
+            diff={reviewFrame.diff}
             arrived={activeFile.external.diskContent}
             mine={activeFile.content}
             changedAgain={!!activeFile.changedWhileComparing}
@@ -288,6 +293,7 @@ export function TabbedEditorPanel({
             zoom={htmlZooms.current.get(activeFilePath)}
             onZoom={zoom => htmlZooms.current.set(activeFilePath, zoom)}
             review={review}
+            reviewFrame={reviewFrame}
             content={activeFile.content}
           />
         ) : activeFile?.isLoading ? (
@@ -316,6 +322,7 @@ export function TabbedEditorPanel({
             filePath={activeFilePath}
             content={activeFile.content}
             review={review}
+            reviewFrame={reviewFrame}
             textSelection={textSelection}
             showDiff={showDiff}
             setShowDiff={setShowDiff}

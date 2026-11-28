@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { MarkdownDiffView } from '../../doc-review/components/MarkdownDiffView'
 import { Button, Callout } from '../../../shared/ui/primitives'
+import type { ReviewFrameSlot } from '../reviewFrameSlot'
 
 interface ExternalCompareViewProps {
+  /** The line diff, handed in by the screen (the review frame's: reviewFrameSlot.ts). */
+  diff: ReviewFrameSlot['diff']
   /** The version that arrived on disk, as shown here: a press acts on this one only. */
   arrived: string
   /** The tab's edits. */
@@ -18,7 +20,7 @@ interface ExternalCompareViewProps {
  * done in one press, the version not picked kept in the backups first
  * (files-and-editor.md "External changes to open files").
  */
-export function ExternalCompareView({ arrived, mine, changedAgain, onSaveMine, onTakeArrived }: ExternalCompareViewProps) {
+export function ExternalCompareView({ diff, arrived,mine, changedAgain, onSaveMine, onTakeArrived }: ExternalCompareViewProps) {
   const [busy, setBusy] = useState(false)
   const choose = (pick: (compared: string) => Promise<unknown>) => {
     if (busy) return
@@ -37,11 +39,11 @@ export function ExternalCompareView({ arrived, mine, changedAgain, onSaveMine, o
         </Callout>
       )}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <MarkdownDiffView
-          snapshot={arrived}
-          current={mine}
-          noChangesMessage="届いた版とあなたの編集に違いはありません"
-        />
+        {diff({
+          snapshot: arrived,
+          current: mine,
+          noChangesMessage: '届いた版とあなたの編集に違いはありません',
+        })}
       </div>
       <div className="flex-shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-surface-sunken">
         <p className="min-w-0 flex-1 text-small text-text-muted">どちらにしても、選ばなかった方は［バックアップ履歴］に残ります。</p>

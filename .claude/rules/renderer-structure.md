@@ -70,6 +70,11 @@ deleted (refactor 5-6). Do not create them again: new code goes to `features/<na
    registered with a reason; using its `hooks/` or `api.ts` needs a reason why it cannot be
    avoided. A PR that adds an entry says why `app/` cannot compose the two through props or a
    slot. Still no barrels: the registered files are a feature's public surface.
+   The model of a slot: the editor declares what it needs of another feature as a small typed
+   slot of its own (`features/editor/selectionSlot.ts`, `reviewFrameSlot.ts`: parts as render
+   functions taking the editor's props, and a state hook the screen hands in as a constant), and
+   `app/` fills it with that feature's parts (`app/editorSelection.ts`, `app/editorReviewFrame.ts`);
+   since 2026-11-29 the editor sees only doc-review's `model.ts`.
    "Imported from anywhere" still makes no new folder-level cycle (`KNOWN_FOLDER_CYCLES`, same
    test, value imports only): `stores/` importing a feature or `shared/` that imports `stores/`
    back closes one. Listed today: `features/auth` ⇄ `shared` ⇄ `stores` (authStore calls

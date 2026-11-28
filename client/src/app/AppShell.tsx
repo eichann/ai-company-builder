@@ -32,6 +32,7 @@ import { TodayFolderSetting } from '../features/settings/components/TodayFolderS
 import { fileNameProblem, NAME_TAKEN_MESSAGE } from '../../shared/file-names'
 import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { EDITOR_SELECTION } from './editorSelection'
+import { EDITOR_REVIEW_FRAME } from './editorReviewFrame'
 import { AppDialogs } from './AppDialogs'
 import { LeftPanelTabs } from '../features/workspace/components/LeftPanelTabs'
 import { resolveLeftPanel, type LeftPanel } from '../features/workspace/leftPanels'
@@ -866,6 +867,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
                         tabsEnd={<TabTidyingMenu tidying={tidying} arrangement={arrangement} activeKey={activeFilePath} looks={recordLooks} />}
                         inPlaceEditing
                         selection={EDITOR_SELECTION}
+                        reviewFrame={EDITOR_REVIEW_FRAME}
                       />
                     )}
                   />

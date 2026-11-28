@@ -1,21 +1,21 @@
-// The editor reaches the document review (features/doc-review) only here, in
-// MarkdownPreviewPane and through MarkdownDiffView (boundary test: editor -> doc-review).
+// The review's state comes from the screen's review frame (reviewFrameSlot.ts); the editor decides
+// which document it is for and how that document is read.
 import { useEffect } from 'react'
-import { useMarkdownReview } from '../../doc-review/hooks/useMarkdownReview'
 import { useTextSelection } from './useTextSelection'
 import { markReviewSeen } from '../../doc-review/model'
 import { useAuthStore } from '../../../stores/authStore'
 import { isHtmlFile, isMarkdownFile } from '../fileKinds'
 import { htmlReading } from '../htmlReview'
+import type { ReviewFrameSlot } from '../reviewFrameSlot'
 
 /**
  * The review of the active document (Markdown, or HTML in its view), the text selection that starts a
  * comment in a Markdown preview, and its 「seen」 mark. An HTML document's quotes are its page's words.
  */
-export function useEditorReview(activeFilePath: string | null, content: string) {
+export function useEditorReview(frame: ReviewFrameSlot, activeFilePath: string | null, content: string) {
   const authUser = useAuthStore(state => state.user)
   const html = !!activeFilePath && isHtmlFile(activeFilePath)
-  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id, html ? htmlReading : undefined)
+  const review = frame.useReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id, html ? htmlReading : undefined)
   const textSelection = useTextSelection(
     review.isReviewing,
     content,
