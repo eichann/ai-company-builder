@@ -419,8 +419,8 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   // A file link in a consultation's own window opens here (that window has no editor).
   useFilesFromChatWindows()
 
-  const approvalCard = (approvalId: string, at: string) => currentCompany
-    ? <ApprovalCard key={approvalId} card={{ id: `card-${approvalId}`, companyId: currentCompany.id, conversationId: null, approvalId, origin: 'shown', at }} />
+  const approvalCard = (approvalId: string, at: string, onDone?: () => void) => currentCompany
+    ? <ApprovalCard key={approvalId} card={{ id: `card-${approvalId}`, companyId: currentCompany.id, conversationId: null, approvalId, origin: 'shown', at }} onDone={onDone} />
     : null
   // What the AI prepared for a task: the same mail and approval cards as in the consultation (the person sends / approves).
   const renderPrepared = (record: RecordViewSummary) => {
@@ -565,7 +565,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   }
   const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
   // The inbox (features/inbox) is the bottom panel's content: あなた待ち and 新着 from what main already read and the
-  // meetings; its approval and mail rows open the same cards as a task (a preview may hand in a sample instead).
+  // meetings; its approval and mail rows open the same cards as a task, beside its list (a preview may hand in a sample instead).
   // Its ［受け箱］ is the title bar's.
   const inbox = useInboxSlot({
     // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
@@ -576,11 +576,13 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
     onOpenJobs: () => { if (!showSettings) setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
-    renderApprovalCard: id => approvalCard(id, ''),
-    renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
+    renderApprovalCard: (id, onDone) => approvalCard(id, '', onDone),
+    renderMailDraft: (id, onDone) => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} onDone={onDone} /> : null,
     // 「ブラウザ操作」's plans: main decides (the switch is per PC, agent-browser.md "This PC's opt-in"); switched off,
     // `browserPlans:list` answers empty and asks the server nothing, so there is no row.
-    browserPlans: currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} />, planStates: PLAN_STATES } : undefined,
+    browserPlans: currentCompany ? { list: listBrowserPlans, renderCard: (id, onDone) => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} onDone={onDone} />, planStates: PLAN_STATES } : undefined,
+    // 「連絡」1枚's 「田中さんが返します」: the names the task list already read (none yet → 「ほかの人」).
+    memberName: id => taskList.data?.members?.find(m => m.id === id)?.name ?? null,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined

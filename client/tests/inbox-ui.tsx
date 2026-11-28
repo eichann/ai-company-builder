@@ -11,6 +11,10 @@
 // `listBrowserPlans` reaching main counts in `#plan-reads`; a run, cancel or confirm shows in `#acted`.
 // `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
 // `&chatcard=1`: the draft's card as a consultation shows it, outside the inbox (its ［任せる］ runs it there).
+// `?many=N` (working through the inbox, notifications.md "Working through the inbox"): N more 新着 on a fixed clock
+// (2026-11-27), so the list has more than its first 15 rows; `&approvals=N` N more approvals waiting (approving lands,
+// `&slow=1` a second later, `&failed=1` answered as a failed write). `?narrow=1`: the
+// panel 360 px wide (the kind chips fold into 「その他」). The keys ↑ ↓ Enter Esc are the app's (`useKeybindings`).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -28,7 +32,9 @@ import type { BrowserPlanView } from '../../shared/types/browser-plans'
 import type { NoticesState } from '../shared/notifications-app'
 import type { NotificationItem } from '../../shared/types/notifications'
 import type { ApprovalView } from '../../shared/types/approvals'
+import type { ContactFinishAnswer, ContactFinishRequest, ContactUndoAnswer, ContactUndoRequest, ContactView } from '../shared/contact-card'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
+import { useKeybindings } from '../src/shared/commands/commands'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -93,6 +99,17 @@ let state: NoticesState = MANUAL ? manualState : {
     ],
   },
 }
+// A fixed clock for the rows added below (never the real date: a test must not change with the day it runs).
+const FIXED = (minute: number) => new Date(Date.UTC(2026, 10, 27, 0, 0) + minute * 60_000).toISOString()
+const MANY = Number(params.get('many') ?? 0)
+const APPROVALS = Number(params.get('approvals') ?? 0)
+if (MANY > 0 || APPROVALS > 0) {
+  const more = Array.from({ length: MANY }, (_, i) => note(`n-many${i + 1}`, 'request_done', `task-many${String(i + 1).padStart(4, '0')}`, 'task', `報告 ${i + 1}`, `高橋さんが「報告 ${i + 1}」を完了にしました`, FIXED(-i)))
+  const approvals = Array.from({ length: APPROVALS }, (_, i) => ({ id: `approval-more${String(i + 1).padStart(4, '0')}`, type: 'approval', title: `値引きの承認 ${i + 1}`, state: 'pending', due: null }))
+  const items = [...state.notices.items, ...more]
+  state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total + approvals.length, items: [...state.myTurn.items, ...approvals] }, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
+}
+
 const HASH = `sha256:${'9c1e'.repeat(16)}`
 const view: ApprovalView = {
   id: 'approval-preview0001', state: 'pending', recordVersion: 1, pluginId: 'hubspot', operation: 'update_deal',
@@ -121,11 +138,83 @@ const planView = (id: string): BrowserPlanView => ({
 
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
+// `?contact=own|draft|waiting|other|made|conflict|changed|archived`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
+// with a notice; a fake server keeps the two records like the real one (one finish ends both, its undo brings both back,
+// `conflict` refuses the finish as 「先に変えた」). What a press sent shows in `#acted`. Synthetic data only.
+const CONTACT = params.get('contact')
+const IID = 'interaction-prev01a'
+const RID = 'reply_request-prev01a'
+const ALLOWED = { replied_elsewhere: true, close: true, drop: true }
+function sceneContact(scene: string): ContactView {
+  const reply: ContactView['replyRequests'][number] = { id: RID, title: 'A社 見積のご相談への返事', state: 'open', version: 4, assignee: 'u-me', due: '2026-12-02', guidelineDue: null, waitUntil: null, drafts: [], may: ALLOWED }
+  const interaction: ContactView['interaction'] = { id: IID, title: 'A社 見積のご相談', state: 'unsure', version: 7, assignee: 'u-me', maySettle: true }
+  switch (scene) {
+    case 'draft': return { interaction, replyRequests: [{ ...reply, drafts: [{ id: 'outbound_message-prev01a', version: 2 }] }], tasks: [] }
+    case 'waiting': return { interaction: { ...interaction, state: 'handled', maySettle: false }, replyRequests: [{ ...reply, state: 'waiting_reply', waitUntil: '2026-12-05' }], tasks: [] }
+    case 'other': return { interaction: { ...interaction, state: 'handled', assignee: 'u-tanaka', maySettle: false }, replyRequests: [{ ...reply, assignee: 'u-tanaka', may: { replied_elsewhere: false, close: false, drop: false } }], tasks: [] }
+    case 'made': return {
+      interaction: { ...interaction, state: 'handled', maySettle: false },
+      replyRequests: [{ ...reply, state: 'closed', may: { replied_elsewhere: false, close: false, drop: false } }],
+      tasks: [{ id: 'task-prev01a', title: '経費の申請を承認する', state: 'todo', version: 2, assignee: 'u-me' }],
+    }
+  }
+  return { interaction, replyRequests: [reply], tasks: [] }
+}
+let contactNow: ContactView | null = CONTACT ? sceneContact(CONTACT) : null
+// `&firstread=offline`: the contact's reads fail (not reached) until `window.__acbInbox.reconnect()` (then an `online` event).
+let contactOffline = params.get('firstread') === 'offline'
+let contactBefore: ContactView | null = null
+if (contactNow) {
+  const items = [
+    note('n-reply', 'reply_arrived', RID, 'reply_request', 'A社 見積のご相談への返事', 'A社から返事が来ました', at(0, 10)),
+    note('n-unsure', 'intake_unsure', IID, 'interaction', 'A社 見積のご相談', '「A社 見積のご相談」を確かめてください', at(0, 9)),
+    ...state.notices.items,
+  ]
+  state = { ...state, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
+}
+/** The fake server's finish: the 返事のお願い's end and, from 確認待ち, the contact's 「済んだ」 — both or neither. */
+function finishOnServer(input: ContactFinishRequest): ContactFinishAnswer {
+  const now = contactNow!
+  const reply = now.replyRequests[0]
+  if (CONTACT === 'conflict' || input.interaction.expectedVersion !== now.interaction.version || input.replyRequest.expectedVersion !== reply.version) {
+    return { success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'replyRequest', error: 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください' }
+  }
+  const settles = now.interaction.state === 'unsure'
+  contactBefore = now
+  contactNow = {
+    ...now,
+    interaction: settles ? { ...now.interaction, state: 'handled', version: now.interaction.version + 1, maySettle: false } : now.interaction,
+    replyRequests: [{ ...reply, state: input.replyRequest.action === 'drop' ? 'dropped' : 'closed', version: reply.version + 1, drafts: [], may: { replied_elsewhere: false, close: false, drop: false } }],
+  }
+  // `?contact=changed`: someone (another person, the AI) changes the contact right after the finish answered.
+  if (CONTACT === 'changed') contactNow = { ...contactNow, interaction: { ...contactNow.interaction, version: contactNow.interaction.version + 1 } }
+  return { success: true, result: {
+    interaction: settles ? { recordId: IID, outcome: 'done', state: 'handled', recordVersion: now.interaction.version + 1, version: now.interaction.version + 1 } : { recordId: IID, outcome: 'unchanged', state: now.interaction.state, recordVersion: now.interaction.version, version: null },
+    replyRequest: { recordId: RID, outcome: 'done', state: contactNow.replyRequests[0].state, recordVersion: reply.version + 1, version: reply.version + 1 },
+  } }
+}
+function undoOnServer(input: ContactUndoRequest): ContactUndoAnswer {
+  // Like the engine's undo: the version the card saw must still be the record's (something changed since → refused).
+  const now = contactNow!
+  if ((input.interaction && input.interaction.expectedVersion !== now.interaction.version) || input.replyRequest.expectedVersion !== now.replyRequests[0].version) {
+    return { success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'interaction', error: 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください' }
+  }
+  const before = contactBefore!
+  contactNow = { ...before, interaction: { ...before.interaction, version: before.interaction.version + (input.interaction ? 2 : 0) }, replyRequests: before.replyRequests.map(r => ({ ...r, version: r.version + 2 })) }
+  contactBefore = null
+  return { success: true, result: {
+    interaction: input.interaction ? { recordId: IID, outcome: 'done', state: contactNow.interaction.state, recordVersion: contactNow.interaction.version, version: contactNow.interaction.version } : null,
+    replyRequest: { recordId: RID, outcome: 'done', state: contactNow.replyRequests[0].state, recordVersion: contactNow.replyRequests[0].version, version: contactNow.replyRequests[0].version },
+  } }
+}
+
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
   const [acted, setActed] = useState('')
   const [planReads, setPlanReads] = useState(0)
+  // Every read of the notices main hands over (`#state-reads`): going down the list must ask nothing more.
+  const [stateReads, setStateReads] = useState(0)
   installElectronAPI({
     listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
     getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: MANUAL ? 'haishin.example.net' : 'manager.linestep.net' } }),
@@ -139,7 +228,7 @@ function Preview() {
     cancelBrowserPlan: async () => { setActed('cancel'); return { ok: false, offline: true, message: '（見本）' } },
     confirmBrowserExecution: async () => { setActed('confirm'); return { ok: false, offline: true, message: '（見本）' } },
     watchNotifications: async () => {},
-    getNotificationsState: async () => state,
+    getNotificationsState: async () => { setStateReads(n => n + 1); return state },
     onNotificationsChanged: changed.subscribe,
     markNotificationsRead: async (companyId, ids) => {
       if (params.get('offline') === '1') throw new Error('offline')
@@ -150,20 +239,45 @@ function Preview() {
       setTimeout(() => changed.emit({ companyId }), 0)
       return { success: true }
     },
-    getApproval: async () => ({ success: true, approval: approved ? { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: at(0, 11), by: 'u-tanaka', onBehalfOf: null, note: '承認します', resultOperationId: 'op-1' } } : view, names: { 'u-yamada': '山田', 'u-me': '阿部', 'u-tanaka': '田中' } }),
-    approveApproval: async () => { setActed('approve'); return { success: false, offline: true, error: '（見本）' } as never },
+    getApproval: async (_companyId, id) => ({ success: true, approval: approved && id === view.id ? { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: at(0, 11), by: 'u-tanaka', onBehalfOf: null, note: '承認します', resultOperationId: 'op-1' } } : { ...view, id, recordTitle: state.myTurn.items.find(i => i.id === id)?.title ?? view.recordTitle }, names: { 'u-yamada': '山田', 'u-me': '阿部', 'u-tanaka': '田中' } }),
+    // `&approvals=N`: an approve lands (the request leaves the turn, as the server's next read says); otherwise offline.
+    approveApproval: async (companyId, id) => {
+      setActed(a => [a, `approve ${id}`].filter(Boolean).join('|'))
+      if (APPROVALS === 0) return { success: false, offline: true, error: '（見本）' } as never
+      // `&slow=1`: the answer comes a second later (the member may open another card meanwhile).
+      if (params.get('slow') === '1') await new Promise(resolve => setTimeout(resolve, 1000))
+      // `&failed=1`: the outside write failed — the server answers 200 with the request `failed` (it stays in the turn).
+      if (params.get('failed') === '1') return { success: true, approval: { ...view, id, state: 'failed', viewerMayApprove: false }, names: {} } as never
+      state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total - 1, items: state.myTurn.items.filter(i => i.id !== id) } }
+      setTimeout(() => changed.emit({ companyId }), 0)
+      return { success: true, approval: { ...view, id, state: 'approved', viewerMayApprove: false, outcome: { at: FIXED(1), by: 'u-me', onBehalfOf: null, note: '承認します', resultOperationId: 'op-2' } } } as never
+    },
     getOutboundMail: async () => ({ success: false, offline: false, code: null, error: '（見本）下書きは、このページでは読み込みません。' }),
     sendOutboundMail: async () => { setActed('send'); return { success: false, offline: true, error: '（見本）' } as never },
+    getContact: async (_companyId, id) => {
+      if (contactOffline) return { success: false, gone: false, offline: true, error: 'サーバーにつながりません' }
+      return contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }
+    },
+    finishContact: async (_companyId, _id, input) => { setActed(`finish ${JSON.stringify(input)}`); return finishOnServer(input) },
+    undoContactFinish: async (_companyId, _id, input) => { setActed(`undo ${JSON.stringify(input)}`); return undoOnServer(input) },
+    // `?contact=archived`: ACB archived the mail in Gmail right after the 「済んだ」 (its note follows the finish's entry 8).
+    getContactArchived: async (_companyId, _id, afterVersion) => ({ success: true, stays: CONTACT === 'archived' && afterVersion === 8 }),
   })
+  useKeybindings()
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({
     companyId: 'co-preview', notices, open: true, onToggle: () => setOpened('toggled'),
     // The manual's fixed clock (2026-11-20) is before the inbox's first day: its notices count as 新着 here.
     newsSince: '2026-01-01T00:00:00.000Z',
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
-    renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
-    renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
-    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} />, planStates: PLAN_STATES } : undefined,
+    renderApprovalCard: (id, onDone) => <ApprovalCard key={id} card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} onDone={onDone} />,
+    // `?contact=draft`: the draft opened from the contact's card is a stand-in whose ［（見本）送った］ is the real card's sent
+    // `onDone` (this page reads no draft): what the inbox does after it is the real slot's.
+    renderMailDraft: (id, onDone) => CONTACT === 'draft'
+      ? <button type="button" onClick={onDone}>（見本）送った</button>
+      : <PreparedMailCard key={id} companyId="co-preview" messageId={id} onDone={onDone} />,
+    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: (id, onDone) => <BrowserPlanCard key={id} companyId="co-preview" planId={id} onDone={onDone} />, planStates: PLAN_STATES } : undefined,
+    memberName: id => (id === 'u-tanaka' ? '田中' : null),
   })
   return (
     <main className="flex h-screen flex-col bg-bg text-text">
@@ -172,8 +286,9 @@ function Preview() {
       <pre id="read">{read}</pre>
       <pre id="acted">{acted}</pre>
       <pre id="plan-reads">{planReads}</pre>
+      <pre id="state-reads">{stateReads}</pre>
       {params.get('chatcard') === '1' && <section aria-label="相談のカード"><BrowserPlanCard companyId="co-preview" planId={DRAFT} /></section>}
-      <div className="mt-auto h-[480px]">{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
+      <div className="mt-auto h-[480px]" style={params.get('narrow') === '1' ? { width: 360 } : undefined}>{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
       {inbox?.dialog}
     </main>
   )
@@ -190,6 +305,11 @@ Object.assign(window, {
     /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
     planApprovedElsewhere() {
       browserInbox = { ...browserInbox, plans: [] }
+    },
+    /** `&firstread=offline`: the server is reached again and the PC says it is online. */
+    reconnect() {
+      contactOffline = false
+      window.dispatchEvent(new Event('online'))
     },
     /** Every plan settled elsewhere: the next read lists none. */
     plansSettled() {
