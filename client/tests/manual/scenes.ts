@@ -239,11 +239,11 @@ export const scenes: Scene[] = [
     id: 'approval-card',
     about: 'An approval request (承認のお願い) as it appears in the chat.',
     page: 'approval-card',
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000' },
       { marker: { target: 'role=textbox', label: '1', at: 'left' } },
-      { marker: { target: 'role=button[name="承認" s]', label: '2', at: 'left' } },
+      { marker: { target: 'role=button[name="承認する" s]', label: '2', at: 'left' } },
     ],
   },
 
@@ -928,10 +928,10 @@ export const scenes: Scene[] = [
     about: '承認のお願い (only where the company uses it): the fixed content, the reason, 承認.',
     page: 'approval-card',
     query: { manual: '1' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000' }, { marker: { target: 'text=1,500,000', label: '1', at: 'right' } },
-      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '2', at: 'left' } },
+      { box: 'role=button[name="承認する" s]' }, { marker: { target: 'role=button[name="承認する" s]', label: '2', at: 'left' } },
     ],
   },
   {
@@ -1490,7 +1490,7 @@ export const scenes: Scene[] = [
     about: 'The approval request as 山田さん, who asked, sees it: 「佐藤さんの承認待ち」 and ［取り下げる］.',
     page: 'approval-card',
     query: { manual: '1', viewer: 'requester' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=佐藤さんの承認待ち' }, { marker: { target: 'text=佐藤さんの承認待ち', label: '1', at: 'left' } },
       { box: 'role=button[name="取り下げる"]' }, { marker: { target: 'role=button[name="取り下げる"]', label: '2', at: 'left' } },
@@ -1501,11 +1501,11 @@ export const scenes: Scene[] = [
     about: 'The same request as 佐藤さん, who decides, sees it: the change, the reason to write, ［承認］［差し戻す］.',
     page: 'approval-card',
     query: { manual: '1', approver: 'sato' },
-    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    crop: { target: 'main > section', padding: { x: 32, y: 16 } },
     annotations: [
       { box: 'text=1,500,000 >> nth=0' }, { marker: { target: 'text=1,500,000 >> nth=0', label: '1', at: 'right' } },
       { box: 'role=textbox' }, { marker: { target: 'role=textbox', label: '2', at: 'left' } },
-      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '3', at: 'left' } },
+      { box: 'role=button[name="承認する" s]' }, { marker: { target: 'role=button[name="承認する" s]', label: '3', at: 'left' } },
       { box: 'role=button[name="差し戻す"]' }, { marker: { target: 'role=button[name="差し戻す"]', label: '4', at: 'right' } },
     ],
   },

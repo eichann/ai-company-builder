@@ -1,24 +1,25 @@
 import { memo, useState } from 'react'
-import { ArrowRight, CheckCircle, Hourglass, Robot, Warning, XCircle } from '@phosphor-icons/react'
+import { ArrowsOut, CheckCircle, Hourglass, Robot, Warning, XCircle } from '@phosphor-icons/react'
+import { Button, StatusBadge } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
-import { nameOf, outcomeByText, percentText, stateLine, type ApprovalCardRef } from '../../../../shared/approvals'
-import { APPROVE_HASH_NOTE, type ApprovalView, type SimilarRecord } from '../../../../../shared/types/approvals'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import { outcomeByText, stateLine, type ApprovalCardRef } from '../../../../shared/approvals'
+import type { ApprovalView } from '../../../../../shared/types/approvals'
 import { approveApproval, getApproval, sameAsApproval, sendBackApproval, withdrawApproval, type ApprovalOutbound } from '../api'
 import { putApproval } from '../approvalStore'
+import { answerHint, pressFinished, type ApprovalPress } from '../approvalCard'
 import { useApproval } from '../hooks/useApproval'
 import { useUnknownResult } from '../hooks/useUnknownResult'
 import { unknownMessage, type PressOutcome, type UnknownWords } from '../unknownResult'
+import { BasisFolds, ChangeSection, DuplicateCheck } from './ApprovalCardParts'
 
-type PressKind = 'approve' | 'send-back' | 'withdraw' | 'same-as'
 /** What the card says when a press's answer did not come (it never says 「開き直すと分かります」). */
-const PRESS_WORDS: Record<PressKind, UnknownWords> = {
+const PRESS_WORDS: Record<ApprovalPress, UnknownWords> = {
   approve: { whether: '承認できたかどうか', notDone: '承認はまだ届いていません' },
   'send-back': { whether: '差し戻せたかどうか', notDone: '差し戻しはまだ届いていません' },
   withdraw: { whether: '取り下げられたかどうか', notDone: '取り下げはまだ届いていません' },
   'same-as': { whether: '「同じ」と伝えられたかどうか', notDone: '「同じ」はまだ届いていません' },
 }
-
-const TONE_CLASS = STATE_BOX
 
 // Awaiting approval is amber (owner decision 2026-11-21); amber otherwise means a warning only.
 const STATE_TONE: Record<ApprovalView['state'], StateBoxTone> = {
@@ -33,37 +34,42 @@ function StateIcon({ state }: { state: ApprovalView['state'] }) {
   return <Warning size={15} weight="bold" aria-hidden className="text-warning-icon" />
 }
 
-const BUTTON = 'rounded-control border px-3 py-1.5 text-xs disabled:opacity-50'
-const PLAIN_BUTTON = `${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`
-
-/** Why a similar record is listed, in the person's words. */
-function matchedText(x: SimilarRecord, systemLabel: string): string {
-  if (x.matchedBy === 'counterpart') return '同じ相手'
-  if (x.matchedBy === 'outside') return `${systemLabel} で見つかりました`
-  return '名前が似ています'
-}
-
 /** After 「同じ」: what happened to the meeting. */
 const MEETING_TEXT = { linked: '会議もこの記録につなぎました。', 'not-linked': '会議はつなげませんでした（会議の担当の人か管理者がつなげます）。', 'not-asked': '' } as const
 
+interface Props {
+  card: ApprovalCardRef
+  outbound?: ApprovalOutbound
+  /**
+   * A press here finished the request (approved, sent back, withdrawn, 「同じ」 — the server's answer says so; a write that
+   * failed or went stale stays on the card): where the card is worked through a list (the inbox), the next one.
+   */
+  onDone?: () => void
+  /** ［大きく開く（タブ）］: the same request as a tab in the middle (a consultation's card; absent where it already is one). */
+  onOpenLarge?: () => void
+}
+
 /**
- * An approval request (承認のお願い; client/shared/approvals.ts), drawn by the app — never by a
- * plugin or the AI's text. It reads the request with the member's session each time it is
- * shown; 「承認」 sends the reason and the hash of the content shown here, and the server acts
- * only when that is still the content it holds.
+ * An approval request (承認のお願い; client/shared/approvals.ts), drawn by the app — never by a plugin or the AI's text.
+ * It reads the request with the member's session each time it is shown; 「承認する」 sends the reason and the hash of the
+ * content shown here, and the server acts only when that is still the content it holds. Laid out to decide (owner
+ * decision 2026-11-28, 12番 案A): ① what changes, large → the folded basis → ② the duplicate check (a create) → ③ the
+ * reason → ④ the buttons, in a bar that stays at the bottom of the view while the card is on screen.
  */
-export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { card: ApprovalCardRef; outbound?: ApprovalOutbound }) {
+export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone, onOpenLarge }: Props) {
   const { key, view, names, error: loadError } = useApproval(card.companyId, card.approvalId, outbound)
+  // The card is memoised by its id: the latest callbacks are read when a press ends.
+  const callbacks = useLatestRef({ onDone, onOpenLarge })
   const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
   // null until the approver edits it: the AI's draft is shown first.
   const [edited, setEdited] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // 「別の…として作る」: the person looked at the similar records and this is a new one.
-  const [distinct, setDistinct] = useState(false)
+  // 「別の…として作る」 holds for the content it was chosen on: new content (another hash) asks again.
+  const [distinctFor, setDistinctFor] = useState<string | null>(null)
   const [linkMeeting, setLinkMeeting] = useState(true)
   // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
   // (Kept per request, not per card: a card shown again or a second card of it offers no press either.)
-  const unknown = useUnknownResult<{ kind: PressKind; before: ApprovalView['state'] }>(key)
+  const unknown = useUnknownResult<{ kind: ApprovalPress; before: ApprovalView['state'] }>(key)
   const reason = edited ?? view?.proposedReason ?? ''
   const locked = busy || unknown.unsure !== null
 
@@ -75,17 +81,16 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
     return r.approval.state !== before ? 'done' : 'not-done'
   }
   /** After an unknown answer: read again by itself; done → the state line says what happened, not done → press again. */
-  const settle = async (kind: PressKind, before: ApprovalView['state'], how: 'start' | 'checkNow') => {
+  const settle = async (kind: ApprovalPress, before: ApprovalView['state'], how: 'start' | 'checkNow') => {
     setMessage(null)
     const outcome = await unknown[how]({ kind, before }, readAfter(before))
     if (outcome === 'not-done') setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'not-done') })
   }
   const unsureBox = unknown.unsure && (
-    <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${TONE_CLASS.info}`}>
+    <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX.info}`}>
       {unknownMessage(PRESS_WORDS[unknown.unsure.press.kind], unknown.unsure.checking ? 'checking' : 'unreadable')}
       {/* Only a read: 「結果を確かめる」 never sends the press again. */}
-      {!unknown.unsure.checking && <button type="button" onClick={() => void settle(unknown.unsure!.press.kind, unknown.unsure!.press.before, 'checkNow')}
-        className={`${PLAIN_BUTTON} ml-2 mt-1`}>結果を確かめる</button>}
+      {!unknown.unsure.checking && <Button size="sm" className="ml-2 mt-1" onClick={() => void settle(unknown.unsure!.press.kind, unknown.unsure!.press.before, 'checkNow')}>結果を確かめる</Button>}
     </div>
   )
 
@@ -98,31 +103,35 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       const withMeeting = linkMeeting && view.basis.meetingId !== null
       const r = await (outbound ? sameAsApproval(card.companyId, view.id, recordId, withMeeting, outbound) : sameAsApproval(card.companyId, view.id, recordId, withMeeting))
       putApproval(key, r)
-      if (r.success) setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` })
-      else if (r.offline) void settle('same-as', view.state, 'start')
+      if (r.success) {
+        setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` })
+        if (pressFinished('same-as', r.approval.state)) callbacks.current.onDone?.()
+      } else if (r.offline) void settle('same-as', view.state, 'start')
       else setMessage({ tone: 'error', text: r.error })
     } finally {
       setBusy(false)
     }
   }
 
-  const act = async (kind: 'approve' | 'send-back' | 'withdraw') => {
-    if (!view || locked) return
+  // `shown` is the view this render draws: 「承認する」 sends its hash, never one read at another time.
+  const act = async (kind: 'approve' | 'send-back' | 'withdraw', shown: ApprovalView) => {
+    if (locked) return
     setBusy(true)
     setMessage(null)
     try {
       const r = kind === 'approve'
-        ? await (outbound ? approveApproval(card.companyId, view.id, view.hash, reason, outbound) : approveApproval(card.companyId, view.id, view.hash, reason))
+        ? await (outbound ? approveApproval(card.companyId, shown.id, shown.hash, reason, outbound) : approveApproval(card.companyId, shown.id, shown.hash, reason))
         : kind === 'send-back'
-          ? await (outbound ? sendBackApproval(card.companyId, view.id, reason, outbound) : sendBackApproval(card.companyId, view.id, reason))
-          : await (outbound ? withdrawApproval(card.companyId, view.id, outbound) : withdrawApproval(card.companyId, view.id))
+          ? await (outbound ? sendBackApproval(card.companyId, shown.id, reason, outbound) : sendBackApproval(card.companyId, shown.id, reason))
+          : await (outbound ? withdrawApproval(card.companyId, shown.id, outbound) : withdrawApproval(card.companyId, shown.id))
       putApproval(key, r)
-      if (!r.success && r.offline) void settle(kind, view.state, 'start')
-      else if (!r.success) {
+      if (r.success) { if (pressFinished(kind, r.approval.state)) callbacks.current.onDone?.() }
+      else if (r.offline) void settle(kind, shown.state, 'start')
+      else {
         setMessage({ tone: 'error', text: r.error })
         // The content changed (or the state moved): show what the server holds now.
         if (!r.approval && (r.code === 'CONTENT_CHANGED' || r.code === 'NOT_PENDING')) {
-          putApproval(key, await (outbound ? getApproval(card.companyId, view.id, outbound) : getApproval(card.companyId, view.id)))
+          putApproval(key, await (outbound ? getApproval(card.companyId, shown.id, outbound) : getApproval(card.companyId, shown.id)))
         }
       }
     } finally {
@@ -132,7 +141,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
 
   if (!view) {
     return (
-      <div role="group" aria-label="承認のお願い" className={`my-2 rounded-card border p-3 text-xs text-gray-600 dark:text-zinc-300 ${TONE_CLASS.plain}`}>
+      <div role="group" aria-label="承認のお願い" className={`my-2 rounded-card border p-3 text-small text-text-muted ${STATE_BOX.plain}`}>
         {loadError ?? '承認のお願いを読み込んでいます…'}
       </div>
     )
@@ -141,101 +150,51 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
   const pending = view.state === 'pending'
   const canAnswer = pending && view.viewerMayApprove
   const canWithdraw = view.viewerIsRequester && (pending || view.state === 'sent_back')
-  const similar = view.similar
-  const similarItems = similar?.items ?? []
+  const similarItems = view.similar?.items ?? []
+  const distinct = distinctFor === view.hash
   // Before approving a new record with similar ones listed, the person says which it is.
   const mustChoose = canAnswer && similarItems.length > 0 && !distinct
-  const canSayDuplicate = (canAnswer || canWithdraw) && similarItems.length > 0 && !distinct
+  const answering = canAnswer && !unknown.unsure
+  const reasonEmpty = reason.trim() === ''
   return (
-    <div role="group" aria-label="承認のお願い" data-state={view.state} className={`my-2 rounded-card border p-3 ${TONE_CLASS[STATE_TONE[view.state]]}`}>
-      <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
-        <StateIcon state={view.state} />
-        承認のお願い：{view.operationLabel}
-        {view.requestedByAi && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-caption font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
-          <Robot size={12} aria-hidden />AI の案から
-        </span>}
-      </div>
-      {view.recordTitle && <p className="mt-1 text-sm text-gray-800 dark:text-zinc-200">{view.recordTitle}</p>}
-      {view.changes.length > 0 && <ul aria-label="変える欄" className="mt-2 space-y-1">
-        {view.changes.map(c => <li key={c.field} className="flex flex-wrap items-center gap-1.5 text-xs text-gray-800 dark:text-zinc-200">
-          <span className="text-gray-500 dark:text-zinc-400">{c.label}</span>
-          <span>{c.beforeShown}</span><ArrowRight size={11} aria-hidden /><span className="sr-only">から</span>
-          <span className="font-medium">{c.afterShown}</span>
-          {percentText(c.changePercent) && <span className="text-gray-500 dark:text-zinc-400">（{percentText(c.changePercent)}）</span>}
-        </li>)}
-      </ul>}
-      {view.create && <div className="mt-2 text-xs text-gray-800 dark:text-zinc-200">
-        <p>作るもの：<span className="font-medium">{view.create.title}</span></p>
-        {view.create.fields.length > 0 && <ul className="mt-1">{view.create.fields.map(f => <li key={f.label}>{f.label}：{f.shown}</li>)}</ul>}
-      </div>}
-      {similar && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-        <p className="text-gray-500 dark:text-zinc-400">似ているもの（すでにある{similar.typeLabel}）</p>
-        {similarItems.length === 0 ? <p>見つかりませんでした</p> : <ul aria-label="似ているもの" className="mt-0.5 space-y-1">{similarItems.map(x => <li key={x.recordId} className="rounded-control border border-gray-200 p-1.5 dark:border-zinc-700">
-          <p className="font-medium text-gray-900 dark:text-zinc-100">{x.title || '（件名なし）'}</p>
-          <p className="text-caption font-normal text-gray-500 dark:text-zinc-400">
-            {[x.status, x.assignee ? `担当 ${nameOf(names, x.assignee)}さん` : null, `更新 ${x.updatedAt.slice(0, 10)}`, matchedText(x, view.systemLabel)].filter(Boolean).join('・')}
-          </p>
-          {canSayDuplicate && <button type="button" disabled={locked} onClick={() => void sameAs(x.recordId)} className={`${PLAIN_BUTTON} mt-1`}>
-            これと同じ{similar.typeLabel}です（作らない）
-          </button>}
-        </li>)}</ul>}
-        {similar.outside === 'unavailable' && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{view.systemLabel} にはいま聞けませんでした（ACB にあるものだけを出しています）</p>}
-        {canSayDuplicate && <div className="mt-1 flex flex-wrap items-center gap-2">
-          {view.basis.meetingId && <label className="flex items-center gap-1 text-caption font-normal text-gray-600 dark:text-zinc-300">
-            <input type="checkbox" checked={linkMeeting} onChange={e => setLinkMeeting(e.target.checked)} />同じだったら、会議もその{similar.typeLabel}につなぐ
-          </label>}
-          <button type="button" disabled={locked} onClick={() => setDistinct(true)} className={PLAIN_BUTTON}>別の{similar.typeLabel}として作る</button>
-        </div>}
-      </div>}
-      {view.similarRequests && view.similarRequests.length > 0 && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-        <p className="text-gray-500 dark:text-zinc-400">似ているお願い（まだ承認待ちのもの）</p>
-        <ul aria-label="似ているお願い" className="mt-0.5 space-y-0.5">{view.similarRequests.map(x => <li key={x.approvalId}>
-          <span className="font-medium text-gray-900 dark:text-zinc-100">{x.title || '（名前なし）'}</span>
-          <span className="text-caption font-normal text-gray-500 dark:text-zinc-400">{`・${nameOf(names, x.requestedBy)}さんのお願い・${x.createdAt.slice(0, 10)}${x.sameSource ? '・同じ会議から' : ''}`}</span>
-        </li>)}</ul>
-      </div>}
-      {view.basis.quote && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-
-        <p className="text-gray-500 dark:text-zinc-400">理由（{view.basis.meetingTitle ? `会議「${view.basis.meetingTitle}」の議事録` : '議事録'}の引用）</p>
-        <blockquote className="mt-0.5 border-l-2 border-gray-300 pl-2 dark:border-zinc-600">{view.basis.quote}</blockquote>
-      </div>}
-      <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-        <p className="text-gray-500 dark:text-zinc-400">前例（同じ部署の、同じ欄の承認：{view.precedents.total} 件）</p>
-        {view.precedents.items.length === 0 ? <p>見られる前例はありません</p> : <ul aria-label="前例" className="mt-0.5 space-y-0.5">
-          {view.precedents.items.map(p => <li key={p.approvalId}>
-            {`${p.at.slice(0, 10)}・${p.fields.map(f => `${f.label} ${f.beforeShown} → ${f.afterShown}`).join('、')}・${p.state === 'approved' ? '承認' : '差し戻し'}`}
-            {p.reason ? `：${p.reason}` : ''}
-            {p.nowShown && p.nowShown.length > 0 ? `（その後：${p.nowShown.map(n => `${n.label} ${n.shown}`).join('、')}）` : ''}
-          </li>)}
-        </ul>}
-      </div>
-      {view.materials.length > 0 && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-        <p className="text-gray-500 dark:text-zinc-400">材料</p>
-        <ul aria-label="材料">{view.materials.map(m => <li key={m.recordId}>{m.kind === 'meeting' ? '会議' : '記録'}「{m.title}」{m.version !== null ? `（お願いしたときの版 ${m.version}）` : ''}</li>)}</ul>
-      </div>}
-      {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
-      <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>
-      {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
-      {unsureBox}
-      {canAnswer && !unknown.unsure && <div className="mt-2">
-        <label className="block text-xs text-gray-600 dark:text-zinc-300">
-          理由（必ず書いてください。AI の下書きを直せます）
-          <textarea value={reason} onChange={e => setEdited(e.target.value)} rows={3} maxLength={2000}
-            className="mt-1 w-full rounded-control border border-gray-300 bg-white p-2 text-xs text-gray-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" />
-        </label>
-        <p className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{mustChoose ? '似ているものと同じかどうかを先に選んでください。' : APPROVE_HASH_NOTE}</p>
-        <div className="mt-1 flex flex-wrap gap-2">
-          <button type="button" disabled={busy || reason.trim() === '' || mustChoose} title={mustChoose ? '似ているものと同じかどうかを先に選んでください' : undefined} onClick={() => void act('approve')}
-            className={`${BUTTON} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}>{busy ? '承認しています…' : '承認'}</button>
-          <button type="button" disabled={busy || reason.trim() === ''} onClick={() => void act('send-back')}
-            className={`${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}>差し戻す</button>
+    <div role="group" aria-label="承認のお願い" data-state={view.state} className={`my-2 rounded-card border ${STATE_BOX[STATE_TONE[view.state]]}`}>
+      <div className="p-3">
+        <div className="flex flex-wrap items-center gap-1.5 text-body font-strong text-text">
+          <StateIcon state={view.state} />
+          <span className="min-w-0">承認のお願い：{view.operationLabel}</span>
+          <span className="ml-auto flex items-center gap-1">
+            {view.requestedByAi && <StatusBadge variant="ai" icon={Robot}>AI の案から</StatusBadge>}
+            {onOpenLarge && <Button size="sm" variant="ghost" title="真ん中のタブで大きく開きます" onClick={() => callbacks.current.onOpenLarge?.()}>
+              <ArrowsOut size={12} aria-hidden />大きく開く（タブ）
+            </Button>}
+          </span>
         </div>
-      </div>}
-      {canWithdraw && !canAnswer && <div className="mt-2">
-        <button type="button" disabled={locked} onClick={() => void act('withdraw')}
-          className={`${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}>取り下げる</button>
+        <p role="status" className={`mt-1 text-small ${pending ? 'text-text-muted' : 'text-text'}`}>{stateLine(view, names)}</p>
+        {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-caption font-normal text-text-subtle">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
+        <ChangeSection view={view} />
+        <BasisFolds view={view} names={names} />
+        {view.similar && <DuplicateCheck view={view} names={names} chosen={distinct} actable={(canAnswer || canWithdraw) && !unknown.unsure} locked={locked}
+          linkMeeting={linkMeeting} onLinkMeeting={setLinkMeeting} onSame={id => void sameAs(id)}
+          onDistinct={() => setDistinctFor(view.hash)} onChooseAgain={() => setDistinctFor(null)} />}
+        {!canAnswer && view.proposedReason && <p className="mt-2 text-small text-text-muted">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
+        {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[message.tone]}`}>{message.text}</div>}
+        {unsureBox}
+        {answering && <label className="mt-3 block text-small text-text-muted">
+          理由（必ず書きます）
+          {view.proposedReason && edited === null && <span className="ml-1 text-caption font-normal text-text-subtle">{view.requestedByAi ? 'AI の下書きが入っています。直せます' : 'お願いした人の下書きが入っています。直せます'}</span>}
+          <textarea value={reason} onChange={e => setEdited(e.target.value)} rows={2} maxLength={2000}
+            className="mt-1 w-full rounded-control border border-border-control bg-bg p-2 text-body text-text focus:border-focus-border focus:outline-none" />
+        </label>}
+        {canWithdraw && !canAnswer && <div className="mt-2">
+          <Button size="sm" disabled={locked} onClick={() => void act('withdraw', view)}>取り下げる</Button>
+        </div>}
+      </div>
+      {/* ④ The buttons stay in reach at the bottom of the view (a short screen, a long card) while the card is shown. */}
+      {answering && <div data-approval-bar className="sticky bottom-0 flex flex-wrap items-center gap-2 rounded-b-card border-t border-[color:var(--color-border)] bg-surface-raised px-3 py-2">
+        <Button variant="primary" disabled={busy || reasonEmpty || mustChoose} onClick={() => void act('approve', view)}>{busy ? '承認しています…' : '承認する'}</Button>
+        <Button disabled={busy || reasonEmpty} onClick={() => void act('send-back', view)}>差し戻す</Button>
+        <span className="text-caption font-normal text-text-subtle">{answerHint({ mustChoose, reasonEmpty })}</span>
       </div>}
     </div>
   )
-}, (prev, next) => prev.card.id === next.card.id)
+}, (prev, next) => prev.card.id === next.card.id && !prev.onOpenLarge === !next.onOpenLarge)
