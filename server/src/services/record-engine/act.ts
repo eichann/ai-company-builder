@@ -454,8 +454,10 @@ export function acting(ctx: EngineContext) {
       if (action.handTo && def.implements.includes('request')) nextFields.next_actor = nextFields[action.handTo] ?? null
       let nextState = action.to ?? current.state
       // Acceptance (records.md "Acceptance"): a new assignee — or the AI handing work over — may
-      // leave it 引き受け待ち; the assignee acting (「引き受ける」) accepts.
-      const acceptance = acceptanceOf(row.type)
+      // leave it 引き受け待ち; the assignee acting (「引き受ける」) accepts. A correction of words (件名・目的を直す,
+      // `isCorrection`) is no part of it, whoever runs it (owner decision 2026-11-28): the state, `accepted_by` and
+      // `next_actor` stay as they are, so nobody is told 「引き受けました」.
+      const acceptance = isCorrection(action) ? null : acceptanceOf(row.type)
       if (acceptance) {
         const originChange = linkChanges.find(l => l.name === acceptance.origin)
         nextState = applyAcceptance(deps, {
@@ -463,7 +465,7 @@ export function acting(ctx: EngineContext) {
           state: nextState, fromState: current.state, fields: nextFields,
           assigneeChanged: typeof args.assignee === 'string' && args.assignee !== (current.fields.assignee ?? null),
           memberId: member.userId, actorKind: actor.kind, onBehalfOf,
-          // The member's own AI at their request moving the state (引き受ける, 完了) acts as them; a correction of words does not accept.
+          // The member's own AI at their request moving the state (引き受ける, 完了) acts as them.
           askedByMember: askedTurn !== null && action.to !== null,
           originIds: originChange ? originChange.targets : records.linksFrom([row.id]).filter(l => l.name === acceptance.origin && l.targetId !== null).map(l => l.targetId as string),
           records,
