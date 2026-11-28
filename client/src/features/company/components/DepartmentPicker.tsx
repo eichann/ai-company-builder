@@ -1,61 +1,38 @@
 import { useState } from 'react'
 import { ArrowRight, Check, CloudArrowDown } from '@phosphor-icons/react'
-import type { PickableDepartment } from '../model'
+import { NOTHING_PICKED, pickedDownload, togglePick, type DepartmentPick, type PickableDepartment } from '../model'
 import { BACK_BUTTON, ScreenHeading } from './SelectorParts'
 
 /**
- * Which departments a first setup downloads; the rest can be added later in
- * settings. Rendered only while shown, so every visit starts with none picked.
+ * Which departments a first setup puts on this PC; the rest can be added later. 「すべての部署」 is a
+ * choice of its own: with nothing chosen the button waits (never 「すべて」 by itself). Rendered only
+ * while shown, so every visit starts with nothing chosen.
  */
 export function DepartmentPicker({ departments, onBack, onDownload }: {
   departments: PickableDepartment[]
   onBack: () => void
-  /** The picked folders in the list's order; none picked = everything. */
-  onDownload: (folders: string[]) => void
+  /** 'all' = every department; else the chosen folders in the list's order. */
+  onDownload: (folders: 'all' | string[]) => void
 }) {
-  const [picked, setPicked] = useState<Set<string>>(() => new Set())
-
-  function toggle(folder: string) {
-    setPicked(prev => {
-      const next = new Set(prev)
-      if (next.has(folder)) next.delete(folder)
-      else next.add(folder)
-      return next
-    })
-  }
+  const [pick, setPick] = useState<DepartmentPick>(NOTHING_PICKED)
+  const download = pickedDownload(departments, pick)
 
   return (
     <div className="space-y-6">
-      <ScreenHeading icon={CloudArrowDown} title="所属する部署を選択">
-        所属する部署を選んでください。他の部署はあとから設定でダウンロードできます
+      <ScreenHeading icon={CloudArrowDown} title="この PC に置く部署を選ぶ">
+        この PC にダウンロードする部署を選んでください。選ばなかった部署も一覧には出ていて、あとからいつでもダウンロードできます
       </ScreenHeading>
 
-      <div className="space-y-2 max-h-80 overflow-y-auto">
-        {departments.map(dept => {
-          const isPicked = picked.has(dept.folder)
-          return (
-            <button
-              key={dept.id}
-              onClick={() => toggle(dept.folder)}
-              aria-pressed={isPicked}
-              className={`w-full flex items-center gap-3 p-3 rounded-control border transition-colors text-left ${
-                isPicked ? 'border-primary bg-selected-bg' : 'border-[color:var(--color-border)] hover:border-selected-border'
-              }`}
-            >
-              <div className={`w-5 h-5 rounded-small border flex items-center justify-center flex-shrink-0 ${
-                isPicked ? 'bg-primary border-primary' : 'border-[color:var(--color-border)]'
-              }`}>
-                {isPicked && <Check size={14} className="text-on-primary" weight="bold" />}
-              </div>
-              <span className="flex-1 text-text">{dept.name}</span>
-              <span className="text-xs text-text-muted font-mono">{dept.folder}/</span>
-            </button>
-          )
-        })}
+      <div role="group" aria-label="この PC に置く部署" className="space-y-2 max-h-80 overflow-y-auto">
+        <Option label="すべての部署" detail={`${departments.length} 部署`} picked={pick.all} onPress={() => setPick(p => togglePick(p, 'all'))} />
+        {departments.map(dept => (
+          <Option key={dept.id} label={dept.name} detail={`${dept.folder}/`} mono picked={!pick.all && pick.folders.has(dept.folder)}
+            onPress={() => setPick(p => togglePick(p, dept.folder))} />
+        ))}
       </div>
 
       <p className="text-xs text-text-muted">
-        全社で共有しているファイル（Skill など）は常にダウンロードされます。部署を選ばない場合は、すべての部署をダウンロードします。
+        全社で共有しているファイル（Skill など）は、どれを選んでもダウンロードされます。
       </p>
 
       <div className="flex gap-3">
@@ -63,15 +40,37 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
           戻る
         </button>
         <button
-          onClick={() => onDownload(departments.map(d => d.folder).filter(f => picked.has(f)))}
-          className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-on-primary rounded-control px-4 py-3 transition-colors"
+          disabled={download === null}
+          onClick={() => { if (download !== null) onDownload(download) }}
+          className="flex-1 flex items-center justify-center gap-2 bg-primary enabled:hover:bg-primary-hover text-on-primary rounded-control px-4 py-3 transition-colors disabled:opacity-disabled disabled:cursor-not-allowed"
         >
-          {picked.size > 0
-            ? `選んだ部署をダウンロード（${picked.size}）`
-            : 'すべての部署をダウンロード'}
-          <ArrowRight size={18} />
+          {download === 'all' ? 'すべての部署をダウンロード'
+            : download ? `選んだ部署をダウンロード（${download.length}）`
+            : '部署を選んでください'}
+          {download !== null && <ArrowRight size={18} />}
         </button>
       </div>
     </div>
+  )
+}
+
+function Option({ label, detail, mono, picked, onPress }: { label: string; detail: string; mono?: boolean; picked: boolean; onPress: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onPress}
+      aria-pressed={picked}
+      className={`w-full flex items-center gap-3 p-3 rounded-control border transition-colors text-left ${
+        picked ? 'border-primary bg-selected-bg' : 'border-[color:var(--color-border)] hover:border-selected-border'
+      }`}
+    >
+      <div className={`w-5 h-5 rounded-small border flex items-center justify-center flex-shrink-0 ${
+        picked ? 'bg-primary border-primary' : 'border-[color:var(--color-border)]'
+      }`}>
+        {picked && <Check size={14} className="text-on-primary" weight="bold" />}
+      </div>
+      <span className="flex-1 text-text">{label}</span>
+      <span className={`text-xs text-text-muted ${mono ? 'font-mono' : ''}`}>{detail}</span>
+    </button>
   )
 }

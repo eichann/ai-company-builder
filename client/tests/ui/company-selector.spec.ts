@@ -11,6 +11,7 @@ const calls = (page: Page) => page.evaluate(() => (window as unknown as { __acbC
 const callsOf = async (page: Page, name: string) => (await calls(page)).filter(call => call[0] === name)
 const opened = (page: Page) => page.getByRole('status', { name: '開いた会社' })
 const button = (page: Page, name: string | RegExp) => page.getByRole('button', { name })
+const allOption = (page: Page) => page.getByRole('group', { name: 'この PC に置く部署' }).getByRole('button', { name: /^すべての部署/ })
 
 async function open(page: Page, query: Record<string, string> = {}) {
   const state = await openPreview(page, 'company-selector', query)
@@ -73,10 +74,11 @@ test('an empty folder asks for departments first and downloads only the picked o
   const state = await open(page)
   await chooseCompany(page)
   await button(page, /既存のフォルダを開く/).click()
-  await expect(page.getByRole('heading', { name: '所属する部署を選択' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'この PC に置く部署を選ぶ' })).toBeVisible()
   // Nested folders are not offered: only root folders are departments.
   await expect(button(page, /入れ子/)).toHaveCount(0)
-  await expect(button(page, 'すべての部署をダウンロード')).toBeVisible()
+  // Nothing chosen: the button waits (never 「すべて」 by itself).
+  await expect(button(page, '部署を選んでください')).toBeDisabled()
   const dev = button(page, /開発/)
   await dev.click()
   await expect(dev).toHaveAttribute('aria-pressed', 'true')
@@ -92,10 +94,18 @@ test('an empty folder asks for departments first and downloads only the picked o
   expectNoPageErrors(state)
 })
 
-test('picking no department downloads everything', async ({ page }) => {
+test('「すべての部署」 is chosen on purpose: it downloads everything; nothing chosen sends nothing', async ({ page }) => {
   await open(page)
   await chooseCompany(page)
   await button(page, /既存のフォルダを開く/).click()
+  await button(page, '部署を選んでください').click({ force: true })
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+  // 「すべて」 and a single department leave each other.
+  await allOption(page).click()
+  await button(page, /開発/).click()
+  await expect(allOption(page)).toHaveAttribute('aria-pressed', 'false')
+  await allOption(page).click()
+  await expect(button(page, /開発/)).toHaveAttribute('aria-pressed', 'false')
   await button(page, 'すべての部署をダウンロード').click()
   await expect(opened(page)).toBeVisible()
   expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', null]])
@@ -110,7 +120,7 @@ test('新しく作成 sets up <chosen folder>/<company>, and the picker\'s 戻�
   await button(page, /フォルダを選択/).click()
   await expect(page.getByText('/Users/demo/作業/阿部商店')).toBeVisible()
   await button(page, /開始/).click()
-  await expect(page.getByRole('heading', { name: '所属する部署を選択' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'この PC に置く部署を選ぶ' })).toBeVisible()
   expect(await callsOf(page, 'gitInspectCompanyFolder')).toEqual([['gitInspectCompanyFolder', '/Users/demo/作業/阿部商店', 'c1']])
   await button(page, '戻る').click()
   await expect(page.getByRole('heading', { name: '作業フォルダを設定' })).toBeVisible()
@@ -159,6 +169,7 @@ test('a first download shows the bytes received, then opens the company', async 
   await open(page, { setup: 'manual' })
   await chooseCompany(page)
   await button(page, /既存のフォルダを開く/).click()
+  await allOption(page).click()
   await button(page, 'すべての部署をダウンロード').click()
   await expect(page.getByRole('heading', { name: 'セットアップ中...' })).toBeVisible()
   await expect(page.getByText('初回のみ。会社のファイルが多いと、ダウンロードに数分かかることがあります')).toBeVisible()
@@ -186,6 +197,7 @@ test('a failed first download says why and does not open an empty company; 戻�
   await open(page, { setup: 'fail' })
   await chooseCompany(page)
   await button(page, /既存のフォルダを開く/).click()
+  await allOption(page).click()
   await button(page, 'すべての部署をダウンロード').click()
   await expect(page.getByText('ダウンロードが途中で止まりました')).toBeVisible()
   await button(page, '戻る').click()
@@ -212,7 +224,7 @@ test('one company and 所属: it opens by itself in the default folder and downl
 
 test('one company without 所属: the member is asked which departments (never everything by default)', async ({ page }) => {
   await openPreview(page, 'company-selector', { companies: 'one' })
-  await expect(page.getByRole('heading', { name: '所属する部署を選択' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'この PC に置く部署を選ぶ' })).toBeVisible()
   expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
 })
 
