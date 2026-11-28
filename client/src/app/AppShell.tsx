@@ -658,7 +658,8 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
           list={taskList}
           aiTurns={aiTurnItems}
           activeRecordId={activeRecordId}
-          onOpen={openFromTaskList}
+          // Through the work-through: a row pressed is the place ↑ ↓ start from, and clears the last notice.
+          onOpen={tasksWork.show}
           onConsult={consultAbout}
           onCompleted={recordEnded}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}

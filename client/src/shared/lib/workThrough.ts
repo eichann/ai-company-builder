@@ -90,3 +90,15 @@ export function setWorkNotice(listKey: string, notice: WorkNotice | null): void 
 export function noticeOf(listKey: string): WorkNotice | null {
   return notices.get(listKey) ?? null
 }
+
+/**
+ * Another company or a sign-out (appStore): every list forgets its order, its place and its notice — a 取り消す kept
+ * from the last company would otherwise act on it from the new company's screen.
+ */
+export function forgetAllWork(): void {
+  if (orders.size === 0 && notices.size === 0 && places.size === 0) return
+  orders.clear()
+  notices.clear()
+  places.clear()
+  notify()
+}

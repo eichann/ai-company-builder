@@ -290,7 +290,13 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   // The やること finished beside it: the next one takes its place (or, the last, the side closes); the 案件 reads again.
   const peekEnded = (taskId: string, undo?: () => Promise<string | null>) => {
     const title = detail.groups.flatMap(g => g.tasks).find(t => t.id === taskId)?.title ?? 'やること'
-    if (work.ended(taskId, title, undo) === 'last') setPeek(null)
+    // Taken back, the 案件 reads again too (the やること is listed again, with its place).
+    const takeBack = undo && (async () => {
+      const failure = await undo()
+      if (failure === null) reload()
+      return failure
+    })
+    if (work.ended(taskId, title, takeBack) === 'last') setPeek(null)
     reload()
   }
   return (

@@ -2,7 +2,7 @@
 // an item done with — the last one included —, 「3 / 11」, and that the order and the place are kept per list.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { nextAfterLeaving, orderOf, placeOf, positionIn, publishOrder, rememberPlace, stepIn, subscribeWork } from './workThrough'
+import { forgetAllWork, nextAfterLeaving, noticeOf, orderOf, placeOf, setWorkNotice, positionIn, publishOrder, rememberPlace, stepIn, subscribeWork } from './workThrough'
 
 const ORDER = ['a', 'b', 'c', 'd']
 
@@ -48,4 +48,15 @@ test('each list keeps its own order and place; publishing the same order again t
   assert.equal(placeOf('test:one'), 'b')
   assert.equal(placeOf('test:two'), null)
   stop()
+})
+
+// Codex review: a 取り消す kept from one company must not show — or act — on the next company's screen.
+test('another company or a sign-out forgets every list\'s order, place and notice (its 取り消す with it)', () => {
+  publishOrder('test:three', ['a'])
+  rememberPlace('test:three', 'a')
+  setWorkNotice('test:three', { text: '「a」を片づけました。次の件です', undo: () => {} })
+  forgetAllWork()
+  assert.deepEqual(orderOf('test:three'), [])
+  assert.equal(placeOf('test:three'), null)
+  assert.equal(noticeOf('test:three'), null)
 })

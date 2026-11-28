@@ -404,6 +404,25 @@ test('the last item of the list finished: its tab closes and the list says it wa
   expectNoPageErrors(state)
 })
 
+// The place is where the member last was — also when they got there with the mouse (Codex review): back from a file,
+// ↓ shows that item again rather than the first. Catches a click that does not remember.
+test('back from another tab, ↓ in the list shows the item last opened by a click, not the first', async ({ page }) => {
+  const README = '/Users/demo/会社/README.md'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: [README], activeFilePath: README, leftTab: 'tasks' }),
+  }) })
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  const tabs = middleTabs(page)
+  await list.locator('[data-work-row="task-row002"]').click()
+  await expect(tabs.getByRole('tab', { name: /やること 3/ })).toHaveAttribute('aria-selected', 'true')
+  await tabs.getByRole('tab', { name: /README\.md/ }).click()
+  await list.locator('[data-work-row="task-aaaaaa1"]').focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(tabs.getByRole('tab', { name: /やること 3/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('group', { name: '一覧の何件目か' })).toContainText('3 / 3')
+  expectNoPageErrors(state)
+})
+
 // 案件の中のやること (the same promises): a row shows its やること beside the 案件 with 「n / N」, ↓ moves, the place is
 // remembered when the 案件's tab is shown again, and finishing the last one listed shows the one before. Catches the
 // row opening a tab of its own, the place forgotten, and 終わったこと counted.
