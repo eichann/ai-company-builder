@@ -11,6 +11,7 @@ import fs from 'fs'
 import path from 'path'
 import { editorOverwriteBackupPlan, type EditorOverwriteBackupMetadata, type KeepCurrentReason } from '../../../shared/editor-disk-state'
 import { privateBackupsDir, readPrivateScopesCache } from '../../sync/private-folders'
+import { BACKUP_METADATA_FILE, backupCopyName } from '../../sync/backup-names'
 import type { PathGuard } from '../ports'
 
 export type KeepCurrentResult =
@@ -69,8 +70,11 @@ export async function keepGivenVersion(
     // Two keeps in the same millisecond get their own folders (each has one _metadata.json).
     let backupDir = path.join(base, plan.folder)
     for (let n = 2; fs.existsSync(backupDir); n++) backupDir = path.join(base, `${plan.folder}_${n}`)
+    // A root `_metadata.json` of the member's is kept beside the backup's own under the
+    // name `copies` records (sync/backup-names.ts), never under it: the two must not meet.
+    const copyRel = backupCopyName(plan.rel)
     // Inside the company by its real location too (.backups could be a link).
-    const target = paths.validate(path.join(backupDir, ...plan.rel.split('/')))
+    const target = paths.validate(path.join(backupDir, ...copyRel.split('/')))
     await fs.promises.mkdir(path.dirname(target), { recursive: true })
     await fs.promises.writeFile(target, bytes)
     const metadata: EditorOverwriteBackupMetadata = {
@@ -78,8 +82,9 @@ export async function keepGivenVersion(
       reason,
       files: [plan.rel],
       privateFolder: plan.privateFolder,
+      ...(copyRel !== plan.rel ? { copies: { [plan.rel]: copyRel } } : {}),
     }
-    await fs.promises.writeFile(path.join(backupDir, '_metadata.json'), JSON.stringify(metadata, null, 2))
+    await fs.promises.writeFile(path.join(backupDir, BACKUP_METADATA_FILE), JSON.stringify(metadata, null, 2))
     return { success: true, backupPath: backupDir }
   } catch (error) {
     console.error(`[backups] keeping a version (${reason}) failed:`, error)

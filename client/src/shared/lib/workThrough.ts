@@ -1,6 +1,7 @@
 // ACB foundation: working through a list one item after another — the やること list (features/tasks, shown by app/), a
 // 案件's やること (features/records) and next the inbox (features/inbox) — kept in one place so they behave alike.
 // Rules: .claude/rules/tasks-ui.md "Working through a list". Memory only: nothing here is saved or sent.
+import { currentCompanyEra, inEra } from './companyEra'
 
 /** Where an item stands in its list, counted from 1 (「3 / 11」). */
 export interface WorkPosition {
@@ -89,6 +90,28 @@ export function setWorkNotice(listKey: string, notice: WorkNotice | null): void 
 
 export function noticeOf(listKey: string): WorkNotice | null {
   return notices.get(listKey) ?? null
+}
+
+/**
+ * 取り消す of the item `id` done with in `listKey`: says it is being put back, runs `undo` (a refusal's words, or null),
+ * then shows the item again (`show`) and says so, or says the refusal. Bound to the company era it is made in: pressed,
+ * or answered, after another company or a sign-out, it changes nothing on the screen (the 件名 never reaches the next
+ * company's list).
+ */
+export function undoOfEnded(listKey: string, id: string, title: string, undo: () => Promise<string | null>, show: (id: string) => void): () => void {
+  const era = currentCompanyEra()
+  return () => {
+    if (!inEra(era)) return
+    setWorkNotice(listKey, { text: `「${title}」を元に戻しています…`, undo: null })
+    void undo().then(failure => {
+      if (!inEra(era)) return
+      if (failure !== null) { setWorkNotice(listKey, { text: failure, undo: null }); return }
+      show(id)
+      setWorkNotice(listKey, { text: `「${title}」を元に戻しました`, undo: null })
+    }, () => {
+      if (inEra(era)) setWorkNotice(listKey, { text: '元に戻せませんでした。', undo: null })
+    })
+  }
 }
 
 /**

@@ -3,6 +3,8 @@ paths:
   - "server/src/services/inbox.ts"
   - "server/src/routes/inbox.ts"
   - "server/src/routes/records-ai-inbox.ts"
+  - "server/src/services/contact-threads.ts"
+  - "server/tests/unit/contact-threads.test.ts"
   - "server/src/ports/inbox.ts"
   - "server/src/adapters/sqlite/inbox.ts"
   - "server/src/composition/inbox.ts"
@@ -209,7 +211,10 @@ nor archived in one.
     assignee's, `UNDO_BY_ASSIGNEE`) reaches the inbox through `afterAct` (also run after an undo), which
     puts back exactly those (`addLabelIds: ['INBOX']`) — never the Sent mail or what the member
     archived themselves. When no entry can be written (a lost race), what was taken out is put back at
-    once: nothing stays archived without a notice and an undo. When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
+    once: nothing stays archived without a notice and an undo. **Checked again after Google answers**: when the record
+    is no longer closed or has open work again (her 「済んだ」 taken back while the call ran, the 連絡 card's ［取り消す］
+    included), no note is written on the reopened record and what was taken out goes back the same way (test
+    `inbox-archive.test.ts` 「her 済んだ taken back while Google was still archiving…」, written before the fix). When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
     (`unarchive_failed`). Calls run after the action's answer (`whenIdle` in tests).
 - Tests: `server/tests/unit/inbox-archive.test.ts` (close as the inbox with the owner's undo, nobody
   runs `left_inbox`, task / 返事のお願い → the note once, another member's mailbox never, no cursor →
@@ -398,8 +403,72 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
 `GET /inbox/set-aside` (the member's own excluded interactions, newest first, why and by whom),
 `GET /inbox/department` (unclaimed messages the member reads), `POST /inbox/items/:recordId/claim
 { expectedVersion }` (引き受ける: a reader of it; unreadable → the missing 404 before 409
-`NOT_UNCLAIMED`). Admin: 「来た連絡」 card on the やることの一覧 page
+`NOT_UNCLAIMED`), and 「連絡」1枚's `GET /inbox/items/:recordId/contact`, `POST /inbox/items/:recordId/finish`,
+`POST /inbox/items/:recordId/finish/undo` ("One contact" below). Admin: 「来た連絡」 card on the やることの一覧 page
 (`admin/src/components/advanced/intake-settings.tsx`, page 「詳しい設定 › 来た連絡の決まり」 `/advanced/inbox`).
+
+## One contact (「連絡」1枚, owner decision 2026-11-28 「5番」, UX stage 2)
+
+A 来た連絡 (`interaction`) and its 返事のお願い (`reply_request`) **stay two records** — their types, versions, actions,
+`who` and ledgers are unchanged; the app shows them as one card 「連絡」 (one row in the 受け箱). The server only adds
+what that card needs (`services/contact-threads.ts`, wired in `composition/inbox.ts`; contract `ContactView` …
+`ContactUndoResult` in `shared/types/inbox.ts`; session routes in `routes/inbox.ts`). Additive: an older app keeps
+pressing each record's own action.
+
+- **Read** `GET /inbox/items/:recordId/contact` (the interaction, or a 返事のお願い of it): the interaction (state,
+  version, 担当, `maySettle`), every 返事のお願い linking it **that the member reads** (open first: state, version, 担当,
+  `due`, `guidelineDue`, `waitUntil` = 追いかけの日, `drafts` — its prepared ones and the card's own reply drafts to the
+  contact still in 下書き and read by the member — and `may`, the engine's own `whoMay` for 「もう返した」 / 「終わりにする」 /
+  「返事をしない」), and the やること made from it (`interaction` link) that the member reads. Everything goes through
+  `recordReader`: a contact the member cannot read (someone else's owner-only one — owners and admins included —, a
+  members-only one they are not on, another company's) is the missing record's 404; inside a readable one, another
+  member's own やること or draft is simply absent. No body, no folder name. At most `CONTACT_READ_LIMIT` (200) linked
+  records of a kind are read; beyond it the view says `truncated: true` (counted before the reader, so it says nothing
+  of who reads them) instead of looking complete.
+- **Finish** `POST /inbox/items/:interactionId/finish { interaction: { expectedVersion }, replyRequest: { id,
+  expectedVersion, action: replied_elsewhere | close | drop, note? } }` — the card's ［返した］ (`replied_elsewhere`: the
+  drafts are dropped by the existing `afterAct`), 返事待ち's ［済んだ（もう待たない）］ and 確かめ中's ［済んだ］ (`close`),
+  「返事は要らなくなった」 (`drop`, note required by its type). The 返事のお願い must link this contact (else 409
+  `NOT_THIS_CONTACT`; unreadable → the missing 404). Its part is that action; the contact's part is its 「済んだ」
+  (`settle`) **only while it is 確認待ち** — a contact the AI judged (対応済み) is over already and stays (`unchanged`),
+  any other state is not the member's to close and stays too. Both run through `recordEngine.actTogether` (records.md
+  "Several changes, all or none"): every rule of each action applies (`from`, `who` — the 返事のお願い's 担当, the
+  contact's 担当 —, `expectedVersion`, `FEATURE_OFF`), and **one refused refuses the whole request, nothing written**
+  (the refusal names `part`). The 返事のお願い is written first in the transaction and its follow-ups run first, so the
+  contact's 「済んだ」 sees no open work (the mailbox archive's rule, "Mail archived in the mailbox").
+- **Twice, at the same time, already done, stale**: a part whose version is the one the card read is written; one whose
+  next ledger entry is **this same action by this member as a person, still in force** (no later entry moved the state:
+  an undo or a reopen since makes it stale; notes such as 「Gmail でもアーカイブしました」 do not) is `already` (a second
+  press, a retry after a lost answer — the ledger entry is the "done" record, nothing written again); anything else moved it (the AI, another
+  press, the thread going on) → 409 `VERSION_CONFLICT` with that part's `version` and `part`, nothing written. Two
+  presses at the same time: one writes both, the other loses a compare-and-set inside the transaction and writes
+  nothing (`VERSION_CONFLICT`); its retry answers `already`. One part done before by the member's own press (the old
+  ［もう返した］): `already`, and the other part is done now. The answer: per part `outcome` (`done` / `already` /
+  `unchanged`), the state and version now, and `version` = the entry to take back.
+- **Undo** `POST /inbox/items/:interactionId/finish/undo { interaction?: { version, expectedVersion }, replyRequest: {
+  id, version, expectedVersion } }`: both entries taken back by `recordEngine.undoTogether` — the generic undo's rules
+  unchanged (its actor or an owner / admin, `CHANGED_SINCE`, no time limit for a person), both or neither (`part` on a
+  refusal). Only a finish's entries (`settle`; `replied_elsewhere` / `close` / `drop`): any other version → 409
+  `NOT_A_FINISH`. An entry already reversed is `already` (a second press). Undoing 「もう返した」 brings back the drafts it
+  dropped, as before (`restoreDrafts`).
+  **The version is what guards the change made in between**: the engine's `CHANGED_SINCE` compares only the entry's own
+  fields with the record now (`record-engine/undo.ts`), so a change of another field (her AI moving the due) or one that came
+  back to the same value (reopened and closed again on the record card) passes it — only `expectedVersion` = the record's
+  latest version refuses those (`VERSION_CONFLICT`). The app sends the versions the finish answered. One exception
+  (`pastQuietNotes`): when **every** entry since that version is one of the inbox's quiet notes — `archived_there`
+  (「Gmail でもアーカイブしました」, written right after a 「済んだ」 once Google answered), `left_inbox_noted`, `unarchive_failed`;
+  actor `INBOX_ACTOR`, no change, no state move — the undo is judged at the latest version, as for a card that saw the note.
+  Anything else since keeps the card's version. The Gmail archive itself is not taken back by this undo (its notice's
+  ［元に戻す］ does). Test: `contact-threads.test.ts` 「a change made in between…」, 「the inbox's quiet note…」 (the move past
+  notes and "every entry since" mutation-checked; the actor / no-change / same-state conditions are a backup — only the
+  inbox writes those actions, and no test can write them otherwise).
+- **The 受け箱** (the app, stage 2): a contact whose reply is over but with a やること still open goes to 「確認したもの」;
+  the やること stays in the list. The app computes it from this view; nothing is stored.
+- Tests: `server/tests/unit/contact-threads.test.ts` (the view per reader — owner-only, members-only, owner / admin /
+  another company as missing, another's やること and draft absent —; finish on a judged and on a 確認待ち contact; refused
+  while checking and while writing — a concurrent 「済んだ」, the AI's cap — with nothing written; twice; at the same
+  time; stale; a change taken back since is not `already`; her AI's same change is not `already`; one part done before; `truncated`; 「使う機能」 off; undo both, twice, changed
+  since, only a finish's entries — mutation-checked), permission matrix rows + `CROSS`.
 
 ## Core types (`shared/core/core-types.ts`, reserved versions)
 
@@ -418,7 +487,8 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   since); `drop` stays the app's ［取り込まない］. Only from 確認待ち: `received` is the AI's turn (it
   judges within minutes; a person's close there would race its 返事のお願い), and 部署の番 has no
   assignee and no screen yet. **An open 返事のお願い is not ended by it** (the engine does no
-  cascades; 「もう返した」 is that record's own action, above): the card says so and points there.
+  cascades; 「もう返した」 is that record's own action, above): the card says so and points there — or, from 「連絡」1枚,
+  the member ends both in one press ("One contact": the two actions named by the caller, all or none).
   Tests: `inbox.test.ts` 「済んだ」 (who, the mark, undo, cleared when the thread goes on —
   mutation-checked), `intake-core.test.ts` (6 additive over 5: `INTERACTION_V5_TEXT`).
 - `interaction` v7 (additive over 6; owner FB #19): state `replied` 「返事のあとを確かめる」 with the AI's

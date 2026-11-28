@@ -711,6 +711,10 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/inbox/set-aside', w => ({ path: `${C(w)}/inbox/set-aside` }), MEMBERS),
   r('GET /api/companies/:companyId/inbox/department', w => ({ path: `${C(w)}/inbox/department` }), MEMBERS),
   r('POST /api/companies/:companyId/inbox/items/:recordId/claim', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/claim`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  // 「連絡」1枚 (inbox.md "One contact"): a contact the caller does not read is the missing record's 404, before the body.
+  r('GET /api/companies/:companyId/inbox/items/:recordId/contact', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/contact` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/inbox/items/:recordId/finish', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/finish`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/inbox/items/:recordId/finish/undo', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/finish/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/inbox/items/:recordId', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/inbox/items/:recordId/judgement', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/judgement', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/inbox/items/:recordId/reply-check', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/reply-check', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -988,6 +992,9 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/identities/proposals/:proposalId/reject', (w, id) => ({ path: `${C(w)}/identities/proposals/${id}/reject` }), () => 'identity-proposal-other'),
   // Another company's record is missing here (its own interactions: tests/unit/inbox.test.ts "companies apart").
   x('POST /api/companies/:companyId/inbox/items/:recordId/claim', (w, id) => ({ path: `${C(w)}/inbox/items/${id}/claim`, body: { expectedVersion: 1 } }), w => w.other.record, 'interaction-nosuch01'),
+  x('GET /api/companies/:companyId/inbox/items/:recordId/contact', (w, id) => ({ path: `${C(w)}/inbox/items/${id}/contact` }), w => w.other.record, 'interaction-nosuch01'),
+  x('POST /api/companies/:companyId/inbox/items/:recordId/finish', (w, id) => ({ path: `${C(w)}/inbox/items/${id}/finish`, body: { interaction: { expectedVersion: 1 }, replyRequest: { id: 'reply_request-nosuch01', expectedVersion: 1, action: 'close' } } }), w => w.other.record, 'interaction-nosuch01'),
+  x('POST /api/companies/:companyId/inbox/items/:recordId/finish/undo', (w, id) => ({ path: `${C(w)}/inbox/items/${id}/finish/undo`, body: { replyRequest: { id: 'reply_request-nosuch01', version: 2, expectedVersion: 2 } } }), w => w.other.record, 'interaction-nosuch01'),
   // lane B ▲
   // lane C ▼
   x('GET /api/companies/:companyId/plugins/:pluginId/package/:version', (w, id) => ({ path: `${C(w)}/plugins/${id}/package/0.1.0` }), w => w.other.plugin, 'no-such-plugin'),

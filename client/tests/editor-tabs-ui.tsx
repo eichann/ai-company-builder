@@ -96,6 +96,10 @@ const writes: Array<[string, string]> = []
 // Saves of these paths fail (a spec adds them); closing the window as main asks it (close-guard.ts).
 const failWrites = new Set<string>()
 const closeAnswers: string[] = []
+// How many saves had happened when each close answer went (a save after 'close' is lost with the window).
+const writesAtAnswer: number[] = []
+// Keeps held until the spec releases them one by one (__acbHoldBackups on, __acbReleaseBackup()).
+const heldBackups: Array<() => void> = []
 let requestClose: (() => void) | null = null
 const pinned: string[] = []
 const backups: Array<{ reason: string; path: string; content: string | undefined }> = []
@@ -113,7 +117,7 @@ Object.assign(window, {
       return true
     },
     onCloseRequested: (cb: () => void) => { requestClose = cb; return () => { requestClose = null } },
-    answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
+    answerCloseRequest: async (answer: string) => { closeAnswers.push(answer); writesAtAnswer.push(writes.length) },
     createDirectory: async () => true,
     // Each keep is listed in __acbBackups (what was kept: the disk then, or the edits given); a
     // spec sets __acbFailBackups.on to have them fail, .skip to have them kept nowhere ('internal'),
@@ -131,6 +135,7 @@ Object.assign(window, {
       // A slow keep (a spec sets it): the member may type meanwhile.
       const delay = (window as unknown as { __acbBackupDelay?: number }).__acbBackupDelay
       if (delay) await new Promise(resolve => setTimeout(resolve, delay))
+      if ((window as unknown as { __acbHoldBackups?: boolean }).__acbHoldBackups) await new Promise<void>(resolve => heldBackups.push(resolve))
       backups.push({ reason, path: p, content })
       // What happens on "disk" while the edits are being kept (a spec sets it).
       ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
@@ -194,7 +199,8 @@ function externalDelete(p: string) {
 }
 Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits,
   __acbFailWrites: failWrites, __acbBackups: backups, __acbFailBackups: failBackups, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened, __acbInserted: inserted,
-  __acbFileChange: (p: string) => emitChanges?.([{ type: 'change', path: p }]), __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
+  __acbFileChange: (p: string) => emitChanges?.([{ type: 'change', path: p }]), __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.(),
+  __acbWritesAtAnswer: writesAtAnswer, __acbHeldBackups: () => heldBackups.length, __acbReleaseBackup: () => heldBackups.shift()?.() })
 
 export function Preview() {
   // As AppShell does: shortcuts reach the focused area only.

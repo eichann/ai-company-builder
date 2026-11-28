@@ -4,6 +4,7 @@ import type { CompanyView } from '../types'
 import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
 import { forgetAllShown } from '../shared/lib/shownCache'
 import { forgetAllWork } from '../shared/lib/workThrough'
+import { endCompanyEra } from '../shared/lib/companyEra'
 import { MODEL_EFFORT_OPTIONS as EFFORTS_OF_MODEL, resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../shared/lib/aiModels'
 
 // Theme type
@@ -101,6 +102,13 @@ interface AppState {
   setChatMarkdownRender: (enabled: boolean) => void
 }
 
+/** The company on screen changes (or goes: a sign-out): what was remembered of it goes, and its era ends. */
+function leaveCompanyOnScreen(): void {
+  endCompanyEra()
+  forgetAllShown()
+  forgetAllWork()
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   theme: getInitialTheme(),
   language: getInitialLanguage(),
@@ -143,9 +151,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (company?.rootPath && canRegisterCompanyFolder()) {
       registerCompanyFolder(company.rootPath)
     }
-    // Another company or none (sign-out sets none): no view shows what it remembered of the last one, and no
-    // list keeps its place or a 取り消す that would act on the last company (tasks-ui.md "Working through a list").
-    if (company?.id !== get().currentCompany?.id) { forgetAllShown(); forgetAllWork() }
+    // Another company or none (sign-out sets none): no view shows what it remembered of the last one, no list keeps
+    // its place or a 取り消す, and an answer still on its way lands nowhere (tasks-ui.md "Working through a list").
+    if (company?.id !== get().currentCompany?.id) leaveCompanyOnScreen()
     set({ currentCompany: company, companyToChoose: null })
   },
 
@@ -153,7 +161,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (company.rootPath && canRegisterCompanyFolder()) {
       registerCompanyFolder(company.rootPath)
     }
-    if (company.id !== get().currentCompany?.id) { forgetAllShown(); forgetAllWork() }
+    if (company.id !== get().currentCompany?.id) leaveCompanyOnScreen()
     set({ currentCompany: company, companyToChoose: null })
   },
 

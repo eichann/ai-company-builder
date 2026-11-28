@@ -4,6 +4,7 @@
 // back), and never "only the newest read" (under a stream of signals every answer would already be
 // outdated when it lands, and the list would freeze).
 import type { TaskListData, TaskListResult } from '../../../shared/tasks'
+import { inEra, type CompanyEra } from '../../shared/lib/companyEra'
 
 export interface TaskListState {
   companyId: string | undefined
@@ -11,6 +12,15 @@ export interface TaskListState {
   error: string | null
   /** The ticket of the read whose data is shown (0: none yet). */
   shown: number
+}
+
+/**
+ * Whether a read's answer may reach the list at all: only while the company it was read for is still the one this
+ * list reads, in the same company era (`companyEra.ts`: no switch or sign-out since). A late reload of the company left
+ * behind (an undo's follow-up) would otherwise replace the new company's list with nothing until the next look.
+ */
+export function answerStillWanted(readFor: string, readIn: CompanyEra, readsNow: string | undefined): boolean {
+  return readFor === readsNow && inEra(readIn)
 }
 
 /** `ticket`: the read's number, counted up as reads begin (one count for every company, so a late answer of the company left behind is older too). */

@@ -1972,6 +1972,17 @@ clock's, a separate service writing through the service writer: `notifications.m
   (`core-types.ts`, 2026-11-05: the inbox's `left_inbox` / `archived_there`, each told with
   ［元に戻す］; `inbox.md` "Mail archived in the mailbox"). After an undo the engine runs `afterAct`
   too (the inbox puts a mail back in the mailbox).
+- **Several changes, all or none** (`actTogether` / `undoTogether`, owner decision 2026-11-28 「連絡1枚」; `inbox.md`
+  "One contact"): a service may ask the engine for up to `ACT_TOGETHER_MAX` (5) actions — or undos — each on its own
+  record, written together or not at all. **No new rule**: each one is the ordinary action / undo, split into its checks
+  (`prepare` / `prepareUndo`: duties 1–2, every refusal, the entry; nothing written) and its write (duty 3:
+  `writeAllOrNone` runs every write in **one transaction**, each with its own compare-and-set; the first refused or lost
+  rolls all back — also the AI's per-turn count). Only after the commit does each tell, run `afterAct`, its history line
+  and `afterAction`, **in the order given** (each runs even when an earlier one throws; the first error is thrown on). A refusal carries `step` (which one). `act` / `undo` are the same code with
+  one step, so nothing a single action does changes. `undoTogether` is a person's only (the AI's 「取り消して」 stays one
+  entry). Not a cascade: the engine still never starts an action of its own; the caller names each one. Test:
+  `server/tests/unit/contact-threads.test.ts` (refused while checking or while writing — a write that lost its
+  compare-and-set to a concurrent press, the AI's cap — leaves every record as it was; mutation-checked).
 - **Replay** (§13.11): `replayRecordState(entries, n)` folds entries 1..n; it throws on a gap or a
   version that does not exist rather than describe another version. `GET …/versions/:version`
   answers the values plus `origin` (action, actor, kind, at, provenance of entry n).

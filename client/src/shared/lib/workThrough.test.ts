@@ -2,7 +2,54 @@
 // an item done with — the last one included —, 「3 / 11」, and that the order and the place are kept per list.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { forgetAllWork, nextAfterLeaving, noticeOf, orderOf, placeOf, setWorkNotice, positionIn, publishOrder, rememberPlace, stepIn, subscribeWork } from './workThrough'
+import { forgetAllWork, nextAfterLeaving, noticeOf, orderOf, placeOf, setWorkNotice, positionIn, publishOrder, rememberPlace, stepIn, subscribeWork, undoOfEnded } from './workThrough'
+import { endCompanyEra } from './companyEra'
+
+/** What appStore does when the company on screen changes or a sign-out clears it (`leaveCompanyOnScreen`). */
+const leaveCompany = () => { endCompanyEra(); forgetAllWork() }
+
+function heldUndo() {
+  let answer: (failure: string | null) => void = () => {}
+  let refuse: () => void = () => {}
+  let calls = 0
+  const undo = () => { calls++; return new Promise<string | null>((resolve, reject) => { answer = resolve; refuse = () => reject(new Error('offline')) }) }
+  return { undo, answer: (f: string | null) => answer(f), refuse: () => refuse(), calls: () => calls }
+}
+const settle = () => new Promise(resolve => setTimeout(resolve, 0))
+
+test('取り消す answered after another company or a sign-out: the old item is not shown and its 件名 never reaches the new list', async () => {
+  for (const outcome of ['undone', 'refused', 'failed'] as const) {
+    const shown: string[] = []
+    const held = heldUndo()
+    const takeBack = undoOfEnded('tasks', 'a', '見積を直す', held.undo, id => shown.push(id))
+    takeBack()
+    assert.equal(noticeOf('tasks')?.text, '「見積を直す」を元に戻しています…', outcome)
+    leaveCompany()
+    if (outcome === 'failed') held.refuse()
+    else held.answer(outcome === 'refused' ? '「見積を直す」は元に戻せませんでした' : null)
+    await settle()
+    assert.deepEqual(shown, [], outcome)
+    assert.equal(noticeOf('tasks'), null, outcome)
+  }
+})
+
+test('取り消す kept on screen past a company change does nothing when pressed; in the same company it puts the item back', async () => {
+  const shown: string[] = []
+  const stale = heldUndo()
+  const old = undoOfEnded('tasks', 'a', '見積を直す', stale.undo, id => shown.push(id))
+  leaveCompany()
+  old()
+  assert.equal(stale.calls(), 0)
+  assert.equal(noticeOf('tasks'), null)
+
+  const now = heldUndo()
+  undoOfEnded('tasks', 'b', '請求書を送る', now.undo, id => shown.push(id))()
+  now.answer(null)
+  await settle()
+  assert.deepEqual(shown, ['b'])
+  assert.equal(noticeOf('tasks')?.text, '「請求書を送る」を元に戻しました')
+  forgetAllWork()
+})
 
 const ORDER = ['a', 'b', 'c', 'd']
 

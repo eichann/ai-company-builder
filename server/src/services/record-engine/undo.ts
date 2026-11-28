@@ -1,7 +1,7 @@
 /** Reversing an earlier ledger entry with a new one (records.md "The state engine"). */
 import { undoableByAssignee } from '../../../shared/core/core-types'
 import { AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, AI_UNDO_WINDOW_MS, aiAskedNeedsSetting, aiOnRequestField, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
-import { AskedLimitReached } from './act'
+import { ACT_TOGETHER_MAX, AskedLimitReached, VERSION_CONFLICT_TEXT, withStep, writeAllOrNone, type PreparedWrite } from './act'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { RECORD_TITLE_CHANGE, replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { ERASED_PREFIX } from '../../../shared/core/record-contents'
@@ -10,7 +10,7 @@ import { isOwnOnlyLinkTarget, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordLinkRow } from '../../ports/records'
 import type { Member } from '../access'
-import { ok, refuse, type Outcome } from '../outcome'
+import { ok, refuse, type Outcome, type Refusal } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
@@ -32,7 +32,13 @@ function changesUnseenTarget(entry: LedgerEntry, seen: ReadonlySet<string>): boo
   })
 }
 
-class AskedSettingOff extends Error {}
+/** What an undo answers: the record as it is now and the new entry (scrubbed for the caller). */
+export type UndoAnswer = { record: RecordSummary; entry: LedgerEntry }
+
+interface PreparedUndo extends PreparedWrite<UndoAnswer> {
+  /** After the commit: tell, the services' follow-up, the answer. */
+  finish(): UndoAnswer
+}
 
 /** Engine entries (not a type's action) the AI may take back: a file link, on a type that lets the AI act (as `fileLink`). */
 const AI_UNDOABLE_ENGINE_ACTIONS = ['link_file', 'unlink_file']
@@ -61,7 +67,45 @@ export function undoing(ctx: EngineContext) {
      * only an entry the member made (themselves or their AI; never an admin's reach over others, never the inbox's
      * entries the assignee may take back), at most `AI_UNDO_WINDOW_MS` old, counted toward the turn's cap.
      */
-    undo(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+    undo(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<UndoAnswer> {
+      const prepared = prepareUndo(member, actor, recordId, body)
+      if (!prepared.ok) return prepared
+      let written: true | false | Refusal
+      try {
+        written = transactions.run(() => prepared.value.write())
+      } catch (error) {
+        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        throw error
+      }
+      if (written !== true && written !== false) return written
+      if (!written) return conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT')
+      return ok(prepared.value.finish())
+    },
+
+    /**
+     * Several entries, each of its own record, taken back **all or none** (inbox.md "One contact"): each is checked by
+     * exactly the rules of `undo` (whose entry, `CHANGED_SINCE`, the version the caller saw…), then every reversal is
+     * written in one transaction with its own compare-and-set; one refused leaves every record as it was. A refusal
+     * carries `step`. People only: the AI's 「取り消して」 is one entry at a time (`undo`).
+     */
+    undoTogether(member: Member, actor: ActorInput, steps: ReadonlyArray<{ recordId: string; body: unknown }>): Outcome<UndoAnswer[]> {
+      if (actor.kind !== 'human') return refuse('forbidden', AI_ASKED_REFUSALS.undoNotAsked.error, { code: AI_ASKED_REFUSALS.undoNotAsked.code })
+      if (steps.length === 0 || steps.length > ACT_TOGETHER_MAX) return bad(`steps: 1 to ${ACT_TOGETHER_MAX}`)
+      if (new Set(steps.map(s => s.recordId)).size !== steps.length) return bad('steps: each on another record')
+      const prepared: PreparedUndo[] = []
+      for (const [i, s] of steps.entries()) {
+        const r = prepareUndo(member, actor, s.recordId, s.body)
+        if (!r.ok) return withStep(r, i)
+        prepared.push(r.value)
+      }
+      const lost = writeAllOrNone(transactions, prepared)
+      if (lost) return withStep(lost.result === false ? conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT') : lost.result, lost.step)
+      return ok(prepared.map(p => p.finish()))
+    },
+  }
+
+  /** Every check of an undo and the entry it would write; nothing is written here (`write` inside the caller's transaction). */
+  function prepareUndo(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<PreparedUndo> {
       const askedTurn = actor.kind === 'ai' && actor.askedTurn && !actor.runId ? actor.askedTurn : null
       if (actor.kind === 'ai' && !askedTurn) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotAsked.error, { code: AI_ASKED_REFUSALS.undoNotAsked.code })
       const opened = open(member)
@@ -172,11 +216,11 @@ export function undoing(ctx: EngineContext) {
         typeVersion: row.typeVersion, reversesVersion: target.version, ...provenance(actor),
         ...(askedTurn ? { askedBy: member.userId } : {}),
       }
-      let written: boolean
-      try {
-        written = transactions.run(() => {
+      return ok({
+        unchanged: null,
+        write: () => {
           // The member's setting again, inside the write (turned off meanwhile: nothing written).
-          if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) throw new AskedSettingOff()
+          if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
           if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
           // One of the turn's `AI_ASKED_PER_TURN`, taken with the write (a write refused gives it back).
           if (askedTurn && !records.takeAskedAction(member.userId, askedTurn.tokenId, AI_ASKED_PER_TURN)) throw new AskedLimitReached()
@@ -184,17 +228,13 @@ export function undoing(ctx: EngineContext) {
           if (nextTitle !== null) writeTitle(records, row.id, nextTitle, at)
           records.appendLedger(entry)
           return true
-        })
-      } catch (error) {
-        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
-        if (error instanceof AskedSettingOff) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
-        throw error
-      }
-      if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
-      tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
-      // The services' follow-up of an undo (the inbox puts a mail back in the mailbox inbox).
-      try { ctx.deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the undo stands */ }
-      return ok({ record: summaryOf(records, row.id), entry: scrubLedger([entry], seen)[0] ?? { ...entry, changes: [] } })
-    },
+        },
+        finish: () => {
+          tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
+          // The services' follow-up of an undo (the inbox puts a mail back in the mailbox inbox).
+          try { ctx.deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the undo stands */ }
+          return { record: summaryOf(records, row.id), entry: scrubLedger([entry], seen)[0] ?? { ...entry, changes: [] } }
+        },
+      })
   }
 }
