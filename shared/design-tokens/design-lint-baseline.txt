@@ -102,7 +102,6 @@ client/src/features/chat/components/AgentInteractionCard.tsx arbitrary-value=1 p
 client/src/features/chat/components/AgentLogNotice.tsx palette-color=8 shadow-scale=1 white-black=2 z-index=1
 client/src/features/chat/components/AiTurnNotice.tsx palette-color=10 radius-scale=1 type-scale=1
 client/src/features/chat/components/AppInstructionChip.tsx palette-color=10 type-scale=1
-client/src/features/chat/components/ApprovalCard.tsx opacity-scale=1 palette-color=90 type-scale=16 white-black=2
 client/src/features/chat/components/BrokerKeyNeededCard.tsx palette-color=8 type-scale=3
 client/src/features/chat/components/ChatAuthGate.tsx arbitrary-value=5 palette-color=3 radius-scale=2 shadow-scale=2 type-scale=7
 client/src/features/chat/components/ChatAuthSettings.tsx type-scale=27

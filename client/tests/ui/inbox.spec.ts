@@ -38,7 +38,7 @@ test('［承認する…］ opens the approval card and approves nothing; the ca
   const dialog = page.getByRole('dialog', { name: '承認のお願い' })
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('一覧からは承認できません')
-  await expect(dialog.getByRole('button', { name: '承認', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '承認する', exact: true })).toBeVisible()
   await expect(page.locator('#acted')).toHaveText('')
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
@@ -186,7 +186,7 @@ for (const theme of ['light', 'dark'] as const) {
     if (SHOTS) {
       await page.screenshot({ path: `${SHOTS}/inbox-preview-${theme}.png`, animations: 'disabled' })
       await page.locator('[data-inbox-row="record:approval-preview0001"]').getByRole('button', { name: '承認する…' }).click()
-      await expect(page.getByRole('dialog', { name: '承認のお願い' }).getByRole('button', { name: '承認', exact: true })).toBeVisible()
+      await expect(page.getByRole('dialog', { name: '承認のお願い' }).getByRole('button', { name: '承認する', exact: true })).toBeVisible()
       await page.screenshot({ path: `${SHOTS}/inbox-approval-card-${theme}.png`, animations: 'disabled' })
     }
     expectNoPageErrors(state)

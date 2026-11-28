@@ -3,7 +3,11 @@
 // holding a `data-approval` reference; the card reads the request through the fake preload API.
 // `?viewer=approver` (default) may approve; `?viewer=requester` asked for it and may not.
 // `?kind=create`: a new deal with similar existing ones (plugins.md "Similar records").
-// What 「承認」 / 「同じ」 sent is shown in `#sent` for the spec.
+// What 「承認する」 / 「同じ」 sent is shown in `#sent` for the spec (every approve's hash in `#hashes`).
+// `?change=1`: the server's content moves to a second version when the page calls `window.__acbChangeContent()` (the card
+// still shows the first until it reads again); an approve with another hash than the server's newest is refused as the
+// server does (409 CONTENT_CHANGED). `?direct=1`: the card alone with `onDone` (as the inbox shows it), counted in `#done`.
+// `?openLarge=1`: something opens a record's tab (［大きく開く（タブ）］), the ids asked for in `#opened`.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { UIMessage } from 'ai'
@@ -11,7 +15,9 @@ import '../src/i18n'
 import '../src/index.css'
 import { AssistantMessageParts } from '../src/features/chat/components/MessageParts'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
-import type { ApprovalView } from '../../shared/types/approvals'
+import { CONTENT_CHANGED_TEXT, type ApprovalView } from '../../shared/types/approvals'
+import { ApprovalCard } from '../src/features/chat/components/ApprovalCard'
+import { useCommandHandler } from '../src/shared/commands/commands'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import { JOB_PROPOSAL_PART_TYPE } from '../shared/job-proposals'
 import { MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
@@ -47,7 +53,14 @@ const createView: ApprovalView = {
 }
 // `?manual=1`: the user manual's picture (manual/README.md): a fictional system name, nothing real.
 const manualView: ApprovalView = { ...updateView, pluginId: 'customer-ledger', operationLabel: '案件の金額を顧客台帳に書き戻す', systemLabel: '顧客台帳' }
-const view = params.get('kind') === 'create' ? createView : params.get('manual') === '1' ? manualView : updateView
+const firstView = params.get('kind') === 'create' ? createView : params.get('manual') === '1' ? manualView : updateView
+// `?change=1`: the second version the server holds after `__acbChangeContent()` — another amount, another hash.
+const changedView: ApprovalView = {
+  ...firstView, version: 2, hash: `sha256:${'7d2a'.repeat(16)}`,
+  changes: firstView.changes.map(c => ({ ...c, after: 1800000, afterShown: '1,800,000', changePercent: 50 })),
+}
+let view = firstView
+;(window as unknown as { __acbChangeContent: () => void }).__acbChangeContent = () => { view = changedView }
 // `?manual=1&viewer=requester` (or `&approver=sato`, the approver's side): the manual's chapter 23 — 山田さん asked, 佐藤さん
 // decides (the same ids, other names). `?manual=1` alone keeps chapter 8's names.
 const swapped = params.get('manual') === '1' && (!approver || params.get('approver') === 'sato')
@@ -84,12 +97,23 @@ const JOB_CANDIDATE_ID = 'jc.' + 'a'.repeat(32)
 const jobCandidate = { id: JOB_CANDIDATE_ID, definition: MANUAL_JOB_DEFINITION, fingerprint: MANUAL_JOB_FINGERPRINT, expiresAt: '2026-11-21T01:30:00.000Z', timeZone: 'Asia/Tokyo' }
 const jobProposal = { id: 'jp.' + 'b'.repeat(32), jobId: 'job.' + '1'.repeat(32), proposerId: 'u-sato', candidateId: JOB_CANDIDATE_ID, submittedVersion: 1, submittedFingerprint: MANUAL_JOB_FINGERPRINT, state: 'submitted' as const, returnReason: null, decidedBy: null, decidedAt: null, createdAt: '2026-11-20T01:30:00.000Z' }
 
+/** Something that opens a record's tab, as AppShell is (only under `?openLarge=1`). */
+function RecordTabs({ onOpen }: { onOpen: (recordId: string) => void }) {
+  useCommandHandler('record.open', ({ recordId }) => onOpen(recordId))
+  return null
+}
+
 function Preview() {
   const [sent, setSent] = useState<string>('')
+  const [hashes, setHashes] = useState<string[]>([])
+  const [done, setDone] = useState(0)
+  const [opened, setOpened] = useState<string[]>([])
   installElectronAPI({
     getApproval: async () => (net.online ? { success: true, approval: net.landed ? approvedView('先方が対象を広げたいと言ったため') : view, names } : OFFLINE_ANSWER),
     approveApproval: async (_companyId, _id, hash, reason) => {
       setSent(JSON.stringify({ hash, reason }))
+      setHashes(h => [...h, hash])
+      if (hash !== view.hash) return { success: false, offline: false, code: 'CONTENT_CHANGED', error: CONTENT_CHANGED_TEXT }
       if (press() === 'dropped') return OFFLINE_ANSWER
       return { success: true, approval: approvedView(reason), names }
     },
@@ -110,9 +134,15 @@ function Preview() {
       ...(params.get('twice') === '1' ? [{ type: APPROVAL_PART_TYPE, id: 'approval-card-2', data: { ...ref, id: 'card-2' } }] : [])]) as UIMessage['parts']
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
+      {params.get('openLarge') === '1' && <RecordTabs onOpen={id => setOpened(o => [...o, id])} />}
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番の相談には接続しません。</p>
-      <section className="mx-auto max-w-xl"><AssistantMessageParts parts={parts} isStreaming={false} markdown /></section>
+      <section className="mx-auto max-w-xl">
+        {params.get('direct') === '1' ? <ApprovalCard card={ref} onDone={() => setDone(n => n + 1)} /> : <AssistantMessageParts parts={parts} isStreaming={false} markdown />}
+      </section>
       <pre id="sent">{sent}</pre>
+      <pre id="hashes">{hashes.join(',')}</pre>
+      <pre id="done">{done}</pre>
+      <pre id="opened">{opened.join(',')}</pre>
       <pre id="presses">0</pre>
     </main>
   )
