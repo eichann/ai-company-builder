@@ -2,89 +2,18 @@
 // which may have read anything, so nothing in it may run or reach the network:
 //   1. mermaid runs with securityLevel 'strict', no HTML labels, none of its settings open to the text, in a hidden
 //      frame whose own CSP lets nothing load (it draws in a live document before anything is sanitised);
-//   2. every SVG (mermaid's and the AI's own) is cut down to drawing elements with local references only;
+//   2. every SVG (mermaid's and the AI's own) is cut down to drawing elements with local references only
+//      (svgCleaning.ts, on the walk the reply's HTML shares: markupCleaning.ts);
 //   3. the result is shown as <img src="data:image/svg+xml">: a picture never runs script or loads anything.
 // mermaid (~2.8 MB) is loaded only when the first mermaid block is drawn (client/vite.config.ts puts it in dist/vendor/).
 import mermaidUrl from '@mermaid-js/tiny/dist/mermaid.tiny.js?url'
 import { mermaidWithoutConfig, type Diagram } from './diagrams'
+import { sanitizeSvg } from './svgCleaning'
 
 export type DiagramState =
   | { status: 'drawing' }
   | { status: 'drawn'; src: string; width?: number; height?: number }
   | { status: 'failed' }
-
-const SVG_NS = 'http://www.w3.org/2000/svg'
-
-/** Drawing elements only (lower case). No script, foreignObject, image, a, animate / set, iframe, feImage. */
-const ALLOWED_ELEMENTS = new Set([
-  'svg', 'g', 'defs', 'title', 'desc', 'style', 'switch', 'symbol', 'use', 'marker', 'clippath', 'mask', 'pattern',
-  'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan',
-  'lineargradient', 'radialgradient', 'stop',
-  'filter', 'fegaussianblur', 'feoffset', 'feblend', 'feflood', 'fecomposite', 'femerge', 'femergenode', 'fedropshadow', 'fecolormatrix',
-])
-/** More `<use>` than this is not drawn: copies of copies can make one small picture cost the renderer seconds. */
-const MAX_USES = 200
-
-/** A url() that is not a reference inside the picture (`url(#id)`). */
-const OUTSIDE_URL = /url\s*\(\s*(?!['"]?#)/i
-/** CSS that could load or hide something: imports, fonts, escapes, other image functions. */
-const UNSAFE_CSS = /@import|@font-face|image-set|image\s*\(|expression\s*\(|javascript:|\\/i
-
-const unsafeCss = (css: string) => OUTSIDE_URL.test(css) || UNSAFE_CSS.test(css)
-
-/**
- * The one `<svg>` of `markup` with only drawing elements and local references, serialised as XML;
- * null when there is no such picture. Parsed as HTML in a DOMParser document: inert (nothing runs or loads)
- * and forgiving of mermaid's HTML-serialised output.
- */
-export function sanitizeSvg(markup: string): { svg: string; width?: number; height?: number } | null {
-  const doc = new DOMParser().parseFromString(markup, 'text/html')
-  const root = doc.body.firstElementChild
-  if (!root || doc.body.children.length !== 1 || root.namespaceURI !== SVG_NS || root.localName !== 'svg') return null
-  clean(root)
-  if (root.getElementsByTagNameNS(SVG_NS, 'use').length > MAX_USES) return null
-  const size = intrinsicSize(root)
-  if (size) {
-    root.setAttribute('width', String(size.width))
-    root.setAttribute('height', String(size.height))
-  }
-  return { svg: new XMLSerializer().serializeToString(root), ...size }
-}
-
-function clean(element: Element): void {
-  for (const original of [...element.children]) {
-    // A link (mermaid's `click … href`) keeps what it draws, as a plain group: a picture links nowhere.
-    const child = original.namespaceURI === SVG_NS && original.localName === 'a' ? unwrapLink(original) : original
-    if (child.namespaceURI !== SVG_NS || !ALLOWED_ELEMENTS.has(child.localName.toLowerCase())) child.remove()
-    else clean(child)
-  }
-  for (const attribute of [...element.attributes]) {
-    const name = attribute.name.toLowerCase()
-    const value = attribute.value
-    const isReference = name === 'href' || name.endsWith(':href') || name === 'src'
-    if (name.startsWith('on') || (isReference && !/^#[\w:.-]*$/.test(value.trim())) ||
-        OUTSIDE_URL.test(value) || (name === 'style' && unsafeCss(value))) {
-      element.removeAttribute(attribute.name)
-    }
-  }
-  if (element.localName === 'style' && unsafeCss(element.textContent ?? '')) element.remove()
-}
-
-function unwrapLink(link: Element): Element {
-  const group = link.ownerDocument.createElementNS(SVG_NS, 'g')
-  group.append(...link.childNodes)
-  link.replaceWith(group)
-  return group
-}
-
-/** The picture's own size from its viewBox (mermaid writes width="100%"), so the <img> has one. */
-function intrinsicSize(root: Element): { width: number; height: number } | undefined {
-  const box = (root.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
-  if (box.length === 4 && box[2] > 0 && box[3] > 0 && box.every(Number.isFinite)) return { width: Math.ceil(box[2]), height: Math.ceil(box[3]) }
-  const width = Number(root.getAttribute('width'))
-  const height = Number(root.getAttribute('height'))
-  return width > 0 && height > 0 ? { width, height } : undefined
-}
 
 // --- mermaid, loaded once and only when needed, in a frame that cannot reach the network ----------------------
 // mermaid draws in a live document to measure text, and some of its shapes load on their own (a node's `img:` runs
