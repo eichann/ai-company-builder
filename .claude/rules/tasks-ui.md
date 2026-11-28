@@ -40,6 +40,9 @@ paths:
   - "client/electron/features/records-table/**"
   - "client/shared/records-table.ts"
   - "client/tests/records-table*"
+  - "client/src/shared/lib/workThrough*"
+  - "client/src/shared/hooks/useWorkThrough.ts"
+  - "client/src/shared/ui/WorkThrough.tsx"
   - "client/tests/ui/records-table.spec.ts"
 ---
 
@@ -220,7 +223,8 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   refuses when something changed since). What the AI judged is never there. Tests:
   `tasks-list.test.ts` (「a 来た連絡: ☑ …」, 「今日終わったこと asks …」), `tasks-list.spec.ts`
   (「a 来た連絡 to confirm …」).
-  **Ended (完了にする, or a 来た連絡's 済んだ) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
+  **Ended (完了にする, or a 来た連絡's 済んだ) here, its tab in the middle closes** — and, when it was the item the
+  middle showed while the list is beside it, the next item of the list takes its place ("Working through a list") (owner FB #15, 2026-11-04;
   `onCompleted` → AppShell `recordEnded`: `closeTabs([recordTabKey(id)])`, the tidy's path, so 固定
   marks and named groups follow): only that record's tab (a card holds nothing unsaved), only after the
   server accepted it; not for 見てもらう or やり直す, and やり直す / 元に戻す do not reopen it.
@@ -247,6 +251,50 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   Tags in use are offered while typing after 「#」, and a tag spelled differently from one in use
   (width, case, katakana / hiragana) is offered as that one (`similarTag`); once typing pauses
   the title's 「タグの候補」 are offered too ("Tag suggestions" below).
+
+## Working through a list (UX 点検 14, owner decision 2026-11-28, 案A)
+
+The list stays beside the item it shows, and the member goes through it one item after another. One set of
+promises for every such list — the やること list, a 案件・プロジェクト's みんなのやること, and next the inbox (点検 11) —
+kept in `client/src/shared/` because two or more features use it: `lib/workThrough.ts` (pure: `positionIn`, `stepIn`,
+`nextAfterLeaving`; memory-only per list: the order on screen, the place, the notice), `hooks/useWorkThrough.ts` (the
+side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThroughNotice`). A list is named by a key
+(`tasks`, `bundle:<record id>`).
+
+- **The order** is what the list shows, top to bottom, published by the list each time it is drawn (`workListRef`, a
+  ref callback on the rows' element: no effect). The やること list: `workOrder` (`model.ts`) — folded sections and
+  「まとまりを選ぶ会議」 groups only once opened, never what is finished (今日終わったこと) and never 期限切れ, whose rows
+  live inside 「まとめて直す…」. A 案件: みんなのやること without 終わったこと. Each row's own open button carries
+  `data-work-row` (the ☑, chips and other buttons keep their keys).
+- **「3 / 11」** with ［前の件］［次の件］ over the item shown (`WorkThroughBar`, `aria-label="一覧の何件目か"`), only while
+  that item is in the order. The やること list: above the card in the middle (`AppShell` `middleCard`), only while the
+  list is beside it (the やること tab chosen and the left column shown). A row opens its item **in the preview tab** as
+  before; ↑ ↓ replace it (never one tab per item).
+- **Keys** (commands `list.next` ↓ / j, `list.previous` ↑ / k, `list.show` Enter, `list.back` Esc, area `list`,
+  `commands.md`): delivered only while the focus is in that list's rows (`data-work-list`) or in the item it shows
+  (`data-work-card`, both marked `commandArea('list', key)`). ↑ ↓ from a row move the row's focus with it; from the
+  item's own frame they keep the focus there; never from a field, a menu, a dialog or a button inside the item.
+  Enter on a row shows its item and moves the focus into it; Esc in the item puts the focus back on its row. With
+  nothing of the list shown, ↓ / ↑ go back to **the place** (the last item shown from that list — by a key or a
+  click, `show`), else the first / last. Another company or a sign-out forgets every list's order, place and notice
+  (`forgetAllWork`, `appStore` beside `forgetAllShown`): a 取り消す of the last company never shows on the next one.
+- **Finishing the item shown** (the card's end button, the list's ☑ on that row; `TaskCard` / `RecordCard` /
+  `TaskListPanel` hand `onEnded` / `onCompleted` an `undo` of that one-step press's entry): the next item (the one
+  after it; the last one → the one before) takes its place, and the list says 「『…』を片づけました。次の件です」 with
+  ［取り消す］ (`WorkThroughNotice`, at the top of the list) — the undo of that entry, then that item shown again;
+  a refusal is said there. None left: 「…この一覧の件は、これで最後です」 and the item is put away (its tab closes).
+  An item that is not the one shown, or with the list not beside it, ends as before (its tab closes). Its automatic
+  consultations close either way.
+- **案件の中のやること**: a row shows its やること **beside the 案件, in the same tab** (`RecordCard` `renderPeek`,
+  the task card drawn by `AppShell`; `region` 「選んだやること」 with the bar and ［閉じる］), not in a tab of its own. The
+  card keeps one shape with or without the side, so the row keeps the focus. Its tab switched back to shows the same
+  やること while it is still listed (the place). Finishing it there goes on to the next one, the 案件 reads again.
+- **Not here** (段5, 案4 — the new layout): folding the consultation list when the middle is narrow, and 案B (the item
+  large with 前へ・次へ) when even that is not enough. Today's layout only.
+- Tests: `src/shared/lib/workThrough.test.ts` (neighbours and ends, the place, the next after the last, 「n / N」, one
+  order per list), `src/features/tasks/model.test.ts` (`workOrder`), `src/shared/commands/commands.test.ts` (the
+  second key), `tests/ui/tasks-layout.spec.ts` (「working through the list…」, 「finishing the item shown…」, 「the last
+  item…」, 「back from another tab…」, 「a 案件's やること…」; `src/shared/lib/workThrough.test.ts` also `forgetAllWork`; `skill-layout-ui.html?tasks=1&work=1`, `&rows=N`) — mutation-checked.
 
 ## The card (S7c, `TaskCard.tsx`, `client/shared/task-card.ts`)
 

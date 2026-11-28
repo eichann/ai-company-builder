@@ -13,6 +13,9 @@
 //             slow = the same list, answered only after window.__acbLayout.answerTasks() (the tab while it loads)
 //   check     1 = (with tasks=1) each row offers its ☑ 完了にする, and the opened task's card its ［完了にする］;
 //             the press is recorded (actOnTask)
+//   work      1 = (with tasks=1) working through the list (tasks-ui.md "Working through a list"): every row's task opens in
+//             its card (not only the first), `rows` sets how many rows the list has (default 3), the プロジェクト
+//             `project-aaaaaa1` lists them as みんなのやること, and 取り消す is recorded (undoTaskAction)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
@@ -272,6 +275,11 @@ const openTasksClicks = emitter<{ companyId: string }>()
 const appCommandRequests = emitter<{ requestId: string; companyId: string; commandId: string; args: unknown }>()
 const appCommandAnswers = new Map<string, unknown>()
 let taskVersion = 2
+// ?work=1: every row's task has a card; ?rows=N rows in the list.
+const WORK = params.get('work') === '1'
+const ROWS = Math.max(1, Math.min(9, Number(params.get('rows') ?? 3) || 3))
+const WORK_ROW_RE = /^task-row00\d$/
+const rowTitle = (id: string) => `やること ${Number(id.slice(-1)) + 1}`
 let taskFiles = ['営業部/提案書/A社_提案.md']
 let cardReads = 0
 let finishSync: (() => void) | null = null
@@ -408,7 +416,14 @@ const api: Partial<ElectronAPI> = {
   getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_PROJECT.id
     ? { success: true, card: {
       record: RECORD_PROJECT, version: 2, fields: [], history: [], links: [],
-      detail: { kind: 'bundle' as const, purpose: null, owner: null, groups: [], done: 0, total: 0, pendingApprovals: [], actions: {
+      detail: { kind: 'bundle' as const, purpose: null, owner: null, pendingApprovals: [],
+        ...(WORK ? {
+          groups: [
+            { title: 'あなたの番', tasks: Array.from({ length: ROWS }, (_, i) => ({ id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'あなたの番', due: null })) },
+            { title: '終わったこと', tasks: [{ id: 'task-done01', title: '終わったやること', turn: null, due: null }] },
+          ], done: 1, total: ROWS + 1,
+        } : { groups: [], done: 0, total: 0 }),
+        actions: {
         main: { action: 'finish', title: '終える', ends: true, noteRequired: false, noteOffered: false, args: [] },
         more: [{ action: 'cancel', title: 'やめる', ends: true, noteRequired: false, noteOffered: true, args: [] }], people: [],
       } },
@@ -426,9 +441,9 @@ const api: Partial<ElectronAPI> = {
     columns: [{ field: 'assignee', label: '担当', kind: 'person', shown: true }], total: 1, offset: query.offset,
     rows: [{ id: RECORD_TASK.id, title: RECORD_TASK.title, stateLabel: '進めている', finished: false, updatedAt: RECORD_TASK.updatedAt, cells: { assignee: { text: '田中 太郎', sort: '田中 太郎' } } }] }),
   // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
-  getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+  getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id || (WORK && WORK_ROW_RE.test(recordId))
     ? (cardReads++, await sleep(120), { success: true, card: {
-      record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion, ...(params.get('personal') === '1' ? { personal: true } : {}) }, due: null, tags: [], purpose: null,
+      record: { ...RECORD_TASK, ...(recordId === RECORD_TASK.id ? {} : { id: recordId, title: rowTitle(recordId) }), state: 'in_progress', version: recordId === RECORD_TASK.id ? taskVersion : 1, ...(params.get('personal') === '1' ? { personal: true } : {}) }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
       roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: params.get('check') === '1' ? [{ action: 'complete', title: '完了', noteRequired: false, args: [], needsOk: false, startFirst: false }] : [], canSetTags: false, canEdit: { title: false, purpose: false }, okLine: null, prepSummary: null, prepared: [],
       files: taskFiles.map(path => ({ path })), localFiles: [], driveFiles: [],
@@ -474,7 +489,7 @@ const api: Partial<ElectronAPI> = {
       members: [{ id: 'u_me', name: '山田' }, { id: 'u_takahashi', name: '高橋' }, { id: 'u_sato', name: '佐藤' }],
       items: MANUAL_TASK_ITEMS } }
     : params.get('tasks') === '1' || params.get('tasks') === 'slow'
-    ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
+    ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: ROWS }, (_, i) => ({
       id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
       ...(params.get('check') === '1' ? { check: { action: 'complete' as const } } : {}),
@@ -488,6 +503,11 @@ const api: Partial<ElectronAPI> = {
   // ?check=1: the ☑ on a row (the list reads again; this fake's list does not change).
   actOnTask: async (companyId: string, recordId: string, input: unknown) => {
     record('actOnTask', [companyId, recordId, input])
+    return { success: true, recordId }
+  },
+  // ?work=1: 取り消す after an item was done with (the list and the card's ［完了にする］).
+  undoTaskAction: async (companyId: string, recordId: string, version: number, expected: number) => {
+    record('undoTaskAction', [companyId, recordId, version, expected])
     return { success: true, recordId }
   },
   onPluginsChanged: () => () => {},

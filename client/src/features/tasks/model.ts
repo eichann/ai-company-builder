@@ -433,3 +433,20 @@ export function linkCandidates(files: readonly string[]): Array<{ path: string; 
   }
   return [...[...folders].sort().map(path => ({ path, folder: true })), ...files.map(path => ({ path, folder: false }))]
 }
+
+/**
+ * The items ↑ ↓ go over and 「3 / 11」 counts (tasks-ui.md "Working through a list"): the rows on screen, top to
+ * bottom — a folded section or 「まとまりを選ぶ会議」 group only once opened (`open(key)`, the panel's keys) — without
+ * what is finished (今日終わったこと) and without 期限切れ, whose rows live inside 「まとめて直す…」.
+ */
+export function workOrder(sections: readonly ListSection[], open: (key: string) => boolean): string[] {
+  const out: string[] = []
+  for (const s of sections) {
+    if (s.overdue || (s.foldable && !open(s.key))) continue
+    for (const r of listRows(s.items)) {
+      const items = r.kind === 'item' ? [r.item] : open(`group:${r.key}`) ? r.items : []
+      for (const i of items) if (i.turn !== 'done' && !out.includes(i.id)) out.push(i.id)
+    }
+  }
+  return out
+}

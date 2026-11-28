@@ -75,9 +75,10 @@ interface Props {
   onChanged?: () => void
   /**
    * The member completed it here (owner FB #29): AppShell closes its tab in the middle and its
-   * automatic consultations, as the list's ☑ does. Not for 見てもらう or 中止, nor for 取り消す.
+   * automatic consultations, as the list's ☑ does. Not for 見てもらう or 中止, nor for 取り消す. `undo` (a one-step
+   * press) takes it back — the refusal's words, or null — for the list the card was shown from.
    */
-  onEnded?: (recordId: string) => void
+  onEnded?: (recordId: string, undo?: () => Promise<string | null>) => void
   /** What the department on screen makes as its 案件・プロジェクト (`tasks:bundleKinds`): its name for ［〇〇につなぐ］ and the kind ［新しい〇〇にする］ makes; null until known. */
   bundleKind?: BundleKind | null
   /** The department's folder a new one is put in (全社: none) when `bundlePlaces` is not given. */
@@ -181,7 +182,14 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     }
     // Only a one-step press is undone in one step.
     setNotice(done ? { kind: 'done', text: done, undo: steps.length === 1 ? { recordId, version: at } : null } : null)
-    if (steps[steps.length - 1]?.action === 'complete') onEnded?.(recordId)
+    if (steps[steps.length - 1]?.action === 'complete') {
+      const entry = at
+      onEnded?.(recordId, steps.length === 1 ? async () => {
+        const r = await undoTaskAction(companyId, recordId, entry, entry)
+        onChanged?.()
+        return r.success ? null : r.error
+      } : undefined)
+    }
     return null
   })
   const undo = (target: UndoTarget) => change(async () => {
