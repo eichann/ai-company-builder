@@ -8,10 +8,11 @@ import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
 import { history } from '@milkdown/plugin-history'
 import { $prose } from '@milkdown/utils'
-import { Plugin, PluginKey } from '@milkdown/prose/state'
+import { Plugin, PluginKey, Selection } from '@milkdown/prose/state'
 import type { Node as PMNode } from '@milkdown/prose/model'
 import type { EditorView } from '@milkdown/prose/view'
 import { localFileUrl } from '../../../shared/local-file-url'
+import { fileVersions } from '../../shared/lib/fileVersions'
 import { SplicedDocument, type MarkdownCodec, type SourceBlock } from './markdownSplice'
 import type { InPlaceEngine, InPlaceOptions, InPlaceRefusal } from './inPlaceEditing'
 
@@ -37,6 +38,23 @@ export function milkdownCodec(ctx: Ctx): MarkdownCodec {
     parse: (md: string) => ctx.get(parserCtx)(md) as PMNode,
     serialize: (doc: PMNode) => ctx.get(serializerCtx)(doc),
     visibleText: (md: string) => mdText(tree(md)),
+    textblocks: (md: string) => {
+      const out: Array<{ start: number; end: number }> = []
+      const walk = (node: MdNode, parent: string) => {
+        const textblock = ['paragraph', 'heading', 'code', 'tableCell'].includes(node.type)
+          || (node.type === 'html' && !['paragraph', 'heading', 'tableCell'].includes(parent))
+        if (textblock) {
+          const start = node.position?.start.offset
+          const end = node.position?.end.offset
+          if (start === undefined || end === undefined) throw new Error('text block without a position')
+          out.push({ start, end })
+          return
+        }
+        for (const c of node.children ?? []) walk(c, node.type)
+      }
+      walk(tree(md), 'root')
+      return out
+    },
   }
 }
 
@@ -53,11 +71,23 @@ export async function makeMilkdown(host: HTMLElement, configure?: (ctx: Ctx) => 
   }
 }
 
-/** A company image (a relative address) is read from the document's folder; nothing else is fetched. */
-function imageSource(src: string, folder: string): string {
-  if (!src || /^(data:|local-file:)/i.test(src)) return src
-  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) return src
-  return localFileUrl(`${folder}/${src.replace(/^\.\//, '')}`)
+/** A company image (a relative address) is the file in the document's folder; other addresses stay as written. */
+function companyImagePath(src: string, folder: string): string | null {
+  if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) return null
+  return `${folder}/${src.replace(/^\.\//, '')}`
+}
+
+/** An image of the document: a company file follows its version (the AI may replace it), as the reading view's. */
+function imageView(node: PMNode, folder: string) {
+  const img = document.createElement('img')
+  img.alt = String(node.attrs.alt ?? '')
+  if (node.attrs.title) img.title = String(node.attrs.title)
+  const src = String(node.attrs.src ?? '')
+  const path = companyImagePath(src, folder)
+  if (!path) { img.src = src; return { dom: img } }
+  const show = () => { img.src = localFileUrl(path, fileVersions.get(path)) }
+  show()
+  return { dom: img, destroy: fileVersions.subscribe(show) }
 }
 
 const trackerKey = new PluginKey('acb-in-place-writer')
@@ -76,18 +106,26 @@ export const milkdownEngine: InPlaceEngine = {
         update(view) {
           const doc = view.state.doc
           if (!spliced || !shownDoc || doc === shownDoc) return
-          const write = spliced.write(doc)
+          // A write that throws (the editor's writer meeting a shape it cannot write) is not writable either.
+          let write: ReturnType<SplicedDocument['write']> = null
+          try { write = spliced.write(doc) } catch { write = null }
           if (write) {
             write.commit()
             shownDoc = doc
             if (write.text !== lastText) { lastText = write.text; options.onChange(write.text) }
             return
           }
-          // Not writable faithfully: show the last written state again (outside this update).
+          // Not writable faithfully: show the last written state again (outside this update), the caret
+          // kept where it was. Not in the middle of a word being composed (Japanese input): its next
+          // step tries again.
+          if (view.composing) return
           const back = shownDoc
           queueMicrotask(() => {
-            if (destroyed || view.isDestroyed) return
-            view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, back.content).setMeta('addToHistory', false))
+            if (destroyed || view.isDestroyed || view.state.doc === back) return
+            const at = view.state.selection.from
+            const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, back.content).setMeta('addToHistory', false)
+            tr.setSelection(Selection.near(tr.doc.resolve(Math.min(at, tr.doc.content.size))))
+            view.dispatch(tr)
             options.onChangeTakenBack()
           })
         },
@@ -100,13 +138,7 @@ export const milkdownEngine: InPlaceEngine = {
           ...prev,
           attributes: { class: 'markdown-body acb-in-place', spellcheck: 'false' },
           nodeViews: {
-            image: (node: PMNode) => {
-              const img = document.createElement('img')
-              img.src = imageSource(String(node.attrs.src ?? ''), options.folder)
-              img.alt = String(node.attrs.alt ?? '')
-              if (node.attrs.title) img.title = String(node.attrs.title)
-              return { dom: img }
-            },
+            image: (node: PMNode) => imageView(node, options.folder),
           },
           handleDOMEvents: {
             // ⌘-click opens a web link in the browser (a plain click places the caret).

@@ -73,6 +73,24 @@ test('Enter in a nested list adds one line in the list\'s own indentation and ma
   expect((await files(page))[MEETING]).toBe(before.replace('    * 送る前に田中さんが確認する\n', '    * 送る前に田中さんが確認する\n    * 請求書も送る\n'))
 })
 
+test('Enter in a `-` list and at the end of a paragraph: the empty line writes nothing, the typed text is its own line', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  await page.evaluate(p => (window as unknown as { __acbExternalEdit: (p: string, t: string) => void }).__acbExternalEdit(p, '- 項目一\n- 項目二\n\n終わりの段落です。\n'), MEETING)
+  await expect(doc(page)).toContainText('終わりの段落です。')
+  await caretAfter(page, '項目一')
+  await page.keyboard.press('Enter')
+  await page.clock.runFor(1500)
+  expect((await files(page))[MEETING]).toBe('- 項目一\n- 項目二\n\n終わりの段落です。\n')
+  await page.keyboard.type('新')
+  await caretAfter(page, '終わりの段落です。')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('追記')
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe('- 項目一\n- 新\n- 項目二\n\n終わりの段落です。\n\n追記\n')
+  await expect(page.getByText('元に戻しました')).toHaveCount(0)
+})
+
 test('⌘⇧V goes to the source and back to the document, which shows what was typed in the source', async ({ page }) => {
   await open(page)
   await expect(doc(page)).toBeVisible()

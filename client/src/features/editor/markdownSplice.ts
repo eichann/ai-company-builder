@@ -24,6 +24,8 @@ export interface MarkdownCodec {
   serialize(doc: PMNode): string
   /** Every character a reader of `md` sees (text, code, raw HTML, image descriptions). */
   visibleText(md: string): string
+  /** Where each text block of `md` is (paragraph, heading, code, table cell, block HTML), in document order. */
+  textblocks(md: string): Array<{ start: number; end: number }>
 }
 
 /** Why a document is not edited in place: shown to the member, who edits the source instead. */
@@ -119,13 +121,18 @@ export class SplicedDocument {
    */
   rebase(shown: PMNode): boolean {
     const now = children(shown)
-    if (now.length === this.nodes.length) { this.nodes = now; return true }
+    if (sameNodes(now, this.nodes)) { this.nodes = now; return true }
     // An empty file: the editor shows one empty paragraph that stands for no block.
     if (this.nodes.length === 0 && now.length === 1 && now[0].content.size === 0) { this.nodes = now; return true }
     return false
   }
 
   write(current: PMNode): SpliceWrite | null {
+    // The editor's writer meeting a shape it cannot write throws: that change is not writable.
+    try { return this.writeAll(current) } catch { return null }
+  }
+
+  private writeAll(current: PMNode): SpliceWrite | null {
     const now = children(current)
     const runs = changedRuns(this.nodes, now)
     if (runs.length <= 1) return this.writeRun(now)
@@ -171,14 +178,32 @@ export class SplicedDocument {
     const { gFirst, gLast, fromNode, toNode, start, end } = range
     const newFrom = fromNode
     const newTo = now.length - (old.length - toNode)
-    const changed = now.slice(newFrom, newTo)
+    // What the file holds of these nodes: an empty paragraph or list item (just after Enter) has no
+    // Markdown (the editor would write `<br />`), so it stays on screen only until text is typed in.
+    const before = writable(old.slice(fromNode, toNode))
+    const changed = writable(now.slice(newFrom, newTo))
     const region = this.body.slice(start, end)
     const defs = definitionsOf(this.body, this.blocks)
-    for (const candidate of this.candidates(region, old.slice(fromNode, toNode), changed, gFirst, gLast, defs)) {
+    const prev = gFirst > 0 ? this.blocks[gFirst - 1] : undefined
+    const next = gFirst >= 0 ? this.blocks[gLast + 1] : undefined
+    for (const written of this.candidates(region, before, changed, gFirst, gLast)) {
+      let from = start
+      let to = end
+      let candidate = written
+      if (candidate === '') {
+        // A block removed whole takes the blank lines after it along (before it, at the end of the file).
+        if (next && this.body.slice(end, next.start).trim() === '') to = next.start
+        else if (!next && prev && this.body.slice(prev.end, start).trim() === '') from = prev.end
+      } else if (region.trim() === '' && gFirst >= 0) {
+        // Text typed into a line left empty on screen: it becomes a block of its own, apart from its neighbours.
+        const eol = this.eol
+        if (prev && !/\n[ \t]*\r?\n[ \t]*$/.test(this.body.slice(prev.end, start))) candidate = eol + eol + candidate
+        if (next && !/^[ \t]*\r?\n[ \t]*\r?\n/.test(this.body.slice(end, next.start))) candidate += eol + eol
+      }
       if (!this.readsBack(candidate, changed, defs)) continue
-      if (!this.neighboursKept(start, end, candidate, gFirst, gLast)) continue
-      const body = this.body.slice(0, start) + candidate + this.body.slice(end)
-      return { text: this.front + body, commit: () => this.commit(range, candidate, body, now, newFrom, newTo, defs) }
+      if (!this.neighboursKept(from, to, candidate, gFirst, gLast)) continue
+      const body = this.body.slice(0, from) + candidate + this.body.slice(to)
+      return { text: this.front + body, commit: () => this.commit({ ...range, start: from, end: to }, candidate, body, now, newFrom, newTo, defs) }
     }
     return null
   }
@@ -211,12 +236,14 @@ export class SplicedDocument {
   }
 
   /** Ways to write `changed` over `region`, smallest first. */
-  private *candidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number, defs: string): Generator<string> {
+  private *candidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
     const codec = this.codec
     const docOf = (ns: PMNode[]) => this.docType.type.create(this.docType.attrs, ns)
     const para = this.docType.type.schema.nodes.paragraph
     const lf = lfRegion(region)
     const back = (patched: string) => (lf.converted ? patched.replace(/\n/g, '\r\n') : patched)
+    // 0. Nothing the file holds changed (an empty line added or removed on screen).
+    if (sameNodes(before, changed)) { yield region; return }
     // 1. Typing inside a block: the same small text change made in the file's own bytes. The
     // smallest text block that changed is written alone first, so a table's or list's re-padding
     // elsewhere does not hide the one-character change.
@@ -224,7 +251,14 @@ export class SplicedDocument {
     const pairs: Array<[string, string]> = []
     if (inner && para) {
       const one = (n: PMNode) => codec.serialize(docOf([para.create(null, n.content)]))
-      pairs.push([one(inner[0]), one(inner[1])])
+      const [b, a] = [one(inner[0]), one(inner[1])]
+      // First inside that text block's own bytes: the same words elsewhere (two equal list items)
+      // cannot take the change.
+      const at = textblockRange(lf.text, before, inner[0], codec)
+      if (at) {
+        for (const patched of textPatches(lf.text.slice(at.start, at.end), b, a)) yield back(lf.text.slice(0, at.start) + patched + lf.text.slice(at.end))
+      }
+      pairs.push([b, a])
     }
     pairs.push([codec.serialize(docOf(before)), codec.serialize(docOf(changed))])
     for (const [b, a] of pairs) for (const patched of textPatches(lf.text, b, a)) yield back(patched)
@@ -235,20 +269,26 @@ export class SplicedDocument {
     }
     // 3. Anything else (a new list item, bold, a block turned into another): only these blocks,
     // rewritten by the editor. Definitions between them stay as written.
-    const keptDefs = gFirst < 0 ? [] : this.blocks.slice(gFirst, gLast + 1).filter(b => b.kind === 'definition').map(b => this.body.slice(b.start, b.end))
+    // With no block that shows anything (an empty file, or only definitions), the whole body is the
+    // region: its definitions are kept as written after the new text.
+    const keptDefs = (gFirst < 0 ? this.blocks : this.blocks.slice(gFirst, gLast + 1)).filter(b => b.kind === 'definition').map(b => this.body.slice(b.start, b.end))
     const written = keepReferenceLinks(region, codec.serialize(docOf(changed)).replace(/\s+$/, ''), this.body)
     const rewritten = [written, ...keptDefs].filter(Boolean).join('\n\n')
-    const trailing = gFirst < 0 ? (/\n$/.test(this.body) || this.body === '' ? '\n' : '') : ''
-    yield (rewritten + trailing).replace(/\r?\n/g, this.eol)
-    void defs
+    const trailing = gFirst < 0 && rewritten !== '' ? (/\n$/.test(this.body) || this.body === '' ? '\n' : '') : ''
+    // New lines as the region writes them (CRLF only where the region has nothing else).
+    const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
+    const out = (rewritten + trailing).replace(/\r?\n/g, eol)
+    // A list rewritten keeps the file's bullet (`-`) where the editor writes `*` (read back like any candidate).
+    const bullet = /^[ \t]*([+-])[ \t]/m.exec(region)?.[1]
+    if (bullet) yield out.replace(/^([ \t]*)\*(?=[ \t])/gm, `$1${bullet}`)
+    yield out
   }
 
   /** The written region reads back as exactly what the screen shows. */
   private readsBack(candidate: string, changed: PMNode[], defs: string): boolean {
     try {
       const reread = this.codec.parse(withDefinitions(candidate, defs))
-      if (changed.length === 1 && changed[0].content.size === 0 && changed[0].type.name === 'paragraph' && candidate.trim() === '') return true
-      return sameNodes(children(reread), changed)
+      return sameNodes(writable(children(reread)), changed)
     } catch {
       return false
     }
@@ -264,14 +304,19 @@ export class SplicedDocument {
     const window = this.body.slice(from, start) + candidate + tail
     let found: SourceBlock[]
     try { found = this.codec.blocks(window) } catch { return false }
+    // A block kept as one written region (its parts read differently alone) is checked by its edge only.
+    const clean = (at: number) => !found.some(b => b.start < at && b.end > at)
     if (prev) {
       const first = found[0]
-      if (!first || first.start !== 0 || first.end !== prev.end - prev.start || first.kind !== prev.kind) return false
+      const len = prev.end - prev.start
+      if (prev.kind === 'region') { if (!clean(len)) return false }
+      else if (!first || first.start !== 0 || first.end !== len || first.kind !== prev.kind) return false
     }
     if (next) {
       const last = found[found.length - 1]
-      const len = next.end - next.start
-      if (!last || last.end !== window.length || last.start !== window.length - len || last.kind !== next.kind) return false
+      const at = window.length - (next.end - next.start)
+      if (next.kind === 'region') { if (!clean(at)) return false }
+      else if (!last || last.end !== window.length || last.start !== at || last.kind !== next.kind) return false
     }
     return true
   }
@@ -280,7 +325,8 @@ export class SplicedDocument {
   private commit(range: ReturnType<SplicedDocument['blockRange']>, candidate: string, body: string, now: PMNode[], newFrom: number, newTo: number, defs: string) {
     const { gFirst, gLast, start, end } = range
     const delta = candidate.length - (end - start)
-    const changed = now.slice(newFrom, newTo)
+    const shown = now.slice(newFrom, newTo)
+    const changed = writable(shown)
     let fresh: SourceBlock[] = []
     let counts: number[] = []
     try {
@@ -292,11 +338,12 @@ export class SplicedDocument {
         made.push(...ns)
         counts.push(ns.length)
       }
-      if (!sameNodes(made, changed)) throw new Error('regroup')
+      // Block by block the nodes must be the ones shown (an empty paragraph on screen has no block).
+      if (!sameNodes(made, changed) || made.length !== shown.length) throw new Error('regroup')
     } catch {
-      // The region read whole matches; read block by block it does not: keep it as one block.
+      // Otherwise the written region is kept as one block holding the shown nodes.
       fresh = [{ start, end: start + candidate.length, kind: 'region' }]
-      counts = [changed.length]
+      counts = [shown.length]
     }
     const lo = gFirst < 0 ? 0 : gFirst
     const hi = gFirst < 0 ? this.blocks.length : gLast + 1
@@ -344,8 +391,9 @@ function changedRuns(old: PMNode[], now: PMNode[]): Array<{ oldTo: number; newTo
 }
 
 /**
- * The same document as read: node types, attributes, marks and text. A heading's `id` is left out:
- * the editor derives it from the text it had, so a typed heading keeps its old one until redrawn.
+ * The same document as read: node types, attributes, marks and text. Attributes the editor derives
+ * for showing are left out: a heading's `id` (from its text) and a list item's `label` (its number,
+ * renumbered on screen when an item is added): Markdown holds neither.
  */
 export function sameNodes(a: readonly PMNode[], b: readonly PMNode[]): boolean {
   return a.length === b.length && a.every((n, i) => sameNode(n, b[i]))
@@ -359,12 +407,53 @@ function sameNode(a: PMNode, b: PMNode): boolean {
   return true
 }
 
+const DERIVED: Record<string, string> = { heading: 'id', list_item: 'label' }
+
 function sameIgnoringId(a: PMNode, b: PMNode): boolean {
-  if (a.type.name !== 'heading') return false
-  const { id: _a, ...ra } = a.attrs
-  const { id: _b, ...rb } = b.attrs
-  void _a; void _b
-  return JSON.stringify(ra) === JSON.stringify(rb) && a.marks.length === b.marks.length && a.marks.every((m, i) => m.eq(b.marks[i]))
+  const derived = DERIVED[a.type.name]
+  if (!derived) return false
+  const keep = (n: PMNode) => JSON.stringify(Object.entries(n.attrs).filter(([k]) => k !== derived))
+  return keep(a) === keep(b) && a.marks.length === b.marks.length && a.marks.every((m, i) => m.eq(b.marks[i]))
+}
+
+/**
+ * The nodes as the file holds them: empty paragraphs and list items whose only content is an empty
+ * paragraph (what Enter makes before anything is typed) are left out, and so is a list left empty.
+ */
+export function writable(nodes: readonly PMNode[]): PMNode[] {
+  const empty = (n: PMNode) => n.type.name === 'paragraph' && n.content.size === 0
+  const isList = (n: PMNode) => /list/.test(n.type.name) && !/item/.test(n.type.name)
+  const emptyItem = (n: PMNode) => /list_item/.test(n.type.name) && n.childCount === 1 && empty(n.firstChild!)
+  const clean = (n: PMNode): PMNode | null => {
+    if (empty(n)) return null
+    if (n.isTextblock || n.isLeaf) return n
+    const kept: PMNode[] = []
+    let dropped = false
+    n.forEach(c => {
+      const k = isList(n) && emptyItem(c) ? null : clean(c)
+      if (k !== c) dropped = true
+      if (k) kept.push(k)
+    })
+    if (!dropped) return n
+    // A list item or a list left with nothing in it is not written at all (an empty item has no Markdown).
+    if (kept.length === 0) return null
+    try { return n.type.create(n.attrs, kept, n.marks) } catch { return n }
+  }
+  return nodes.map(clean).filter((n): n is PMNode => n !== null)
+}
+
+/** The source range of `target` (a text block inside `nodes`), when the reader's text blocks line up with the editor's. */
+function textblockRange(source: string, nodes: PMNode[], target: PMNode, codec: MarkdownCodec): { start: number; end: number } | null {
+  const mine: PMNode[] = []
+  for (const n of nodes) {
+    if (n.isTextblock) { mine.push(n); continue }
+    n.descendants(d => { if (d.isTextblock) { mine.push(d); return false } return true })
+  }
+  const index = mine.indexOf(target)
+  if (index < 0) return null
+  let ranges: Array<{ start: number; end: number }>
+  try { ranges = codec.textblocks(source) } catch { return null }
+  return ranges.length === mine.length ? ranges[index] : null
 }
 
 function children(doc: PMNode): PMNode[] {
@@ -406,24 +495,45 @@ export function textPatches(source: string, before: string, after: string): stri
   return out
 }
 
+const LIST_MARKER = /^([*+-]|\d+[.)])(?=\s)/
+const itemText = (line: string) => line.trim().replace(/^([*+-]|\d+[.)])\s+/, '').trim()
+
 function linePatch(source: string, before: string, after: string): string | null {
   const bl = before.replace(/\s+$/, '').split('\n')
   const al = after.replace(/\s+$/, '').split('\n')
+  // Lines compared without their list markers: the editor renumbers the items after a new one.
+  const key = (l: string) => /^\s*/.exec(l)![0] + itemText(l)
   let p = 0
-  while (p < bl.length && p < al.length && bl[p] === al[p]) p++
+  while (p < bl.length && p < al.length && key(bl[p]) === key(al[p])) p++
   let s = 0
-  while (s < bl.length - p && s < al.length - p && bl[bl.length - 1 - s] === al[al.length - 1 - s]) s++
+  while (s < bl.length - p && s < al.length - p && key(bl[bl.length - 1 - s]) === key(al[al.length - 1 - s])) s++
   if (bl.length - p - s !== 0 || p === 0) return null
   const added = al.slice(p, al.length - s)
   const anchor = bl[p - 1]
   if (anchor.trim() === '') return null
   const src = source.split('\n')
-  const hits = src.map((l, i) => [l, i] as const).filter(([l]) => l.trim() === anchor.trim())
+  // A list item is found by its text: the editor writes `*` and its own numbers, the file may not.
+  const hits = src.map((l, i) => [l, i] as const).filter(([l]) => itemText(l) === itemText(anchor))
   if (hits.length !== 1) return null
   const [srcLine, at] = hits[0]
   const serIndent = /^\s*/.exec(anchor)![0]
   const srcIndent = /^\s*/.exec(srcLine)![0]
-  const rebased = added.map(l => (l.startsWith(serIndent) && l.trim() !== '' ? srcIndent + l.slice(serIndent.length) : l))
+  const srcMarker = LIST_MARKER.exec(srcLine.slice(srcIndent.length))
+  const rebased = added.map(l => {
+    if (!l.startsWith(serIndent) || l.trim() === '') return l
+    let rest = l.slice(serIndent.length)
+    const m = LIST_MARKER.exec(rest)
+    // A new item at the anchor's own level takes the file's marker: `-`, a list numbered `1.` on
+    // every line keeps `1.`, otherwise the next number.
+    if (m && srcMarker) {
+      const num = /^(\d+)([.)])$/.exec(srcMarker[1])
+      const markerOf = (line: string | undefined) => (line?.startsWith(srcIndent) ? LIST_MARKER.exec(line.slice(srcIndent.length))?.[1] : undefined)
+      const repeated = markerOf(src[at + 1]) === srcMarker[1] || markerOf(src[at - 1]) === srcMarker[1]
+      const marker = num && !repeated ? `${Number(num[1]) + 1}${num[2]}` : srcMarker[1]
+      rest = marker + rest.slice(m[1].length)
+    }
+    return srcIndent + rest
+  })
   return [...src.slice(0, at + 1), ...rebased, ...src.slice(at + 1)].join('\n')
 }
 

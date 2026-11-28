@@ -352,13 +352,19 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   own reader (source offsets), each read alone (link reference definitions handed to every block);
   the `---` block (`splitFront`, BOM / trailing spaces / `...` accepted) never reaches the editor.
   A change is written as the smallest edit that **reads back as exactly what the screen shows**:
-  (1) the same text change in the file's own bytes (located by its unique surroundings), or whole
-  new lines in the source's own indentation and marker; (2) a table's changed cells / one row / one
+  (0) nothing at all when what the file holds did not change — an empty paragraph or list item
+  (Enter before anything is typed) has no Markdown (the editor would write `<br />`), so it is left
+  out of what is written (`writable`) until text is typed into it; (1) the same text change in the
+  file's own bytes, first inside that text block's own source range (so two equal list items cannot
+  take each other's change), else located by its unique surroundings; or whole new lines in the
+  source's own indentation and list marker (`-`, a repeated `1.`, or the next number); (2) a table's changed cells / one row / one
   column in its own padding; (3) only the changed blocks rewritten by the editor (reference links
   kept as references). Each candidate is accepted only when the written region reads back equal
-  (a heading's derived `id` aside) **and** the blocks right before and after it still read as the
-  same blocks from the same bytes; changes in several places at once are written run by run; a
-  written change becomes the baseline (the next one is placed against it). CRLF files keep CRLF.
+  (what the editor derives for showing aside: a heading's `id`, a list item's number `label`)
+  **and** the blocks right before and after it still read as the same blocks from the same bytes;
+  changes in several places at once are written run by run; a block deleted whole takes the blank
+  lines after it; a written change becomes the baseline (the next one is placed against it). CRLF
+  files keep CRLF (a region's new lines follow the region's own).
   Measured (demo, 2026-11-28): opening and leaving 0 lines, one character 1 line, Enter in a list
   one new line, bold / a heading level 1 line; a column added changes every row (accepted, owner).
 - **Never written approximately**: a document with a block kind it does not hold (footnotes, …:
@@ -366,8 +372,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   vs the editor's), that the editor tidies when shown, or whose unchanged write-back is not the file
   byte for byte, stays in the reading view (`MarkdownPreview`) with a callout and
   ［もとの書き方で直す］ (the source); nothing is written. A change that cannot be written faithfully
-  is taken back on screen (the last written state shown again) with a callout — the screen never
-  shows what the file does not hold. The editor failing to load → the same reading view.
+  is taken back on screen (the last written state shown again, the caret kept; not while a word is
+  being composed) with a callout — the screen never shows what the file does not hold. The editor failing to load → the same reading view.
 - **Saving, external changes and leaving are the editor's as before**: each written change goes
   through `handleContentChange` (the tab's text, its dot, the preview tab pinned on the first edit),
   so autosave, ⌘S, the external-change band (it pauses autosave; the member's text stays on screen),

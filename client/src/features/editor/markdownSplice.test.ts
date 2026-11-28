@@ -234,6 +234,108 @@ test('a new list item is one new line in the list\'s own indentation and marker'
   assert.ok(text.includes('    * 送る前に田中さんが確認する\n    * 請求書も送る\n'), text)
 })
 
+/** Splits the text block holding the caret right after `after`, as Enter does (an empty one when at its end). */
+function enterAfter(view: EditorView, after: string): number {
+  const at = posAfter(view.state.doc, after)
+  const $at = view.state.doc.resolve(at)
+  const inItem = [...Array($at.depth + 1).keys()].some(d => $at.node(d).type.name === 'list_item')
+  view.dispatch(inItem ? view.state.tr.split(at, 2) : view.state.tr.split(at))
+  return at + (inItem ? 4 : 2) // the start of the new, empty text block
+}
+
+test('Enter makes an empty line that writes nothing; what is typed into it is the one new line', () => {
+  const text = '# 題\n\n一つめの段落\n\n二つめの段落\n'
+  {
+    const { spliced, view } = open(text)
+    const at = enterAfter(view, '一つめの段落')
+    assert.equal(saved(spliced, view), text, 'no `<br />` for the empty paragraph')
+    view.dispatch(view.state.tr.insertText('間の段落', at))
+    assert.equal(saved(spliced, view), '# 題\n\n一つめの段落\n\n間の段落\n\n二つめの段落\n')
+  }
+  {
+    const { spliced, view } = open(text)
+    view.dispatch(view.state.tr.split(posAfter(view.state.doc, '一つめの段落') - 6))
+    assert.equal(saved(spliced, view), text, 'Enter at the start of a paragraph')
+  }
+})
+
+test('a new item in a `-` or numbered list keeps the file\'s own markers; an empty item writes nothing', () => {
+  const cases: Array<[string, string, string]> = [
+    ['- 項目一\n- 項目二\n- 項目三\n', '項目一', '- 項目一\n- 新\n- 項目二\n- 項目三\n'],
+    ['1. 一\n1. 二\n1. 三\n', '二', '1. 一\n1. 二\n1. 新\n1. 三\n'],
+    ['1. 一\n2. 二\n', '二', '1. 一\n2. 二\n3. 新\n'],
+  ]
+  for (const [text, after, expected] of cases) {
+    const { spliced, view } = open(text)
+    const at = enterAfter(view, after)
+    assert.equal(saved(spliced, view), text, `the empty item after ${after}`)
+    view.dispatch(view.state.tr.insertText('新', at))
+    assert.equal(saved(spliced, view), expected)
+  }
+})
+
+test('typing in one of several equal list items changes that item only', () => {
+  // Spaced as people type it: rewritten by the editor, the list would lose its spacing.
+  const text = '-   同じ\n-   同じ\n-   同じ\n'
+  const { spliced, view } = open(text)
+  let second = -1
+  let seen = 0
+  view.state.doc.descendants((node, pos) => {
+    if (node.isText && node.text === '同じ' && ++seen === 2) second = pos + 2
+    return true
+  })
+  view.dispatch(view.state.tr.insertText('だ', second))
+  assert.equal(saved(spliced, view), '-   同じ\n-   同じだ\n-   同じ\n')
+})
+
+test('a paragraph deleted whole takes its blank lines along, and the next edits still write', () => {
+  const { spliced, view } = open('一つめ\n\n二つめ\n\n三つめ\n')
+  const $at = view.state.doc.resolve(posAfter(view.state.doc, '二つめ'))
+  view.dispatch(view.state.tr.delete($at.before(1), $at.after(1)))
+  assert.equal(saved(spliced, view), '一つめ\n\n三つめ\n')
+  insertAfter(view, '三つめ', 'です')
+  assert.equal(saved(spliced, view), '一つめ\n\n三つめです\n')
+})
+
+test('a line cleared and typed again, and the last paragraph deleted, leave no stray blank lines', () => {
+  {
+    const { spliced, view } = open('一つめ\n\n二つめ\n\n三つめ\n')
+    const from = posAfter(view.state.doc, '二つめ') - 3
+    view.dispatch(view.state.tr.delete(from, from + 3))
+    assert.equal(saved(spliced, view), '一つめ\n\n三つめ\n')
+    view.dispatch(view.state.tr.insertText('新しい二つめ', from))
+    assert.equal(saved(spliced, view), '一つめ\n\n新しい二つめ\n\n三つめ\n')
+  }
+  {
+    const { spliced, view } = open('一\n\n二\n')
+    const $at = view.state.doc.resolve(posAfter(view.state.doc, '二'))
+    view.dispatch(view.state.tr.delete($at.before(1), $at.after(1)))
+    assert.equal(saved(spliced, view), '一\n')
+  }
+})
+
+test('a list item removed or emptied keeps the list\'s `-`, and an item emptied of two paragraphs never stops the writing', () => {
+  {
+    const { spliced, view } = open('- 一\n- 二\n- 三\n')
+    const $at = view.state.doc.resolve(posAfter(view.state.doc, '二'))
+    const item = [...Array($at.depth + 1).keys()].reverse().find(d => $at.node(d).type.name === 'list_item')!
+    view.dispatch(view.state.tr.delete($at.before(item), $at.after(item)))
+    assert.equal(saved(spliced, view), '- 一\n- 三\n')
+  }
+  {
+    const { spliced, view } = open('- 一\n\n  続き\n- 二\n')
+    for (const word of ['一', '続き']) {
+      const at = posAfter(view.state.doc, word)
+      view.dispatch(view.state.tr.delete(at - word.length, at))
+      // Written or refused (then taken back on screen), but never a throw that stops the writing.
+      let w: ReturnType<typeof spliced.write> = null
+      assert.doesNotThrow(() => { w = spliced.write(view.state.doc) })
+      if (w) (w as { commit(): void }).commit()
+    }
+    assert.match(spliced.text, /二/)
+  }
+})
+
 test('bold, a heading level and a new table row change only their own line', () => {
   {
     const { spliced, view } = open(MEETING)
@@ -279,6 +381,10 @@ test('the frontmatter block stays as written, and an empty file takes what is ty
   const { spliced, view } = open('')
   view.dispatch(view.state.tr.insertText('はじめの一行', 1))
   assert.equal(saved(spliced, view), 'はじめの一行\n')
+  // A file of link definitions only shows nothing: what is typed comes first, the definitions stay.
+  const defsOnly = open('[ref]: https://example.com\n')
+  defsOnly.view.dispatch(defsOnly.view.state.tr.insertText('こんにちは', 1))
+  assert.equal(saved(defsOnly.spliced, defsOnly.view), 'こんにちは\n\n[ref]: https://example.com\n')
 })
 
 test('a document the editor cannot hold is refused before anything can be written', () => {
@@ -287,6 +393,14 @@ test('a document the editor cannot hold is refused before anything can be writte
   // A reader that drops text on reading (as an editor does with syntax it does not know).
   const dropping: MarkdownCodec = { ...md.codec, parse: s => md.codec.parse(s.replace('大事な一言', '')) }
   assert.equal(reason(SplicedDocument.load('前の段落\n\n大事な一言のある段落\n', dropping)), 'lossy')
+})
+
+test('an editor that tidies the document as it shows it does not get to edit it', () => {
+  const loaded = SplicedDocument.load('一つめ\n\n二つめ\n', md.codec)
+  assert.ok(loaded.ok)
+  // Shown with the same number of blocks, but not the same words: not a baseline to write from.
+  assert.equal(loaded.doc.rebase(md.codec.parse('一つめ\n\n二つ\n')), false)
+  assert.equal(loaded.doc.rebase(md.codec.parse('一つめ\n\n二つめ\n')), true)
 })
 
 test('a change that would not read back as what the screen shows is not written', () => {
