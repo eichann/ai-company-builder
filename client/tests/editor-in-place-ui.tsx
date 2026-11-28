@@ -11,7 +11,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { EDITOR_SELECTION } from '../src/app/editorSelection'
-import { useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
+import { commandArea, useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { useAppStore } from '../src/stores/appStore'
@@ -91,10 +91,12 @@ export function Preview() {
   // As AppShell has them: ⌘B is the left column's, ⌘K 探す — the document's bold and link only while it has the focus.
   useCommandHandler('layout.toggleLeft', () => { appKeys.push('layout.toggleLeft') })
   useCommandHandler('find.byName', () => { appKeys.push('find.byName') })
+  // A part around the editor that also answers Esc (as a list worked through does): the 「/」 list takes Esc only while it shows.
+  useCommandHandler('list.back', () => { appKeys.push('list.back') }, { target: 'around' })
   const [active, setActive] = useState(new URLSearchParams(location.search).get('file') === 'notes' ? NOTES : MEETING)
   return (
     <main className="min-h-screen bg-bg text-text">
-      <div style={{ height: 480, width: 800 }}>
+      <div style={{ height: 480, width: 800 }} {...commandArea('list', 'around')}>
         <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={[MEETING, NOTES]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} inPlaceEditing />
       </div>
       <WindowCloseGuard />

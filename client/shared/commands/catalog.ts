@@ -324,6 +324,33 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'editor' },
     keybinding: { key: 'mod+alt+3', area: 'editor', notInHtmlDocument: true },
   },
+  // The 「/」 list of a document edited in place (files-and-editor.md "The 「/」 list, line starts and the
+  // table bar"): each declines its key unless that list shows in the focused document (and not while a word
+  // is being composed), so ↑ ↓ Enter Esc stay the text's — and Esc another part's — otherwise.
+  {
+    id: 'editor.blockMenuNext', title: '「/」の一覧で次の形を選ぶ', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'ArrowDown', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuPrevious', title: '「/」の一覧で前の形を選ぶ', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'ArrowUp', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuChoose', title: '「/」の一覧で選んだ形にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'Enter', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuClose', title: '「/」の一覧を閉じる', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'Escape', area: 'editor', notInHtmlDocument: true },
+  },
 ])
 
 export type AppCommands = typeof COMMANDS

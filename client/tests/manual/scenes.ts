@@ -501,17 +501,42 @@ export const scenes: Scene[] = [
   },
   {
     id: 'doc-selection-bubble',
-    about: 'Words selected in 訪問メモ_1123.md: the one bubble — decorations, 文字の大きさ, リンク, ［コメント］.',
+    about: 'Words selected in a paragraph of 提案書_A社向け.md: the one bubble — decorations, 文字の大きさ, リンク, ［コメント］.',
     ...MAIN,
-    // The bubble shows while the document has the focus.
+    // The bubble shows while the document has the focus; 文字の大きさ only in a paragraph or heading (not a list item).
     keepFocus: true,
-    steps: [...SALES_FILES, { click: VISIT_MEMO }, { waitFor: 'text=納期は3月末を希望' }, { click: EDITOR }, SELECT_TEXT('納期は3月末を希望', '[data-in-place-editor]'), { waitFor: 'role=toolbar[name="選んだ文字の飾り"]' }, SETTLE],
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { click: EDITOR }, SELECT_TEXT('受発注の手作業を減らし', '[data-in-place-editor]'), { waitFor: 'role=toolbar[name="選んだ文字の飾り"]' }, SETTLE],
     crop: { region: { x: 260, y: 90, width: 760, height: 320 } },
     annotations: [
       { box: 'role=toolbar[name="選んだ文字の飾り"]' },
       { marker: { target: 'role=button[name="太字"]', label: '1', at: 'below' } },
       { marker: { target: 'role=button[name=/本文/]', label: '2', at: 'below' } },
       { marker: { target: 'role=toolbar[name="選んだ文字の飾り"] >> role=button[name="コメント"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'doc-block-menu',
+    about: '提案書_A社向け.md: Enter twice after the last item, then 「/」 — the list of shapes a line can take.',
+    ...MAIN,
+    // The list shows while the document has the focus.
+    keepFocus: true,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { typeAtEnd: EDITOR, text: '\n\n/' }, { waitFor: 'role=listbox[name="形を選ぶ"]' }, SETTLE],
+    crop: { region: { x: 260, y: 200, width: 600, height: 560 } },
+    annotations: [
+      { box: 'role=listbox[name="形を選ぶ"]' },
+      { marker: { target: 'role=listbox[name="形を選ぶ"]', label: '1', at: 'right' } },
+    ],
+  },
+  {
+    id: 'doc-table-bar',
+    about: '提案書_A社向け.md: a table made from the 「/」 list, the caret in it — the bar over its top right.',
+    ...MAIN,
+    keepFocus: true,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { typeAtEnd: EDITOR, text: '\n\n/表' }, { press: 'Enter' }, { waitFor: 'role=toolbar[name="表の操作"]' }, SETTLE],
+    crop: { region: { x: 260, y: 300, width: 760, height: 480 } },
+    annotations: [
+      { box: 'role=toolbar[name="表の操作"]' },
+      { marker: { target: 'role=toolbar[name="表の操作"]', label: '1', at: 'left' } },
     ],
   },
   {

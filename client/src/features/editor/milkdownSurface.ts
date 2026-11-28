@@ -19,6 +19,7 @@ import { strikethroughKeymap } from '@milkdown/preset-gfm'
 import { TextSelection } from '@milkdown/prose/state'
 import type { InPlaceEngine, InPlaceOptions, InPlaceRefusal } from './inPlaceEditing'
 import { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } from './milkdownFormat'
+import { blockMenuPlugin, blockMenuReport, closeBlockMenu, lineStartRules, REPLACED_LINE_START_RULES, editTable, tableReport, turnIntoBlock } from './milkdownBlocks'
 
 interface MdNode { type: string; value?: unknown; alt?: unknown; children?: MdNode[]; position?: { start: { offset?: number }; end: { offset?: number } } }
 
@@ -66,7 +67,8 @@ export function milkdownCodec(ctx: Ctx): MarkdownCodec {
 export async function makeMilkdown(host: HTMLElement, configure?: (ctx: Ctx) => void, plugins: ReturnType<typeof $prose>[] = []) {
   const editor = await Editor.make()
     .config(ctx => { ctx.set(rootCtx, host); ctx.set(defaultValueCtx, ''); configure?.(ctx) })
-    .use(commonmark).use(gfm).use(history).use(plugins).create()
+    .use(commonmark.filter(p => !REPLACED_LINE_START_RULES.includes(p))).use(gfm.filter(p => !REPLACED_LINE_START_RULES.includes(p)))
+    .use(history).use([...lineStartRules, blockMenuPlugin].flat()).use(plugins).create()
   return {
     editor,
     codec: editor.action(ctx => milkdownCodec(ctx)),
@@ -106,14 +108,19 @@ export const milkdownEngine: InPlaceEngine = {
     let destroyed = false
     // The selection as last shown: a box for a link's address takes the focus, the change still applies to it.
     let lastRange: { from: number; to: number } | null = null
-    let lastReported: string | null = null
+    const reported = { selection: '', menu: '', table: '' }
+    const report = <T>(kind: keyof typeof reported, value: T, tell: (v: T) => void) => {
+      const key = JSON.stringify(value)
+      if (key === reported[kind]) return
+      reported[kind] = key
+      tell(value)
+    }
     const reportSelection = (view: EditorView) => {
       const shown = view.hasFocus() ? selectionOf(view) : null
       if (shown) lastRange = { from: view.state.selection.from, to: view.state.selection.to }
-      const key = JSON.stringify(shown)
-      if (key === lastReported) return
-      lastReported = key
-      options.onSelection(shown)
+      report('selection', shown, options.onSelection)
+      report('menu', blockMenuReport(view), options.onBlockMenu)
+      report('table', tableReport(view), options.onTable)
     }
     const tracker = $prose(() => new Plugin({
       key: trackerKey,
@@ -215,6 +222,9 @@ export const milkdownEngine: InPlaceEngine = {
           setInPlaceLink(view, href)
         },
         setSize: size => { if (!view.isDestroyed) setInPlaceSize(view, size) },
+        turnInto: block => { if (!view.isDestroyed) turnIntoBlock(view, block) },
+        closeBlockMenu: () => { if (!view.isDestroyed) closeBlockMenu(view) },
+        editTable: edit => { if (!view.isDestroyed) editTable(view, edit) },
       },
     }
   },

@@ -4,8 +4,9 @@
 // behind this door, so the parts can be replaced without the screen changing. The editor is
 // loaded only when a document is first shown this way (it is ~440 KB; dist/vendor/).
 import type { InPlaceRefusal } from './markdownSplice'
+import type { InPlaceBlock } from './blockChoices'
 
-export type { InPlaceRefusal }
+export type { InPlaceRefusal, InPlaceBlock }
 
 export interface InPlaceOptions {
   /** The document's folder: relative image addresses are read from there. */
@@ -16,6 +17,29 @@ export interface InPlaceOptions {
   onChangeTakenBack(): void
   /** The words selected (what the selection bubble shows), or none / the focus left the document. */
   onSelection(selection: InPlaceSelection | null): void
+  /** The 「/」 list to show (a line holding 「/」 and what was typed after it), or none. */
+  onBlockMenu(menu: InPlaceBlockMenu | null): void
+  /** The table holding the caret (its bar's place and what it can do), or none. */
+  onTable(table: InPlaceTable | null): void
+}
+
+export interface InPlaceBlockMenu {
+  /** What was typed after 「/」. */
+  query: string
+  /** The blocks it finds, in the list's order (never empty). */
+  choices: InPlaceBlock[]
+  /** The caret on screen (viewport pixels). */
+  box: { left: number; top: number; bottom: number }
+}
+
+/** The table bar's operations. */
+export type TableEdit = 'addRow' | 'addColumn' | 'deleteRow' | 'deleteColumn'
+
+export interface InPlaceTable {
+  /** The table's top right corner on screen (viewport pixels). */
+  box: { top: number; right: number }
+  /** Which operations apply where the caret is (no deleting the header row, the last column or the last row). */
+  can: Record<TableEdit, boolean>
 }
 
 /** The decorations the bubble offers: each one a Markdown mark, so the file keeps it. */
@@ -45,6 +69,11 @@ export interface InPlaceSurface {
   /** A link on the selection (`href`) or none (`null`); the selection last shown when the focus left (a box for the address). */
   setLink(href: string | null): void
   setSize(size: TextSize): void
+  /** The 「/」 list's choice: the 「/…」 line becomes that block. */
+  turnInto(block: InPlaceBlock): void
+  /** Esc on the 「/」 list: it closes, the 「/」 stays as typed. */
+  closeBlockMenu(): void
+  editTable(edit: TableEdit): void
 }
 
 export type InPlaceOpening = { ok: true; surface: InPlaceSurface } | { ok: false; reason: InPlaceRefusal }

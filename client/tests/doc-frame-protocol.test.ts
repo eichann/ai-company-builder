@@ -706,8 +706,8 @@ test('the app shortcuts a document hands over are the command catalog\'s, of the
   const all = Object.values(COMMANDS as Record<string, CommandDefinition>).filter(def => def.keybinding && ['editor', 'app'].includes(def.keybinding.area))
   const around = all.filter(def => !def.keybinding!.notInHtmlDocument)
   const kept = all.filter(def => def.keybinding!.notInHtmlDocument)
-  // ⌘F and the Markdown selection bubble's keys (⌘I, ⌘⇧S, ⌘E, ⌘⌥0〜3 …) do nothing on an HTML tab.
-  assert.deepEqual(kept.map(def => def.id), ['editor.find', 'editor.toggleBold', 'editor.toggleItalic', 'editor.toggleStrike', 'editor.toggleCode', 'editor.editLink', 'editor.setBodyText', 'editor.setHeadingOne', 'editor.setHeadingTwo', 'editor.setHeadingThree'], 'control: the keys marked as nothing on an HTML tab')
+  // ⌘F, the Markdown selection bubble's keys (⌘I, ⌘⇧S, ⌘E, ⌘⌥0〜3 …) and the 「/」 list's (↑ ↓ Enter Esc) do nothing on an HTML tab.
+  assert.deepEqual(kept.map(def => def.id), ['editor.find', 'editor.toggleBold', 'editor.toggleItalic', 'editor.toggleStrike', 'editor.toggleCode', 'editor.editLink', 'editor.setBodyText', 'editor.setHeadingOne', 'editor.setHeadingTwo', 'editor.setHeadingThree', 'editor.blockMenuNext', 'editor.blockMenuPrevious', 'editor.blockMenuChoose', 'editor.blockMenuClose'], 'control: the keys marked as nothing on an HTML tab')
   assert.equal(docViewShortcutOf(press('f', { metaKey: true }), true), null, 'the document keeps ⌘F')
   assert.equal(docViewShortcutOf(press('f', { ctrlKey: true }), false), null, 'the document keeps Ctrl+F')
   for (const def of kept) {

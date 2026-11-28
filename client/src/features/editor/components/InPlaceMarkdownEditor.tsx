@@ -5,11 +5,12 @@ import { useCommandHandler } from '../../../shared/commands/commands'
 import { isMacControlKey, type KeyInput } from '../../../../shared/commands/define'
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
 import { previewFrontmatter } from '../markdownFrontmatter'
-import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceMark, type InPlaceRefusal, type InPlaceSelection, type InPlaceSurface, type TextSize } from '../inPlaceEditing'
+import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceBlockMenu, type InPlaceMark, type InPlaceRefusal, type InPlaceSelection, type InPlaceSurface, type InPlaceTable, type TextSize } from '../inPlaceEditing'
 import type { CommentBoxProps } from '../selectionSlot'
 import type { CommentSeverity } from '../../doc-review/model'
 import { FrontmatterNote, MarkdownPreview, PreviewSearchBar } from './MarkdownPreview'
 import { SelectionBubble, type BubbleMode } from './SelectionBubble'
+import { BlockMenu, TableBar } from './BlockTools'
 
 const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
 
@@ -64,6 +65,15 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   const onSelection = useCallback((selection: InPlaceSelection | null) => {
     setBubble(b => (selection ? { selection, mode: b?.mode === 'size' ? 'size' : 'tools' } : b && (b.mode === 'link' || b.mode === 'comment') ? b : null))
   }, [])
+  // The 「/」 list (its highlighted choice starts at the first again when what was typed changes) and the table bar.
+  const [menu, setMenu] = useState<{ menu: InPlaceBlockMenu; index: number } | null>(null)
+  // What the editor reported last, at once: a key pressed before the list is drawn again meets the editor's own state.
+  const shownMenu = useRef<InPlaceBlockMenu | null>(null)
+  const onBlockMenu = useCallback((next: InPlaceBlockMenu | null) => {
+    shownMenu.current = next
+    setMenu(m => (next ? { menu: next, index: m && m.menu.query === next.query ? m.index : 0 } : null))
+  }, [])
+  const [table, setTable] = useState<InPlaceTable | null>(null)
   const folder = filePath.substring(0, filePath.lastIndexOf('/'))
   // Read when the editor is made: the host callback must stay the same, or the editor is made again.
   const startAt = useLatestRef({ folder, initialScrollRatio })
@@ -80,6 +90,8 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         onChange: text => latestChange.current(text),
         onChangeTakenBack: () => setTakenBack(true),
         onSelection,
+        onBlockMenu,
+        onTable: setTable,
       }))
       .then(result => {
         if (gone) { if (result.ok) result.surface.destroy(); return }
@@ -93,7 +105,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         }
       })
       .catch(() => { if (!gone) setState('unavailable') })
-  }, [opened, latestChange, startAt, onSelection])
+  }, [opened, latestChange, startAt, onSelection, onBlockMenu])
 
   // The bubble's keys (command catalog, editor area): only while the focus is in this document, else
   // the key is the app's (⌘B the left column, ⌘K 探す).
@@ -116,6 +128,18 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   useCommandHandler('editor.setHeadingOne', size(1), keys)
   useCommandHandler('editor.setHeadingTwo', size(2), keys)
   useCommandHandler('editor.setHeadingThree', size(3), keys)
+  // The 「/」 list's keys: only while it shows in this document, never while a word is being composed.
+  const menuKeys = { target: paneId, acceptsKey: (input: KeyInput) => inDocument(input) && shownMenu.current !== null && !input.isComposing }
+  const step = (by: number) => () => setMenu(m => m && { ...m, index: (m.index + by + m.menu.choices.length) % m.menu.choices.length })
+  useCommandHandler('editor.blockMenuNext', step(1), menuKeys)
+  useCommandHandler('editor.blockMenuPrevious', step(-1), menuKeys)
+  useCommandHandler('editor.blockMenuChoose', () => {
+    const now = shownMenu.current
+    if (!now) return
+    const index = menu && menu.menu.query === now.query ? menu.index : 0
+    surfaceRef.current?.turnInto(now.choices[Math.min(index, now.choices.length - 1)])
+  }, menuKeys)
+  useCommandHandler('editor.blockMenuClose', () => surfaceRef.current?.closeBlockMenu(), menuKeys)
 
   const closeBox = () => { setBubble(null); surfaceRef.current?.focus() }
 
@@ -162,6 +186,15 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         <FrontmatterNote info={front.info} />
         <div ref={host} className={state === 'opening' ? 'invisible' : undefined} aria-label="文章（その場で直せます）" />
       </div>
+      {menu && state === 'open' && (
+        <BlockMenu
+          menu={menu.menu}
+          index={menu.index}
+          onHover={index => setMenu(m => m && { ...m, index })}
+          onChoose={block => surfaceRef.current?.turnInto(block)}
+        />
+      )}
+      {table && !bubble && !menu && state === 'open' && <TableBar table={table} onEdit={edit => surfaceRef.current?.editTable(edit)} />}
       {bubble && state === 'open' && (bubble.mode === 'comment' && comment ? comment.box({
         position: { x: Math.min(bubble.selection.box.left, window.innerWidth - 300), y: bubble.selection.box.bottom },
         selectedText: bubble.selection.text.trim(),

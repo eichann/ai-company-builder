@@ -170,7 +170,7 @@ export class SplicedDocument {
     let oldStart = p
     let oldEnd = old.length - s
     if (oldStart === oldEnd) {
-      // Only nodes added: the block before them is rewritten with them (or after, at the very top).
+      // Only nodes added: the block before them is the region (or after, at the very top).
       if (oldStart > 0) oldStart--
       else oldEnd++
     }
@@ -235,8 +235,40 @@ export class SplicedDocument {
     }
   }
 
-  /** Ways to write `changed` over `region`, smallest first. */
+  /**
+   * Ways to write `changed` over `region`, smallest first; each first in the file's own way of
+   * writing a list's bullet and a divider (the editor writes `*` and `***`). Each is read back.
+   */
   private *candidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
+    const style = this.fileStyle(region)
+    for (const c of this.plainCandidates(region, before, changed, gFirst, gLast)) {
+      const styled = style(c)
+      if (styled !== c) yield styled
+      yield c
+    }
+  }
+
+  /**
+   * A list's bullet: the region's own (`-` / `+`); in a region without a list (one made by 「- 」 or
+   * the 「/」 list) the file's first, else `-`. A divider: the file's first, else `---`.
+   */
+  private fileStyle(region: string): (written: string) => string {
+    const STAR_ITEM = /^([ \t]*)\*(?=[ \t])/gm
+    const STARS = /^\*\*\*([ \t]*)$/gm
+    const own = /^[ \t]*([+-])[ \t]/m.exec(region)?.[1]
+    const bullet = own || /^[ \t]*\*[ \t]/m.test(region) ? own
+      : (/^[ \t]*([*+-])[ \t]/m.exec(this.body)?.[1] ?? '-')
+    const rule = this.blocks.find(b => b.kind === 'thematicBreak')
+    const divider = rule ? this.body.slice(rule.start, rule.end).trim() : '---'
+    const keepStars = divider === '***' || new RegExp(STARS.source, 'm').test(region)
+    return written => {
+      let out = bullet && bullet !== '*' ? written.replace(STAR_ITEM, `$1${bullet}`) : written
+      if (!keepStars) out = out.replace(STARS, `${divider}$1`)
+      return out
+    }
+  }
+
+  private *plainCandidates(region: string, before: PMNode[], changed: PMNode[], gFirst: number, gLast: number): Generator<string> {
     const codec = this.codec
     const docOf = (ns: PMNode[]) => this.docType.type.create(this.docType.attrs, ns)
     const para = this.docType.type.schema.nodes.paragraph
@@ -244,10 +276,28 @@ export class SplicedDocument {
     const back = (patched: string) => (lf.converted ? patched.replace(/\n/g, '\r\n') : patched)
     // 0. Nothing the file holds changed (an empty line added or removed on screen).
     if (sameNodes(before, changed)) { yield region; return }
+    // New blocks after (or before) the region's own (Enter, then a line typed or made): the region's
+    // bytes as they are, the new blocks apart — not the region rewritten by the editor (`----` → `##`).
+    const n = before.length
+    if (n > 0 && changed.length > n && region.trim() !== '') {
+      const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
+      const md = (ns: PMNode[]) => codec.serialize(docOf(ns)).replace(/\s+$/, '').replace(/\r?\n/g, eol)
+      if (sameNodes(before, changed.slice(0, n))) yield region + eol + eol + md(changed.slice(n))
+      else if (sameNodes(before, changed.slice(changed.length - n))) yield md(changed.slice(0, changed.length - n)) + eol + eol + region
+    }
     // 1. Typing inside a block: the same small text change made in the file's own bytes. The
     // smallest text block that changed is written alone first, so a table's or list's re-padding
     // elsewhere does not hide the one-character change.
     const inner = innermostChange(before, changed)
+    const isTable = gFirst >= 0 && gFirst === gLast && this.blocks[gFirst].kind === 'table' && before.length === 1 && changed.length === 1
+    const table = () => (isTable ? tablePatch(lf.text, before[0], changed[0], codec, this.docType) : null)
+    // A row or column added or removed, or words typed into an empty cell (one just added): the
+    // table's own lines, `|  |` / `| words |`, not the editor's padding or the bytes' spaces.
+    const reshaped = isTable && (before[0].childCount !== changed[0].childCount || before[0].firstChild?.childCount !== changed[0].firstChild?.childCount)
+    if (isTable && (reshaped || (inner && inner[0].content.size === 0))) {
+      const patched = table()
+      if (patched !== null) yield back(patched)
+    }
     const pairs: Array<[string, string]> = []
     if (inner && para) {
       const one = (n: PMNode) => codec.serialize(docOf([para.create(null, n.content)]))
@@ -263,10 +313,8 @@ export class SplicedDocument {
     pairs.push([codec.serialize(docOf(before)), codec.serialize(docOf(changed))])
     for (const [b, a] of pairs) for (const patched of textPatches(lf.text, b, a)) yield back(patched)
     // 2. A table's cells, rows or columns: only those cells / lines, keeping the file's padding.
-    if (gFirst >= 0 && gFirst === gLast && this.blocks[gFirst].kind === 'table' && before.length === 1 && changed.length === 1) {
-      const patched = tablePatch(lf.text, before[0], changed[0], codec, this.docType)
-      if (patched !== null) yield back(patched)
-    }
+    const patched = table()
+    if (patched !== null) yield back(patched)
     // 3. Anything else (a new list item, bold, a block turned into another): only these blocks,
     // rewritten by the editor. Definitions between them stay as written.
     // With no block that shows anything (an empty file, or only definitions), the whole body is the
@@ -277,11 +325,7 @@ export class SplicedDocument {
     const trailing = gFirst < 0 && rewritten !== '' ? (/\n$/.test(this.body) || this.body === '' ? '\n' : '') : ''
     // New lines as the region writes them (CRLF only where the region has nothing else).
     const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
-    const out = (rewritten + trailing).replace(/\r?\n/g, eol)
-    // A list rewritten keeps the file's bullet (`-`) where the editor writes `*` (read back like any candidate).
-    const bullet = /^[ \t]*([+-])[ \t]/m.exec(region)?.[1]
-    if (bullet) yield out.replace(/^([ \t]*)\*(?=[ \t])/gm, `$1${bullet}`)
-    yield out
+    yield (rewritten + trailing).replace(/\r?\n/g, eol)
   }
 
   /** The written region reads back as exactly what the screen shows. */
@@ -424,7 +468,14 @@ export function writable(nodes: readonly PMNode[]): PMNode[] {
   const empty = (n: PMNode) => n.type.name === 'paragraph' && n.content.size === 0
   const isList = (n: PMNode) => /list/.test(n.type.name) && !/item/.test(n.type.name)
   const emptyItem = (n: PMNode) => /list_item/.test(n.type.name) && n.childCount === 1 && empty(n.firstChild!)
+  // A table's cell is in the file even when empty (`|  |`): it keeps its place in the row.
+  const isCell = (n: PMNode) => n.type.spec.tableRole === 'cell' || n.type.spec.tableRole === 'header_cell'
   const clean = (n: PMNode): PMNode | null => {
+    if (isCell(n)) {
+      const kept: PMNode[] = []
+      n.forEach(c => { kept.push(clean(c) ?? c) })
+      return kept.every((k, i) => k === n.child(i)) ? n : n.type.create(n.attrs, kept, n.marks)
+    }
     if (empty(n)) return null
     if (n.isTextblock) {
       const t = trimEdges(n)

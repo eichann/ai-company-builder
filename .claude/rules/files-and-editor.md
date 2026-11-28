@@ -441,7 +441,7 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   edit).
 - **Bundle**: Milkdown is imported only when a document is first shown in place; `vite.config.ts`
   puts that chunk in `dist/vendor/` under its own budget (`check-bundle-size.mjs`
-  `ON_DEMAND_VENDOR`, 430 KB; 358 KB today). Versions pinned (`@milkdown/*` 7.23.0).
+  `ON_DEMAND_VENDOR`, 430 KB; 372 KB today). Versions pinned (`@milkdown/*` 7.23.0).
 - Tests: `src/features/editor/markdownSplice.test.ts` (the real Milkdown under jsdom: unchanged
   write-back byte for byte on frontmatter, `*` lists indented by 4, aligned / unpadded tables, HTML,
   comments, `***`, escapes, code fences, reference links, `===` / `---` headings, Japanese, CRLF;
@@ -450,8 +450,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   `tests/ui/editor-in-place.spec.ts` on `tests/editor-in-place-ui.html` (real keys, autosave, Enter in
   a list, ⌘⇧V, the AI writing the file with and without edits, closing the window, a refused
   document, ⌘F).
-- Next (PR3–5): 「/」 and line starts, empty-line hint and table bar, pasting images into `images/`,
-  ［AI に直してもらう］ (its part through the selection slot, below).
+- Next (PR4–5): pasting images into `images/`, ［AI に直してもらう］ (its part through the selection
+  slot, below). PR3 is "The 「/」 list, line starts and the table bar" below.
 
 ## The selection bubble (UX check 9 PR2, owner decision 2026-11-28)
 
@@ -492,6 +492,52 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   `markdownSplice.test.ts` (a mark in a nested list and off, a size on one line of a multi-line
   paragraph, a `----` heading to body text, spaces typed at a line's end),
   `src/shared/commands/commands.test.ts` (⌥⌘1 on a Mac; ⌘B bold in the document, else the left column).
+
+## The 「/」 list, line starts and the table bar (UX check 9 PR3, owner decision 2026-11-28)
+
+- **「/」 list**: 「/」 on a top-level line of its own (the caret at its end, up to 16 letters after it) shows
+  `components/BlockTools.tsx` `BlockMenu` (`role="listbox"` 「形を選ぶ」): 見出し1〜3・箇条書き・番号つきの箇条書き・
+  チェックリスト・引用・コード・区切り線・表 (3×3), the one list in `blockChoices.ts` (names, the line start shown
+  beside each, the words typed after 「/」 that find it — `matchBlockChoices`). Nothing found → no list. The choice
+  turns the 「/…」 line into that block (`InPlaceSurface.turnInto`, `milkdownBlocks.ts` `turnIntoBlock`; a divider
+  and a table at the end get an empty line after them for the caret, not written while empty). The 「/」 is text
+  until then (written as typed). The pointer picks only when it moves.
+- **Its keys are the catalog's** (`commands.md`): `editor.blockMenuNext` ↓, `blockMenuPrevious` ↑,
+  `blockMenuChoose` Enter, `blockMenuClose` Esc (`notInHtmlDocument`). Each declines unless the list shows in
+  the focused document and no word is being composed (`KeyInput.isComposing`); the editor's own plugin only
+  leaves ↓ ↑ Enter alone while the list shows (`blockMenuPlugin` `handleKeyDown`: no caret move, no new line),
+  never Esc — so Esc with no list reaches another part (a list worked through, 「延ばす」). Esc closes the list for
+  that text (typing on opens it again), the 「/」 stays.
+- **Line starts** (`lineStartRules`, replacing the editor's rules for the same starts — `REPLACED_LINE_START_RULES`):
+  「- 」「* 」「+ 」 a list, 「1. 」 a numbered list (its number kept), 「[] 」「[ ] 」 a checklist (in a list item, that
+  item; anywhere else a new checklist), 「```」 code at once, 「---」 a divider with the caret on the line after it;
+  「# 」〜 and 「> 」 are the editor's own. 「```」 / 「---」 only on a line with nothing else. Lists are made as the
+  reader makes them (`spread: false`, the item's kind): the editor's own made loose lists that were never written.
+- **Empty line hint**: the empty top-level line holding the caret gets `acb-empty-line` (a decoration, not the
+  document); `index.css` shows 「「/」で形を選べます」 there while the document has the focus.
+- **Table bar** (`TableBar`, `role="toolbar"` 「表の操作」, over the table's top right while the caret is in it and
+  no words are selected): ［行を足す］ (under the caret's row, each cell its column's alignment, the caret into it),
+  ［列を足す］ (right of the caret's column, no alignment `---`, the caret into it), ［行を消す］ (never the header
+  row), ［列を消す］ (never the last column) — disabled where they do not apply (`InPlaceTable.can`).
+- **Written back** (measured, as the demo): a 「/」 choice or a line start → the lines made only (a heading
+  `## 議題`, a checklist `- [ ] …`, a table's four lines); a row → 1 line; a column → one cell on every line of
+  the table (accepted, owner); words typed into a new cell → that cell (`| 商談 |  |`). How
+  (`markdownSplice.ts`): an empty table cell stays in what is written (`writable`: it keeps its column — before,
+  an empty row was dropped and words typed into its second cell could be written into the first); a table whose
+  rows or columns changed, or an empty cell typed into, is written by `tablePatch` first (the file's own lines, not
+  the editor's padding); new blocks after (before) unchanged ones are written beside those blocks' own bytes,
+  not with them rewritten (a `----` heading stayed `----`, not `##`); a list made where the region had none takes
+  the file's first bullet (else `-`), a divider the file's first (else `---`) — each read back like every
+  candidate, so a `-` list right above a `-` list is written `*` (two lists, as on screen).
+- Not built (owner): typeface, colour, a handle to drag lines (⋮⋮).
+- Tests: `markdownSplice.test.ts` (each 「/」 choice and line start written exactly, the file's bullet and divider,
+  the list beside a `-` list, a checklist item in a list, 「---」 before words; the list narrowed, closed by Esc;
+  the table bar's row / column / delete and words in the right cell; the header row and last column kept; a `----`
+  heading kept), `tests/ui/editor-block-tools.spec.ts` (real keys: the list, ↓ Enter, Esc then `list.back` and Enter
+  a new line, every line start, the hint, the table bar) — mutation-checked: empty cells kept, the table patch
+  first, tight lists, the file's style, the region kept beside new blocks, the header row, the editor holding Enter,
+  the keys only while the list shows. `doc-frame-protocol.test.ts`: the list's keys stay an HTML document's.
+- Bundle: the list and bar (~5 KB) are in the app's JS; the rest in the Milkdown chunk (372 KB of 430).
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
 

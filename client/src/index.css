@@ -425,6 +425,14 @@ body {
   color: var(--color-text-muted);
 }
 .acb-in-place li[data-item-type="task"][data-checked="true"]::before { content: "☑"; }
+/* The empty line the caret is in, while the document has the focus: 「「/」で形を選べます」 (milkdownBlocks.ts). */
+.acb-in-place.ProseMirror-focused p.acb-empty-line::before {
+  content: attr(data-hint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-text-subtle);
+}
 /* ⌘F in a document edited in place: the browser's highlights, the text untouched. */
 ::highlight(acb-find) { background-color: rgb(var(--color-warning-bg-rgb)); }
 ::highlight(acb-find-current) { background-color: rgb(var(--color-warning-border-rgb)); }

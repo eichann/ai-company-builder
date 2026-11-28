@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom'
 import type { Node as PMNode } from '@milkdown/prose/model'
 import type { EditorView } from '@milkdown/prose/view'
 import type { MarkdownCodec } from './markdownSplice'
+import type { InPlaceBlock } from './blockChoices'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
 const win = dom.window as unknown as Record<string, unknown>
@@ -31,6 +32,7 @@ const { SplicedDocument, splitFront } = await import('./markdownSplice')
 const { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } = await import('./milkdownFormat')
 const { TextSelection } = await import('@milkdown/prose/state')
 const { makeMilkdown } = await import('./milkdownSurface')
+const { blockMenuOf, closeBlockMenu, editTable, turnIntoBlock } = await import('./milkdownBlocks')
 
 let md: Awaited<ReturnType<typeof makeMilkdown>>
 before(async () => {
@@ -507,4 +509,171 @@ test('the bubble changes nothing it should not: 本文 on body text, a size wher
     setInPlaceLink(view, null)
     assert.equal(saved(spliced, view), '詳しくは 社内の資料 を見てください。\n')
   }
+})
+
+// ───── The 「/」 list, the line starts and the table bar (files-and-editor.md "The 「/」 list, line starts and the table bar") ─────
+
+/** Typed as the keyboard does: each character through the editor's text input (its line-start rules run). */
+function typeKeys(view: EditorView, text: string) {
+  for (const ch of text) {
+    const { from, to } = view.state.selection
+    if (!view.someProp('handleTextInput', f => f(view, from, to, ch, () => view.state.tr.insertText(ch, from, to)))) view.dispatch(view.state.tr.insertText(ch, from, to))
+  }
+}
+
+/** Enter after `after`, the caret on the new empty line (after a heading, a paragraph: as Enter makes it). */
+function newLine(view: EditorView, after: string) {
+  const at = posAfter(view.state.doc, after)
+  if (view.state.doc.resolve(at).parent.type.name === 'heading') {
+    view.dispatch(view.state.tr.split(at, 1, [{ type: view.state.schema.nodes.paragraph }]))
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 2)))
+    return
+  }
+  const start = enterAfter(view, after)
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, start)))
+}
+
+test('a 「/」 choice is written as what was made: the new lines only, in the file\'s bullet and divider', () => {
+  const cases: Array<[InPlaceBlock, string, string]> = [
+    ['heading2', '議題', '## 議題'],
+    ['bullet', '項目', '* 項目'], // the MEETING's first bullet
+    ['ordered', '一番', '1. 一番'],
+    ['task', '資料を送る', '* [ ] 資料を送る'],
+    ['quote', '引用', '> 引用'],
+    ['code', 'ls', '```\nls\n```'],
+    ['table', '名前', '| 名前 |   |   |\n| - | - | - |\n|   |   |   |\n|   |   |   |'],
+  ]
+  for (const [block, words, written] of cases) {
+    const { spliced, view } = open(MEETING)
+    newLine(view, '数字の確認')
+    typeKeys(view, '/')
+    assert.equal(blockMenuOf(view.state)?.choices.length, 10)
+    assert.equal(saved(spliced, view), plusAfter(MEETING, '## 数字の確認\n', '\n/\n'), 'the 「/」 is text until a choice')
+    assert.ok(turnIntoBlock(view, block), block)
+    // Each change is written as it happens (the screen writes every step).
+    saved(spliced, view, `${block} chosen`)
+    view.dispatch(view.state.tr.insertText(words, view.state.selection.from))
+    assert.equal(saved(spliced, view, block), plusAfter(MEETING, '## 数字の確認\n', `\n${written}\n`), block)
+  }
+  // A divider: the file's own (`***` in the MEETING, `---` where there is none), the caret on the line after it.
+  for (const [text, after, line, rule] of [[MEETING, '数字の確認', '## 数字の確認\n', '***'], [SKILL, '手順', '手順\n----\n', '---']] as const) {
+    const { spliced, view } = open(text)
+    newLine(view, after)
+    typeKeys(view, '/区切り')
+    assert.ok(turnIntoBlock(view, 'divider'))
+    saved(spliced, view)
+    view.dispatch(view.state.tr.insertText('下', view.state.selection.from))
+    assert.equal(saved(spliced, view), plusAfter(text, line, `\n${rule}\n\n下\n`))
+  }
+})
+
+test('the 「/」 list: narrowed by what is typed, closed by Esc for that text, only on a top-level line of its own', () => {
+  const { view } = open('# 題\n\n- 項目\n')
+  newLine(view, '題')
+  typeKeys(view, '/みだし')
+  assert.deepEqual(blockMenuOf(view.state)?.choices, ['heading1', 'heading2', 'heading3'])
+  typeKeys(view, 'x')
+  assert.equal(blockMenuOf(view.state), null, 'nothing found: no list (Enter is a new line again)')
+  view.dispatch(view.state.tr.delete(view.state.selection.from - 1, view.state.selection.from))
+  assert.ok(blockMenuOf(view.state))
+  closeBlockMenu(view)
+  assert.equal(blockMenuOf(view.state), null, 'closed with Esc')
+  view.dispatch(view.state.tr.delete(view.state.selection.from - 1, view.state.selection.from))
+  assert.deepEqual(blockMenuOf(view.state)?.choices, ['heading1', 'heading2', 'heading3'], 'typing on (here: a letter taken back) opens it again')
+  const item = posAfter(view.state.doc, '項目')
+  view.dispatch(view.state.tr.insertText('/', item))
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, item + 1)))
+  assert.equal(blockMenuOf(view.state), null, 'not after words, nor in a list item')
+})
+
+test('the line starts become their block and write what was typed; a list next to a `-` list stays its own (`*`)', () => {
+  const text = '# 題\n\n本文の段落です。\n\n- 一つめ\n- 二つめ\n\n終わりの段落。\n'
+  const cases: Array<[string, string, string]> = [
+    ['# ', '見出し', '# 見出し'], ['### ', '小', '### 小'], ['- ', '項目', '- 項目'], ['* ', '項目', '- 項目'], ['1. ', '一番', '1. 一番'],
+    ['3. ', '三番', '3. 三番'], ['[] ', 'やること', '- [ ] やること'], ['[ ] ', 'やること', '- [ ] やること'], ['> ', '引用', '> 引用'],
+    ['```', 'ls', '```\nls\n```'], ['---', '下', '---\n\n下'],
+  ]
+  for (const [start, words, written] of cases) {
+    const { spliced, view } = open(text)
+    newLine(view, '終わりの段落。')
+    typeKeys(view, start)
+    typeKeys(view, words)
+    assert.equal(saved(spliced, view, start), `${text}\n${written}\n`, start)
+  }
+  {
+    // Right above the `-` list: a `-` would join it (one list), so the new one is written `*`.
+    const { spliced, view } = open(text)
+    newLine(view, '本文の段落です。')
+    typeKeys(view, '- 新しい')
+    assert.equal(saved(spliced, view), text.replace('本文の段落です。\n', '本文の段落です。\n\n* 新しい\n'))
+  }
+  {
+    // 「[] 」 at the start of a list item: that item only.
+    const { spliced, view } = open(text)
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, posAfter(view.state.doc, '二つめ') - 3)))
+    typeKeys(view, '[] ')
+    assert.equal(saved(spliced, view), text.replace('- 二つめ', '- [ ] 二つめ'))
+  }
+  {
+    // 「```」 and 「---」 in front of words are words.
+    const { spliced, view } = open(text)
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, posAfter(view.state.doc, '終わりの段落。') - 7)))
+    typeKeys(view, '---')
+    assert.equal(view.state.doc.lastChild!.type.name, 'paragraph')
+    assert.equal(view.state.doc.lastChild!.textContent, '---終わりの段落。')
+    saved(spliced, view)
+  }
+})
+
+test('the table bar: a row is one line, a column one cell on each line, words typed into a new cell land in that cell', () => {
+  const caretIn = (view: EditorView, words: string) => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, posAfter(view.state.doc, words))))
+  const ROW = '| 問い合わせ | 42 | 51 | 広告を変えてから増えた |\n'
+  {
+    const { spliced, view } = open(MEETING)
+    caretIn(view, '問い合わせ')
+    assert.ok(editTable(view, 'addRow'))
+    let text = saved(spliced, view)
+    assert.deepEqual(changedLines(MEETING, text), { removed: 0, added: 1 })
+    assert.equal(text, MEETING.replace(ROW, `${ROW}|  |  |  |  |\n`))
+    // The caret is in the new row: words typed go into the cell of its column, written as `| words |`.
+    view.dispatch(view.state.tr.insertText('商談', view.state.selection.from))
+    text = saved(spliced, view)
+    assert.equal(text, MEETING.replace(ROW, `${ROW}| 商談 |  |  |  |\n`))
+    // Into the third cell of that row: the empty one before it is kept, so the words stay in their column.
+    let third = -1
+    let seen = 0
+    view.state.doc.descendants((n, pos) => { if (third < 0 && n.type.name === 'table_cell' && n.textContent === '' && ++seen === 2) third = pos; return third < 0 })
+    view.dispatch(view.state.tr.insertText('25', third + 2))
+    assert.equal(saved(spliced, view), MEETING.replace(ROW, `${ROW}| 商談 |  | 25 |  |\n`))
+    assert.ok(editTable(view, 'deleteRow'))
+    assert.equal(saved(spliced, view), MEETING)
+  }
+  {
+    const { spliced, view } = open(MEETING)
+    caretIn(view, '10月')
+    assert.ok(editTable(view, 'addColumn'))
+    const text = saved(spliced, view)
+    const rows = MEETING.split('\n').filter(l => l.startsWith('|')).length
+    assert.deepEqual(changedLines(MEETING, text), { removed: rows, added: rows }, 'one cell on each of the table\'s lines (owner: accepted)')
+    assert.ok(text.includes('| 項目 | 10月 |  | 11月（見込み） | メモ |\n|:-----|-----:|---|------:|------|\n'), 'no alignment for the new column')
+    view.dispatch(view.state.tr.insertText('12月', view.state.selection.from))
+    assert.ok(saved(spliced, view).includes('| 項目 | 10月 | 12月 | 11月（見込み） | メモ |\n'), 'the caret was in the new column')
+    assert.ok(editTable(view, 'deleteColumn'))
+    assert.equal(saved(spliced, view), MEETING)
+  }
+  {
+    // The header row is never deleted (a Markdown table needs it); the last column is not either.
+    const { spliced, view } = open('| 一 |\n|---|\n| 二 |\n')
+    caretIn(view, '一')
+    assert.equal(editTable(view, 'deleteRow'), false)
+    assert.equal(editTable(view, 'deleteColumn'), false)
+    assert.equal(saved(spliced, view), '| 一 |\n|---|\n| 二 |\n')
+  }
+})
+
+test('a line typed under a block the editor writes otherwise (a `----` heading) leaves that block\'s bytes as they are', () => {
+  const { spliced, view } = open(SKILL)
+  newLine(view, '手順')
+  view.dispatch(view.state.tr.insertText('新しい段落', view.state.selection.from))
+  assert.equal(saved(spliced, view), SKILL.replace('手順\n----\n', '手順\n----\n\n新しい段落\n'))
 })
