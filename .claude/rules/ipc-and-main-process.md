@@ -54,6 +54,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `records.md` "The app's views"),
   `after-meeting` (afterMeeting:read / note: 「会議のあと」's card, the run's files on this PC and the card's mark; removable,
   `jobs.md` "The 4b-4 screens (PR6-A)"),
+  `reply-pages` (replyPage:save: a rich reply kept as a page in the member's 今日のフォルダ, the path built in main, `wx`;
+  `chat-ui-and-history.md` "Rich replies: ［大きく見る］…"),
   `records-table` (recordsTable:page: 「記録の一覧」, one page of one kind through `/records/query`;
   `tasks-ui.md` "The records table (B4)"),
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event

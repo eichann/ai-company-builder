@@ -91,6 +91,8 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'chatWindow:openFile': { args: [IN_FILE], paths: [0], fromChatWindow: true },
   'afterMeeting:read': { args: ['c1', IN, `occ.${'a'.repeat(32)}`], paths: [1] },
   'afterMeeting:note': { args: ['c1', IN, `occ.${'a'.repeat(32)}`, { kind: 'draft-dismissed' }], paths: [1] },
+  // A rich reply kept as a page: the company folder is checked; the page's place is main's (a today folder of the app's shape).
+  'replyPage:save': { args: [IN, '営業部/.personal/inbox/日付別/2026/20261128', { companyId: 'co', sessionId: 'conv-guard-0001' }, '<p>x</p>'], paths: [0] },
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲
@@ -130,6 +132,7 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'skills:list': { departmentFolder: 'relative to the checked root: absolute / .. refused, the joined path validated and kept under that root (ipc-app.test.ts)' },
   'skills:publish': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
   'skills:makePrivate': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
+  'replyPage:save': { todayFolder: 'a company-relative today folder, only of the app\'s exact shape (isTodayFolderPath), joined to the checked root by main and the result validated again (ipc-reply-pages.test.ts)' },
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

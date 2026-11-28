@@ -320,6 +320,10 @@ carrying a secret in its user name reached a local listener). Each document is s
   here (the same `docView:open`, check, grant, CSP and session). A rich reply's pages go to the member's 今日のフォルダ's
   `ページ/` folder; `doc-frame-electron.test.ts` 「a page the AI made in the 今日のフォルダ…」 shows such a page reaching
   only its own folder.
+- **A rich reply's ［大きく見る］** (`chat-ui-and-history.md` "Rich replies: ［大きく見る］…"): the chat has main write the reply,
+  its blocks as the AI wrote them, to the same `ページ/` folder (`replyPage:save`) and runs the same `editor.viewDocument`;
+  nothing changes here. That is why the uncleaned HTML may be written there: this view's guards, not the chat's
+  cleaning, keep it from reaching anything.
 
 ## The band of blocked internet parts (A3)
 

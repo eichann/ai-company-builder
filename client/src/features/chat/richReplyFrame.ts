@@ -75,7 +75,7 @@ let appCssText: string | null = null
  * The app's design tokens (custom properties on `:root` and `.dark`) and its Markdown typography (the `prose` rules),
  * read once from the app's own style sheets. Only the app's CSS: nothing of the reply.
  */
-function appCss(): string {
+export function appCss(): string {
   if (appCssText !== null) return appCssText
   const walk = (rules: CSSRuleList): string => {
     let text = ''
@@ -107,7 +107,7 @@ function appCss(): string {
 }
 
 /** The chat's reply text (MessageParts' TextPartView), a few resets the app's base layer gives, and the ready-made boxes. */
-const FRAME_CSS = `
+export const FRAME_CSS = `
   *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
   html { color-scheme: light; } html.dark { color-scheme: dark; }
   html, body { background: transparent; overflow: hidden; }
