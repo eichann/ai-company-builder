@@ -600,7 +600,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     layouts run on the app's thread), so a step opened or a tab switched is never cut off — a reply that can be
     opened keeps that room below it while closed. Heights are kept per width, theme and text, only once written
     (`knownHeights`, ≤ 200). The copy is made again if it left the page; an unmeasured reply keeps the ordinary
-    rendering. Over **20,000 px** as written (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
+    rendering. **Owner condition for the copy (2026-11-28): no frame of the app is ever sandboxed with both
+    `allow-scripts` and `allow-same-origin`** — `tests/frame-sandbox.test.ts` reads every string of the app's code
+    (renderer, main, shared; comments left out) and fails on a file holding both, and pins the two sandboxes here
+    exactly; the spec checks every frame on the chat page. Over **20,000 px** as written (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
     途中までを表示しています。続きは［大きく見る］で見られます。」 follows (`onOpenLarge`: the button comes with PR4).
   - **Being written**: drawn again at most every 80 ms (`RICH_UPDATE_MS`), one drawing at a time. The shown frame is
     never rewritten: the next one loads out of sight and takes the old one's place once drawn (two animation frames

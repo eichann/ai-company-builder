@@ -114,6 +114,9 @@ test.describe('in the chat', () => {
     expect(await measure.getAttribute('sandbox')).toBe('allow-same-origin')
     expect(await measure.evaluate(el => [el.hasAttribute('inert'), el.getAttribute('aria-hidden'), getComputedStyle(el).visibility])).toEqual([true, 'true', 'hidden'])
     expect((await measure.getAttribute('srcdoc'))!).toContain(`content="default-src 'none'; img-src data:;`)
+    // Owner condition: no frame on the page has both allow-scripts and allow-same-origin.
+    const sandboxes = await page.locator('iframe').evaluateAll(all => all.map(el => (el as HTMLIFrameElement).sandbox.value))
+    expect(sandboxes.filter(value => /\ballow-scripts\b/.test(value) && /\ballow-same-origin\b/.test(value))).toEqual([])
 
     // SCREENSHOTS=<dir>: the reply beside the chat, light and dark (for the PR).
     if (process.env.SCREENSHOTS) {
