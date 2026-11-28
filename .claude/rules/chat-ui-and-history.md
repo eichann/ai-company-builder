@@ -507,10 +507,11 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `tests/chat-standing-instructions.test.ts` (the one line with the turn, only for リッチ and an agent that takes it).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
-  folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, not hidden) is drawn as a
+  folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a
   card (`components/ChatPageCard.tsx`: the link's words, 「ページ・あなただけに見えます」 for a page in a `.personal/`
   folder, the file name, 「見る」), a `<button>` inside the paragraph. Pressing it runs `editor.viewDocument` (in a
-  consultation's own window `file.open`, which asks the main window): the page opens in **the HTML viewer as it is**
+  consultation's own window `file.open`, which asks the main window; there `useFilesFromChatWindows` runs an `.html`
+  file as `editor.viewDocument`, so a tab showing 中身 comes back as 見る — Codex review): the page opens in **the HTML viewer as it is**
   (doc-frame.md: its own view, no network, nothing of the app) — no new viewer; the card reads nothing of the page and
   draws no frame. Every other link stays a link. Cards are drawn whatever 「返事の形」, like diagrams. **Where the AI puts a
   page**: リッチ adds one sentence (`reply-style.ts` `replyPageInstruction`) naming
@@ -521,7 +522,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `.personal/` as never shared (`chat-write-guard.md`). Tests: `src/features/chat/pageCards.test.ts` (which links are
   cards), `tests/ui/chat-page-cards.spec.ts` (`editor-tabs-ui.html?view=html`: two cards among planted links, a press
   opens exactly that page's tab as 見る — also from 中身 —, no frame, the page's script never runs in the app, no outside
-  request), `tests/chat-standing-instructions.test.ts` (the page line names the today folder; none for another shape, no
+  request), `tests/ui/skill-layout.spec.ts` 「an HTML page asked for from a consultation's own window…」,
+  `tests/chat-standing-instructions.test.ts` (the page line names the today folder; none for another shape, no
   folder, ふつう or the API key), `tests/doc-frame-electron.test.ts` 「a page the AI made in the 今日のフォルダ…」 (real
   Electron: a planted page there loads its own folder's image but not the day's files, other personal files, the
   company's, a key file by `file:` / `local-file:`, the app, storage or the web).

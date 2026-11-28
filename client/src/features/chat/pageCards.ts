@@ -30,10 +30,12 @@ function decoded(href: string): string | null {
   try { return decodeURIComponent(href) } catch { return null }
 }
 
-function hasControlCharacter(text: string): boolean {
+/** Control characters, and the invisible and direction marks that could make the shown file name lie (`x\u202Elmth.html`). */
+function hasHiddenCharacter(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i)
-    if (code < 0x20 || code === 0x7f) return true
+    if (code < 0x20 || code === 0x7f || (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e)
+      || (code >= 0x2060 && code <= 0x2069) || code === 0xfeff) return true
   }
   return false
 }
@@ -44,7 +46,7 @@ export function pageCardOf(href: unknown, rootPath: string | null | undefined): 
   // A scheme (`https:`, `file:`, `javascript:`, `acb-doc:` …), a query or a fragment: not a file of the folder.
   if (/^[a-z][a-z0-9+.-]*:/i.test(href) || /[?#]/.test(href)) return null
   const text = decoded(href.trim())
-  if (text === null || hasControlCharacter(text)) return null
+  if (text === null || hasHiddenCharacter(text)) return null
   const root = normalizePathSeparators(rootPath).replace(/\/+$/, '')
   if (!root) return null
   const written = normalizePathSeparators(text)

@@ -9,6 +9,7 @@ const PAGE = `${ROOT}/営業部/.personal/inbox/日付別/2026/20261128/ペー�
 test('a link to an HTML file inside the company folder is a card: absolute, company-relative, percent-encoded as markdown writes it', () => {
   assert.deepEqual(pageCardOf(PAGE, ROOT), { path: PAGE, name: '比べる表.html', personal: true })
   assert.deepEqual(pageCardOf(encodeURI(PAGE), ROOT), { path: PAGE, name: '比べる表.html', personal: true })
+  assert.deepEqual(pageCardOf(`%2F${encodeURIComponent(ROOT.slice(1))}%2F営業部%2Fa.html`, ROOT), { path: `${ROOT}/営業部/a.html`, name: 'a.html', personal: false })
   assert.deepEqual(pageCardOf('営業部/報告/売上.htm', `${ROOT}/`), { path: `${ROOT}/営業部/報告/売上.htm`, name: '売上.htm', personal: false })
 })
 
@@ -35,6 +36,11 @@ test('no card for the web, other schemes, a place outside the company folder, a 
     `${PAGE}?x=1`,
     `${PAGE}#top`,
     `${ROOT}/営業部/a%0a.html`,
+    `${ROOT}/営業部/x\u202Elmth.html`,
+    `${ROOT}/営業部/x%E2%80%8B.html`,
+    '営業部%5C..%5C..%5Cx.html',
+    '%2Ftmp%2F営業部%2Fx.html',
+    'C:/Users/demo/会社/営業部/x.html',
     `${ROOT}/営業部/%E0%A4%A.html`,
     '',
   ]) assert.equal(pageCardOf(href, ROOT), null, href)

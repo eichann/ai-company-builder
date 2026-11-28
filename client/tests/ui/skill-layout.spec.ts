@@ -289,6 +289,20 @@ test('a file link clicked in a consultation\'s own window opens here, in the fil
   await expect(page.getByText('コピー用紙は総務へ。')).toBeVisible()
 })
 
+// A reply's page card pressed in a consultation's own window (chat-ui-and-history.md "Page cards in a reply"): the page
+// is shown as 見る here even when its tab showed 中身, as the card does in the main window.
+test('an HTML page asked for from a consultation\'s own window shows as 見る, also when its tab showed 中身', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { extra: '1' })
+  const file = `${ROOT}/営業部/提案書/提案書_A社向け.html`
+  await page.evaluate(path => window.__acbLayout.fileFromChatWindow(path), file)
+  await expect(page.getByTitle(file, { exact: true })).toBeVisible()
+  await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
+  await page.getByRole('toolbar', { name: '資料の表示' }).getByRole('button', { name: '中身' }).click()
+  await expect(page.getByRole('toolbar', { name: '資料の中身' })).toBeVisible()
+  await page.evaluate(path => window.__acbLayout.fileFromChatWindow(path), file)
+  await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
+})
+
 test('ログアウト is the one sign-out: the session ends and the company closes, so the login screen shows', async ({ page }) => {
   // The title bar's button used to end the session but leave the account
   // signed in on the company list.
