@@ -543,6 +543,10 @@ test('「タグ」: a word that is a 案件\'s name offers ［案件につなぐ
 
 // 「延ばす」 (使い心地のメモ #7): more choices, and the popover closes on Esc and on a press outside.
 test('「延ばす」: more choices; Esc and a press outside close it', async ({ page }) => {
+  // The choices count from today (postponeChoices; its days, weekends and holidays: model.test.ts). A fixed Monday
+  // morning keeps the three checked below on days of their own: on a Sunday, あさって and 来月のはじめ can be one day,
+  // and the later one is rightly left out (2026-11-29 in Japan: both 12/1).
+  await page.clock.install({ time: new Date('2026-11-02T01:00:00Z') })
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
   const button = card.getByRole('button', { name: '期限を変える' })

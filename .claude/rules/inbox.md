@@ -215,7 +215,10 @@ nor archived in one.
     assignee's, `UNDO_BY_ASSIGNEE`) reaches the inbox through `afterAct` (also run after an undo), which
     puts back exactly those (`addLabelIds: ['INBOX']`) — never the Sent mail or what the member
     archived themselves. When no entry can be written (a lost race), what was taken out is put back at
-    once: nothing stays archived without a notice and an undo. When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
+    once: nothing stays archived without a notice and an undo. **Checked again after Google answers**: when the record
+    is no longer closed or has open work again (her 「済んだ」 taken back while the call ran, the 連絡 card's ［取り消す］
+    included), no note is written on the reopened record and what was taken out goes back the same way (test
+    `inbox-archive.test.ts` 「her 済んだ taken back while Google was still archiving…」, written before the fix). When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
     (`unarchive_failed`). Calls run after the action's answer (`whenIdle` in tests).
 - Tests: `server/tests/unit/inbox-archive.test.ts` (close as the inbox with the owner's undo, nobody
   runs `left_inbox`, task / 返事のお願い → the note once, another member's mailbox never, no cursor →
@@ -452,6 +455,17 @@ pressing each record's own action.
   refusal). Only a finish's entries (`settle`; `replied_elsewhere` / `close` / `drop`): any other version → 409
   `NOT_A_FINISH`. An entry already reversed is `already` (a second press). Undoing 「もう返した」 brings back the drafts it
   dropped, as before (`restoreDrafts`).
+  **The version is what guards the change made in between**: the engine's `CHANGED_SINCE` compares only the entry's own
+  fields with the record now (`record-engine/undo.ts`), so a change of another field (her AI moving the due) or one that came
+  back to the same value (reopened and closed again on the record card) passes it — only `expectedVersion` = the record's
+  latest version refuses those (`VERSION_CONFLICT`). The app sends the versions the finish answered. One exception
+  (`pastQuietNotes`): when **every** entry since that version is one of the inbox's quiet notes — `archived_there`
+  (「Gmail でもアーカイブしました」, written right after a 「済んだ」 once Google answered), `left_inbox_noted`, `unarchive_failed`;
+  actor `INBOX_ACTOR`, no change, no state move — the undo is judged at the latest version, as for a card that saw the note.
+  Anything else since keeps the card's version. The Gmail archive itself is not taken back by this undo (its notice's
+  ［元に戻す］ does). Test: `contact-threads.test.ts` 「a change made in between…」, 「the inbox's quiet note…」 (the move past
+  notes and "every entry since" mutation-checked; the actor / no-change / same-state conditions are a backup — only the
+  inbox writes those actions, and no test can write them otherwise).
 - **The 受け箱** (the app, stage 2): a contact whose reply is over but with a やること still open goes to 「確認したもの」;
   the やること stays in the list. The app computes it from this view; nothing is stored ("One contact in the app" below).
 - Tests: `server/tests/unit/contact-threads.test.ts` (the view per reader — owner-only, members-only, owner / admin /
