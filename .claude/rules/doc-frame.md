@@ -315,6 +315,11 @@ carrying a secret in its user name reached a local listener). Each document is s
   (`TabbedEditorPanel`): a tab shown as 中身 goes back to 見る, then `file.open` opens / shows the tab.
   Main checks everything again on `docView:open` (top level, links, not downloaded…): the chat only
   decides where the button is.
+- **Page cards** (step ② of 「図とページで返す」, `chat-ui-and-history.md` "Page cards in a reply"): a link in the AI's
+  reply to an HTML file of the company folder is a card that runs the same `editor.viewDocument`; nothing else changes
+  here (the same `docView:open`, check, grant, CSP and session). A rich reply's pages go to the member's 今日のフォルダ's
+  `ページ/` folder; `doc-frame-electron.test.ts` 「a page the AI made in the 今日のフォルダ…」 shows such a page reaching
+  only its own folder.
 
 ## The band of blocked internet parts (A3)
 

@@ -63,6 +63,7 @@ interface Result {
   blocked: Array<{ viewId: number; kind: string; count: number; hosts: string[]; hostCount: number }>
   blockedGaps: number[]
   blockedAfterOwnPage: { viewId: number; kind: string; count: number; hosts: string[]; hostCount: number } | undefined
+  aiPage: Record<string, unknown> | null
 }
 
 function freePort(): Promise<number> {
@@ -258,6 +259,22 @@ test('what a document wanted from the internet reaches the window as hosts and a
   // How many events depends on how long the page takes to ask (longer on a busy computer); the gaps do not.
   assert.ok(result.blockedGaps.every(gap => gap >= 450), `told at most every BLOCKED_INTERVAL_MS, not per request (gaps ${result.blockedGaps.map(Math.round).join(', ')} ms)`)
   assert.ok(result.blocked.every(e => e.viewId === last.viewId && e.kind === 'blocked'))
+})
+
+// The chat's page cards (chat-ui-and-history.md "Page cards in a reply"): a rich reply's page sits in the member's
+// 今日のフォルダ beside their own files, and the AI that wrote it may have read a planted mail.
+test('a page the AI made in the 今日のフォルダ reaches only its own folder: not the day\'s files, other personal files, the company, a key file, the app or the web', { skip }, () => {
+  const page = result.aiPage
+  assert.ok(page, 'the planted page ran')
+  assert.equal(page.ownImage, 'loaded', 'control: its own folder')
+  for (const probe of ['dayFile', 'encodedDayFile', 'personalFile', 'companyFile', 'keyFile', 'localKeyFile']) assert.equal(page[probe], 'failed', probe)
+  assert.equal(page.electronAPI, 'undefined')
+  assert.equal(page.parentAPI, 'undefined', 'it is the top document of its own view: no app page above it')
+  assert.equal(page.top, true)
+  assert.equal(page.fetchWeb, 'refused')
+  assert.equal(page.webImage, 'failed')
+  assert.equal(page.localStorage, 'threw')
+  assert.deepEqual(result.connections, {}, 'nothing it asked for connected')
 })
 
 test('a new page of the document starts the tally again: the window hears 0 when it wants nothing', { skip }, () => {

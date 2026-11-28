@@ -476,8 +476,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.
-- **Diagrams in a reply** (owner decision 2026-11-28, step ① of 「図とページで返す」; ② — a page card through the HTML
-  viewer — is next). A closed ```` ```mermaid ```` block, or a ```` ```svg ```` / ```` ```xml ```` / unlabelled block that is one
+- **Diagrams in a reply** (owner decision 2026-11-28, step ① of 「図とページで返す」; ② is "Page cards in a reply"
+  below). A closed ```` ```mermaid ```` block, or a ```` ```svg ```` / ```` ```xml ```` / unlabelled block that is one
   whole `<svg>` (`diagrams.ts` `diagramOf`; ```` ```html ```` stays code; over 60,000 characters — mermaid 20,000 — stays code), is drawn as a
   picture (`components/ChatDiagram.tsx`) with 「図のもとの書き方」 folded under it; while drawing, 「図を描いています…」; a block
   that cannot be drawn (or takes over 15 s) is the code it was. **Nothing in a diagram runs or reaches the network** (the text is the AI's,
@@ -505,6 +505,26 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   and with mermaid's directives honoured; an undrawable block stays code; the
   switch and the request; `SCREENSHOTS=<dir>`), `tests/chat-panel-helpers.test.ts` (the request reads it per request),
   `tests/chat-standing-instructions.test.ts` (the one line with the turn, only for リッチ and an agent that takes it).
+- **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
+  company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
+  folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, not hidden) is drawn as a
+  card (`components/ChatPageCard.tsx`: the link's words, 「ページ・あなただけに見えます」 for a page in a `.personal/`
+  folder, the file name, 「見る」), a `<button>` inside the paragraph. Pressing it runs `editor.viewDocument` (in a
+  consultation's own window `file.open`, which asks the main window): the page opens in **the HTML viewer as it is**
+  (doc-frame.md: its own view, no network, nothing of the app) — no new viewer; the card reads nothing of the page and
+  draws no frame. Every other link stays a link. Cards are drawn whatever 「返事の形」, like diagrams. **Where the AI puts a
+  page**: リッチ adds one sentence (`reply-style.ts` `replyPageInstruction`) naming
+  `<company root>/<今日のフォルダ>/ページ/` (`REPLY_PAGE_FOLDER`) — the member's own, never synced
+  (`[PERSONAL_PATH]`), so what the AI makes is first the member's alone; a folder of its own so a page's scripts (which may
+  read their folder, doc-frame.md) reach only other pages. Only a today folder of the app's shape (`isTodayFolderPath`)
+  gives the line; none (a consultation's own window, no department here) → no page line. The write guard treats
+  `.personal/` as never shared (`chat-write-guard.md`). Tests: `src/features/chat/pageCards.test.ts` (which links are
+  cards), `tests/ui/chat-page-cards.spec.ts` (`editor-tabs-ui.html?view=html`: two cards among planted links, a press
+  opens exactly that page's tab as 見る — also from 中身 —, no frame, the page's script never runs in the app, no outside
+  request), `tests/chat-standing-instructions.test.ts` (the page line names the today folder; none for another shape, no
+  folder, ふつう or the API key), `tests/doc-frame-electron.test.ts` 「a page the AI made in the 今日のフォルダ…」 (real
+  Electron: a planted page there loads its own folder's image but not the day's files, other personal files, the
+  company's, a key file by `file:` / `local-file:`, the app, storage or the web).
 - Preview `client/tests/chat-header-ui.html?history=long` (a restored 240-message conversation);
   tests `src/features/chat/chat-rendering.test.ts`. UI specs drive replies through `window.__acbChat`
   (`chat-header-ui.html?turn=manual`; see `testing.md`).

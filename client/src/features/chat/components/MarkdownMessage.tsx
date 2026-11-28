@@ -6,6 +6,8 @@ import { splitMarkdownBlocks } from '../markdownBlocks'
 import { CodeHighlighter, PlainCodeBlock } from './codeHighlighter'
 import { ChatDiagram } from './ChatDiagram'
 import { diagramOf } from '../diagrams'
+import { ChatPageCard } from './ChatPageCard'
+import { pageCardOf } from '../pageCards'
 
 interface MarkdownMessageProps {
   content: string
@@ -15,14 +17,19 @@ type Components = Record<string, unknown>
 
 const remarkPlugins = [...chatMarkdownSafety.remarkPlugins]
 
-function makeComponents(isDark: boolean, highlight: boolean): Components {
+function makeComponents(isDark: boolean, highlight: boolean, rootPath: string | undefined): Components {
   return {
     ...chatMarkdownSafety.components,
-    a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-      <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-link underline underline-offset-2 hover:opacity-80">
-        {children}
-      </a>
-    ),
+    a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+      // A link to an HTML page of the company folder is a card that shows it in the HTML viewer (pageCards.ts).
+      const card = pageCardOf(href, rootPath)
+      if (card) return <ChatPageCard card={card}>{children}</ChatPageCard>
+      return (
+        <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-link underline underline-offset-2 hover:opacity-80">
+          {children}
+        </a>
+      )
+    },
     code({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { className?: string }) {
       const match = /language-(\w+)/.exec(className || '')
       const lang = match?.[1]
@@ -78,9 +85,10 @@ const MarkdownBlockView = memo(function MarkdownBlockView({ text, components }: 
 export const MarkdownMessage = memo(function MarkdownMessage({ content }: MarkdownMessageProps) {
   const theme = useAppStore((s) => s.theme)
   const isDark = theme === 'dark'
+  const rootPath = useAppStore((s) => s.currentCompany?.rootPath)
 
-  const components = useMemo(() => makeComponents(isDark, true), [isDark])
-  const streamingComponents = useMemo(() => makeComponents(isDark, false), [isDark])
+  const components = useMemo(() => makeComponents(isDark, true, rootPath), [isDark, rootPath])
+  const streamingComponents = useMemo(() => makeComponents(isDark, false, rootPath), [isDark, rootPath])
   const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
 
   return (
