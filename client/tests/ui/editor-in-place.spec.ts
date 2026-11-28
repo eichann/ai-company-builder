@@ -212,3 +212,16 @@ test('⌘F in the document finds words without changing the document', async ({ 
   expect(await writes(page)).toEqual([])
   expect(await page.locator('[data-in-place-editor] mark').count()).toBe(0)
 })
+
+test('⌘F also finds the name and description shown from the file\'s frontmatter', async ({ page }) => {
+  await open(page)
+  await externalEdit(page, '---\nname: proposal-writer\ndescription: 提案書の骨子を作る\n---\n\n# 議事録\n\n本文です。\n')
+  await expect(page.getByRole('note', { name: 'このファイルの情報' })).toContainText('proposal-writer')
+  await doc(page).click()
+  await shortcut(page, { key: 'f' })
+  const box = page.getByPlaceholder('検索...')
+  await box.fill('proposal-writer')
+  await expect(page.getByText('1/1')).toBeVisible()
+  await box.fill('骨子')
+  await expect(page.getByText('1/1')).toBeVisible()
+})

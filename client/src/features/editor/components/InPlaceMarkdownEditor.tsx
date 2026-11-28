@@ -72,10 +72,9 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
       .catch(() => { if (!gone) setState('unavailable') })
   }, [opened, latestChange, startAt])
 
-  // ⌘F reads the editor's text; it lives only while the document is edited here (the reading view
-  // shown on a refusal has its own).
+  // ⌘F reads the file's information box and the editor's text (only highlights: nothing is put into
+  // the editor's DOM); it lives only while the document is edited here (a refusal's reading view has its own).
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  const setHost = useCallback((el: HTMLDivElement | null) => { bodyRef.current = el; host(el) }, [host])
 
   const setScroll = useCallback((el: HTMLDivElement | null) => {
     scrollRef.current = el
@@ -110,9 +109,9 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
           </Callout>
         </div>
       )}
-      <div className="max-w-3xl mx-auto">
+      <div ref={bodyRef} className="max-w-3xl mx-auto">
         <FrontmatterNote info={front.info} />
-        <div ref={setHost} className={state === 'opening' ? 'invisible' : undefined} aria-label="文章（その場で直せます）" />
+        <div ref={host} className={state === 'opening' ? 'invisible' : undefined} aria-label="文章（その場で直せます）" />
       </div>
     </div>
   )
