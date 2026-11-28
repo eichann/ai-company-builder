@@ -1,4 +1,4 @@
-// 設定 → 自分の設定: 「AI から定期の仕事を提案してもらう」 (jobs.md "Asking after repeats (PR D)"). This PC's own setting for
+// 設定 → AI に任せること: 「AI から定期の仕事を提案してもらう」 (jobs.md "Asking after repeats (PR D)"). This PC's own setting for
 // the member in this company (main keeps it beside the count, features/jobs/repeat-asks.ts); on unless turned off.
 import { useCallback, useId, useRef, useState } from 'react'
 import { CalendarCheck } from '@phosphor-icons/react'

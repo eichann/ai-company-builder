@@ -1,7 +1,7 @@
 // Members read one word for one thing (owner 2026-11-23: ordinary members never see developer
 // words). The member UI spells a skill 「Skill」 — as CLAUDE.md and the manual do — never 「スキル」
 // or 「SKILL」 (file names such as SKILL.md aside); a new consultation is a 「相談」; a task is a
-// 「やること」 (thing-words.ts), never 「タスク」; a switch is named as 自分の設定 names it.
+// 「やること」 (thing-words.ts), never 「タスク」; a switch is named as 「AI に任せること」 (the settings) names it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -82,10 +82,11 @@ test('no code line a member may read says 「タスク」: a task is 「やる�
   assert.equal(toolLineOf('mcp__acb_records__records_create', { type: 'task', title: '修正見積を送る' }).detail, 'やること「修正見積を送る」')
 })
 
-test('the scheduled-job card names the switch as 自分の設定 does, 「AI が自動で進める」', () => {
+// 「AI に任せること」 is the settings section (UX stage 3, item 19) that holds the switch; never a switch's name.
+test('the scheduled-job card names the switch as 「AI に任せること」 does, 「AI が自動で進める」', () => {
   assert.equal(WORK_SWITCH_NAMES.autoRun, 'AI が自動で進める')
   assert.ok(JOB_CANDIDATE_NOTES.some(n => n.includes('「AI が自動で進める」')))
-  assert.deepEqual(codeLines().filter(l => /AI に任せる/.test(l.line)).map(l => `${l.file}: ${l.line}`), [])
+  assert.deepEqual(codeLines().filter(l => /AI に任せる(?!こと)/.test(l.line)).map(l => `${l.file}: ${l.line}`), [])
 })
 
 test('a task made by the AI reads 「…から AI が作りました」, with the space before 「AI」', () => {

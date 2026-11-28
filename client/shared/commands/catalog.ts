@@ -103,7 +103,7 @@ export const COMMANDS = defineCommands([
   },
   {
     // Settings → 「自分の鍵」, that service shown first (its form open when the member may register).
-    id: 'settings.openOwnKey', title: '「自分の鍵」の設定を開く', class: 'view',
+    id: 'settings.openOwnKey', title: '「Claude・Gemini などの鍵」の設定を開く', class: 'view',
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),
   },
   {

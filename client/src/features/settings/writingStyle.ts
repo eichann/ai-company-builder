@@ -18,7 +18,7 @@ export function writingCheckHint(status: WritingStyleStatus): string {
 }
 
 /** Shown when the check is on but nothing can be read yet (the member has not allowed reading what arrives). */
-export const WRITING_NOT_READABLE_TEXT = '送ったメッセージを読む許可がまだありません。設定の「自分の設定」で「受信を読む」をオンにして、上の道具をつなぐと、まとめを作ります。'
+export const WRITING_NOT_READABLE_TEXT = '送ったメッセージを読む許可がまだありません。設定の「AI に任せること」で「受信を読む」をオンにして、上の道具をつなぐと、まとめを作ります。'
 
 /** The check is offered when at least one tool of the company could hand the member's sent messages. */
 export const writingCheckOffered = (status: WritingStyleStatus | null): status is WritingStyleStatus =>

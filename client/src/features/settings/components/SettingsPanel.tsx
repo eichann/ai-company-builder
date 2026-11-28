@@ -1,309 +1,71 @@
-// Over ~300 lines: the panel owns the .env / .gitignore drafts and asks before they (or a section's) are lost;
-// the sections it draws are their own files.
-import { VoiceShortcutSettings } from '../../voice/components/VoiceShortcutSettings'
+// Today's frame of the settings: a dialog with the left list (SettingsNav) and one section (SettingsSection).
+// It holds the drafts that survive moving between sections (.env, .gitignore) and asks before anything
+// typed would be lost; the sections know nothing of this frame.
+import { useImperativeHandle, useState, type ReactNode, type Ref } from 'react'
+import { Info, X } from '@phosphor-icons/react'
 import { companyHasSharedFolder } from '../../../../shared/company-folder'
-import { VoicePromptSettings } from '../../voice/components/VoicePromptSettings'
-import { PromptSuggestionSettings } from './PromptSuggestionSettings'
-import { AgentEnvSettings } from './AgentEnvSettings'
-import { DownloadFoldersSection } from './DownloadFoldersSection'
-import { AutoSyncSettings } from './AutoSyncSettings'
-import { OwnKeysSection } from './OwnKeysSection'
-import { GoogleSection } from './GoogleSection'
-import { SlackSection } from './SlackSection'
-import { ConnectToolsScreen } from './ConnectToolsScreen'
-import { AbsenceSection } from '../../absences/components/AbsenceSection'
-import { JobsSection } from '../../jobs/components/JobsSection'
-import { MySwitchesSection } from './MySwitchesSection'
-import { JobRepeatAskSetting } from './JobRepeatAskSetting'
-import { BrowserSection } from './BrowserSection'
-import { useBrowserSites } from '../hooks/useBrowserSites'
-import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
-import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { Dialog } from '../../../shared/ui/Dialog'
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
-import { UnsavedChangesDialog } from './UnsavedChangesDialog'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected, Globe } from '@phosphor-icons/react'
+import { Callout } from '../../../shared/ui/primitives'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
-import { canEditCompanyGitignore, getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../api'
-import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from '../model'
-import type { EnvVarStatus } from '../../../../shared/env-file'
-
-// Common API key definitions
-const COMMON_API_KEYS = [
-  { key: 'OPENAI_API_KEY', label: 'OpenAI', placeholder: 'sk-...' },
-  { key: 'ANTHROPIC_API_KEY', label: 'Anthropic', placeholder: 'sk-ant-...' },
-  { key: 'GOOGLE_API_KEY', label: 'Google AI', placeholder: 'AIza...' },
-  { key: 'AZURE_OPENAI_API_KEY', label: 'Azure OpenAI', placeholder: '' },
-]
-const commonKeySet = new Set(COMMON_API_KEYS.map(k => k.key))
+import { useBrowserSites } from '../hooks/useBrowserSites'
+import { useEnvDraft } from '../hooks/useEnvDraft'
+import { useGitignoreDraft } from '../hooks/useGitignoreDraft'
+import { KEPT_DRAFT_SECTIONS, sectionToOpen, settingsGroupsFor, shownSectionIds, type SettingsSectionId } from '../sections'
+import { createSettingsUnsaved, type SettingsUnsavedAsk } from '../unsaved'
+import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
+import { SettingsNav } from './SettingsNav'
+import { SettingsSection } from './SettingsSection'
+import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 
 interface SettingsPanelProps {
   onClose: () => void
-  /** Section to open first (default: 自分の設定). */
-  initialTab?: TabType
-  /** 「自分の鍵」: the service to show first (from the chat's "no key" card). */
+  /** Section to open first (default: AI に任せること). */
+  initialTab?: SettingsSectionId
+  /** 「Claude・Gemini などの鍵」: the service to show first (from the chat's "no key" card). */
   focusService?: string
-  /** 自分の設定's rows the screen composes (「今日のフォルダ」: it knows the departments on this PC; 「前の日のタブを自動で片づける」). */
+  /** 「AI に任せること」's rows the screen composes (「今日のフォルダ」: it knows the departments on this PC; 「前の日のタブを自動で片づける」). */
   mineRows?: ReactNode
+  /** Asks from outside what the settings have typed and not saved (every section), and saves it. */
+  unsavedRef?: Ref<SettingsUnsavedAsk>
 }
 
-export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences' | 'jobs' | 'browser'
-
-const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
-  {
-    group: 'あなた',
-    items: [
-      { id: 'mine', label: '自分の設定', icon: <UserCircle size={16} /> },
-    ],
-  },
-  {
-    group: '同期',
-    items: [
-      { id: 'sync', label: 'ダウンロードするフォルダ', icon: <CloudArrowDown size={16} /> },
-      { id: 'autosync', label: '自動同期', icon: <ArrowsClockwise size={16} /> },
-      { id: 'gitignore', label: '同期しないファイル', icon: <FileX size={16} /> },
-    ],
-  },
-  {
-    group: 'AI と連携',
-    items: [
-      { id: 'tools', label: '仕事の道具をつなぐ', icon: <PlugsConnected size={16} /> },
-      { id: 'ownkeys', label: '自分の鍵', icon: <LockKey size={16} /> },
-      { id: 'google', label: 'Google', icon: <GoogleLogo size={16} /> },
-      { id: 'slack', label: 'Slack', icon: <SlackLogo size={16} /> },
-      { id: 'browser', label: 'ブラウザ操作', icon: <Globe size={16} /> },
-      { id: 'apikeys', label: 'APIキー（このPC）', icon: <Key size={16} /> },
-      { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
-      { id: 'aienv', label: 'AIに渡す環境変数', icon: <ShieldCheck size={16} /> },
-    ],
-  },
-  {
-    group: '仕事',
-    items: [
-      { id: 'absences', label: '不在と代わりの人', icon: <UserSwitch size={16} /> },
-      { id: 'jobs', label: '定期の仕事', icon: <CalendarCheck size={16} /> },
-    ],
-  },
-  {
-    group: '入力',
-    items: [
-      { id: 'voice', label: '音声入力', icon: <Microphone size={16} /> },
-      { id: 'suggestions', label: '入力候補', icon: <Lightbulb size={16} /> },
-    ],
-  },
-]
-
-/**
- * The sections a company shows: without the shared company folder nothing is synced or
- * downloaded, so the 同期 group (download choices with folder sizes, automatic sync,
- * .gitignore) is not offered.
- */
-function settingsGroupsFor(sharedFolder: boolean, browserSites: boolean): typeof NAV {
-  const groups = sharedFolder ? NAV : NAV.filter(group => group.group !== '同期')
-  // 「ブラウザ操作」 only while the member's policy is on with at least one site.
-  return browserSites ? groups : groups.map(group => ({ ...group, items: group.items.filter(item => item.id !== 'browser') }))
-}
-
-const INPUT = 'h-9 rounded-control border border-zinc-200 bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
-const TEXTAREA = 'h-80 w-full resize-none rounded-control border border-zinc-200 bg-white px-4 py-3 font-mono text-body leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
-const CODE = 'rounded-small bg-zinc-100 px-1 py-px font-mono text-small text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
-
-export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mineRows }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, initialTab, focusService, mineRows, unsavedRef }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
   const browser = useBrowserSites(currentCompany?.id)
-  const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab)
-  // Saved .env values never reach the renderer: only their status, plus what is typed here.
-  const [envStatus, setEnvStatus] = useState<Record<string, EnvVarStatus>>({})
-  const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({})
-  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set())
-  const [addedKeys, setAddedKeys] = useState<string[]>([])
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
-  const [newKeyName, setNewKeyName] = useState('')
-  const [pastedEnv, setPastedEnv] = useState('')
-  const [gitignoreContent, setGitignoreContent] = useState('')
-  const [gitignoreSaved, setGitignoreSaved] = useState('')
-  // The open section's own unsaved input (download choices, AI env names, a key, voice instructions).
-  const sectionUnsaved = useRef<UnsavedChanges>(null)
+  const env = useEnvDraft(currentCompany?.rootPath ?? '')
+  const gitignore = useGitignoreDraft(currentCompany?.id ?? '', currentCompany?.rootPath ?? '')
+  const kept = useLatestRef<Partial<Record<SettingsSectionId, UnsavedChanges>>>({ envkeys: env.unsaved, gitignore: gitignore.unsaved })
+  const [unsaved] = useState(() => createSettingsUnsaved(() => kept.current))
+  const ctx = { sharedFolder: currentCompany ? companyHasSharedFolder(currentCompany) : false, browserSites: browser.sites.length > 0 }
+  const [chosen, setActive] = useState<SettingsSectionId>(initialTab ?? 'mine')
+  const active = sectionToOpen(chosen, ctx)
+  const allIds = shownSectionIds(ctx)
   // Asked before closing (or leaving a section whose input would be dropped): what to do with what is unsaved.
-  const [leaving, setLeaving] = useState<{ what: string[]; verb: string; then: () => void; section: boolean } | null>(null)
+  const [leaving, setLeaving] = useState<{ what: string[]; ids: SettingsSectionId[]; verb: string; then: () => void } | null>(null)
   const [leaveSaving, setLeaveSaving] = useState(false)
-  // Read-only until the server says this member is an owner or admin (canEditCompanyGitignore).
-  const [gitignoreEditable, setGitignoreEditable] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Check which git binary is in use (warn when on the system git fallback)
-  useEffect(() => {
-    getGitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
-  }, [])
+  useImperativeHandle(unsavedRef, () => ({ pending: () => unsaved.pending(allIds), save: () => unsaved.save(allIds) }))
 
-  // Load .env and .gitignore files (and whether this member may edit the latter) on mount
-  useEffect(() => {
-    if (!currentCompany?.rootPath) return
-    const companyId = currentCompany.id
-
-    setGitignoreEditable(false)
-    let live = true
-    void canEditCompanyGitignore(companyId).then(editable => { if (live) setGitignoreEditable(editable) })
-
-    const loadFiles = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const result = await readCompanyEnvStatus(currentCompany.rootPath)
-        if (result.success && result.vars) {
-          setEnvStatus(result.vars)
-        } else if (result.error) {
-          setError(result.error)
-        }
-
-        // Load .gitignore
-        const gitignoreResult = await readGitignore(currentCompany.rootPath)
-        setGitignoreContent(gitignoreResult || '')
-        setGitignoreSaved(gitignoreResult || '')
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '読み込みに失敗しました')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadFiles()
-    return () => { live = false }
-  }, [currentCompany?.rootPath, currentCompany?.id])
-
-  // After a key moved to the server: the .env changed in main, read its state again.
-  const reloadEnvStatus = useCallback(() => {
-    if (!currentCompany?.rootPath) return
-    void readCompanyEnvStatus(currentCompany.rootPath).then(r => { if (r.success && r.vars) setEnvStatus(r.vars) })
-  }, [currentCompany?.rootPath])
-
-  // Toggle visibility of a key
-  const toggleVisibility = useCallback((key: string) => {
-    setVisibleKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }, [])
-
-  const customKeys = [...Object.keys(envStatus).filter(k => !commonKeySet.has(k)), ...addedKeys.filter(k => !(k in envStatus))]
-
-  const updateDraft = useCallback((key: string, value: string) => {
-    setEnvDrafts(prev => ({ ...prev, [key]: value }))
-    setSaved(false)
-  }, [])
-
-  // Marks a saved name for removal on save, or undoes that.
-  const toggleRemoved = useCallback((key: string) => {
-    setRemovedKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-    setSaved(false)
-  }, [])
-
-  const addCustomKey = useCallback(() => {
-    if (!newKeyName.trim()) return
-    const normalized = normalizeEnvName(newKeyName)
-    if ('error' in normalized) {
-      setError(normalized.error)
-      return
-    }
-    const keyName = normalized.name
-    if (commonKeySet.has(keyName) || keyName in envStatus || addedKeys.includes(keyName)) {
-      setError('このキー名は既に存在します')
-      return
-    }
-    setError(null)
-    setAddedKeys(prev => [...prev, keyName])
-    setNewKeyName('')
-    setSaved(false)
-  }, [newKeyName, envStatus, addedKeys])
-
-  const removeAddedKey = useCallback((key: string) => {
-    setAddedKeys(prev => prev.filter(k => k !== key))
-    setEnvDrafts(prev => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-  }, [])
-
-  // .env: only typed values and removals are sent; main merges them into the file. null = saved.
-  const envChanges = envChangesToSave({ ...envDrafts, ...envDraftsFromText(pastedEnv) }, removedKeys)
-  const envDirty = Object.keys(envChanges).length > 0
-  // Also typed but not a value to save yet (a new name, a paste without values): asked about at closing.
-  const envTyped = envDirty || addedKeys.length > 0 || newKeyName.trim() !== '' || pastedEnv.trim() !== ''
-  const gitignoreDirty = gitignoreEditable && gitignoreContent !== gitignoreSaved
-  const saveEnv = useCallback(async (): Promise<string | null> => {
-    if (!currentCompany?.rootPath) return null
-    const result = await updateCompanyEnv(currentCompany.rootPath, envChanges)
-    if (!result.success) return result.error || '保存に失敗しました'
-    const status = await readCompanyEnvStatus(currentCompany.rootPath)
-    if (status.success && status.vars) setEnvStatus(status.vars)
-    setEnvDrafts({})
-    setRemovedKeys(new Set())
-    setAddedKeys([])
-    setPastedEnv('')
-    return null
-  }, [currentCompany?.rootPath, envChanges])
-  const saveGitignore = useCallback(async (): Promise<string | null> => {
-    if (!currentCompany?.rootPath || !gitignoreEditable) return null
-    if (!await writeGitignore(currentCompany.rootPath, gitignoreContent)) return '保存に失敗しました'
-    setGitignoreSaved(gitignoreContent)
-    return null
-  }, [currentCompany?.rootPath, gitignoreContent, gitignoreEditable])
-
-  // The footer's 保存: the open section's part.
-  const saveChanges = useCallback(async () => {
-    setSaving(true)
-    setError(null)
-    try {
-      const failed = await (activeTab === 'gitignore' ? saveGitignore() : saveEnv())
-      if (failed) setError(failed)
-      else { setSaved(true); setTimeout(() => setSaved(false), 2000) }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '保存に失敗しました')
-    } finally {
-      setSaving(false)
-    }
-  }, [activeTab, saveEnv, saveGitignore])
-
-  // What closing would drop (`section`: only the open section's own input, which leaving it drops too).
-  const unsavedParts = (sectionOnly: boolean): string[] => [
-    ...(!sectionOnly && envTyped ? ['APIキー・環境変数（.env）の入力'] : []),
-    ...(!sectionOnly && gitignoreDirty ? ['同期しないファイル（.gitignore）の変更'] : []),
-    ...[sectionUnsaved.current?.pending() ?? null].filter((x): x is string => !!x),
-  ]
-  const leave = (then: () => void, sectionOnly: boolean, verb: string) => {
-    const what = unsavedParts(sectionOnly)
+  // Moving on drops only the open section's own input; the kept drafts are asked about at closing.
+  const leave = (ids: SettingsSectionId[], verb: string, then: () => void) => {
+    const what = unsaved.pending(ids)
     if (what.length === 0) then()
-    else setLeaving({ what, verb, then, section: sectionOnly })
+    else setLeaving({ what, ids, verb, then })
   }
-  const close = () => leave(onClose, false, '閉じる')
+  const close = () => leave(allIds, '閉じる', onClose)
+  const choose = (id: SettingsSectionId) => leave(KEPT_DRAFT_SECTIONS.has(active) ? [] : [active], '移る', () => { setActive(id); setError(null) })
   const saveAndLeave = async () => {
     if (!leaving) return
     setLeaveSaving(true)
     setError(null)
-    let failed: string | null = null
+    let failed: string | null
     try {
-      if (!leaving.section && envDirty) failed = await saveEnv()
-      if (!failed && !leaving.section && gitignoreDirty) failed = await saveGitignore()
-      if (!failed && sectionUnsaved.current?.pending()) failed = await sectionUnsaved.current.save()
+      failed = await unsaved.save(leaving.ids)
     } catch (e) {
       failed = e instanceof Error ? e.message : '保存に失敗しました'
     }
@@ -315,362 +77,56 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
     then()
   }
 
-  if (!currentCompany) {
-    return null
-  }
-
-  const tabDirty = activeTab === 'gitignore' ? gitignoreDirty : (activeTab === 'apikeys' || activeTab === 'advanced') && envDirty
-  const hasSaveFooter = activeTab === 'apikeys' || (activeTab === 'gitignore' && gitignoreEditable) || activeTab === 'advanced'
-
-  const loadingState = (
-    <div className="flex items-center justify-center gap-2 py-16 text-body text-zinc-500 dark:text-zinc-400">
-      <SpinnerGap size={16} className="animate-spin" />読み込み中…
-    </div>
-  )
+  if (!currentCompany) return null
+  const unsavedIds = new Set<SettingsSectionId>([...(env.dirty ? ['envkeys' as const] : []), ...(gitignore.dirty ? ['gitignore' as const] : [])])
 
   return (
     // The shared frame (design-system.md, P2d): its surface, scrim and keys — Tab stays inside, Esc
     // closes and stops there, focus goes back to what opened it; a wide two-pane dialog of its own size.
     <Dialog onClose={close} label="設定" size="custom" padded={false}
       className="flex h-[min(760px,92vh)] max-w-[1040px] overflow-hidden">
-        {/* Section nav */}
-        <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-[color:var(--color-border)] bg-bg px-3 py-5">
-          <div className="px-2.5 pb-4">
-            <p className="text-title tracking-tight">設定</p>
-            <p className="mt-0.5 truncate text-small text-text-subtle" title={currentCompany.rootPath}>{currentCompany.name}</p>
-          </div>
-          <div className="min-h-0 space-y-5 overflow-y-auto">
-            {settingsGroupsFor(companyHasSharedFolder(currentCompany), browser.sites.length > 0).map(group => (
-              <div key={group.group}>
-                <p className="px-2.5 pb-1.5 text-caption text-text-subtle">{group.group}</p>
-                <ul className="space-y-0.5">
-                  {group.items.map(item => {
-                    const active = activeTab === item.id
-                    return (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          aria-current={active ? 'page' : undefined}
-                          onClick={() => { if (!active) leave(() => { setActiveTab(item.id); setSaved(false); setError(null) }, true, '移る') }}
-                          className={`flex h-control w-full items-center gap-2.5 rounded-control px-2.5 text-left text-body transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring ${active
-                            ? 'bg-surface-raised font-medium text-text shadow-card ring-1 ring-[color:var(--color-border)]'
-                            : 'text-text-muted hover:bg-surface-sunken hover:text-text'}`}
-                        >
-                          <span className={active ? 'text-selected-icon' : 'text-text-subtle'}>{item.icon}</span>
-                          {item.label}
-                          {((envDirty && (item.id === 'apikeys' || item.id === 'advanced')) || (gitignoreDirty && item.id === 'gitignore')) && (
-                            <span className="ml-auto text-caption font-normal text-warning-text">未保存</span>
-                          )}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
-          {/* Always shown, whatever section is open (owner decision: members are told). */}
-          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-[color:var(--color-border)] px-2.5 pt-3 text-caption font-normal leading-relaxed text-text-muted">
-            <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
-            <span><span className="block">{AGENT_LOG_NOTICE_TEXT}</span><span className="mt-1 block">{SANDBOX_NOTICE_TEXT}</span></span>
-          </p>
-        </nav>
-
-        {/* Section content */}
-        <div className="relative flex min-w-0 flex-1 flex-col">
-          <button
-            type="button"
-            onClick={close}
-            aria-label="閉じる"
-            className="absolute right-4 top-4 z-10 rounded-control p-1.5 text-text-subtle transition-colors hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
-          >
-            <X size={18} />
-          </button>
-
-          {error && !hasSaveFooter && (
-            <div className="px-8 pt-7"><Callout tone="danger">{error}</Callout></div>
-          )}
-          <div className="flex-1 overflow-y-auto">
-            {activeTab === 'sync' ? (
-              <>
-                {gitBinaryStatus && !gitBinaryStatus.bundled && (
-                  <div className="px-8 pt-7">
-                    <Callout tone="warning" title={`同梱のGitが使用できないため、システムのGitで動作しています（${gitBinaryStatus.binary}）`}>
-                      古いGitでは大きなファイルの同期に失敗することがあるため、保護設定（http.postBuffer）を自動適用しています。
-                    </Callout>
-                  </div>
-                )}
-                <DownloadFoldersSection unsavedRef={sectionUnsaved} rootPath={currentCompany.rootPath} companyId={currentCompany.id} departments={departments} />
-              </>
-            ) : activeTab === 'voice' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
-                <Card className="p-5"><VoiceShortcutSettings /></Card>
-                <Card className="p-5"><VoicePromptSettings unsavedRef={sectionUnsaved} /></Card>
-              </div>
-            ) : activeTab === 'ownkeys' ? (
-              <OwnKeysSection unsavedRef={sectionUnsaved} companyId={currentCompany.id} focusService={focusService} />
-            ) : activeTab === 'tools' ? (
-              <ConnectToolsScreen key={currentCompany.id} companyId={currentCompany.id} />
-            ) : activeTab === 'google' ? (
-              <GoogleSection key={currentCompany.id} companyId={currentCompany.id} />
-            ) : activeTab === 'browser' ? (
-              <BrowserSection key={currentCompany.id} companyId={currentCompany.id} sites={browser.sites} />
-            ) : activeTab === 'slack' ? (
-              <SlackSection key={currentCompany.id} companyId={currentCompany.id} />
-            ) : activeTab === 'mine' ? (
-              <>
-                <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} onOpenGoogle={() => setActiveTab('google')} />
-                <div className="-mt-3 space-y-3 px-8 pb-8">{mineRows}<JobRepeatAskSetting key={currentCompany.id} companyId={currentCompany.id} /></div>
-              </>
-            ) : activeTab === 'absences' ? (
-              <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />
-            ) : activeTab === 'jobs' ? (
-              <JobsSection key={currentCompany.id} companyId={currentCompany.id} />
-            ) : activeTab === 'aienv' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
-                <Card className="p-5"><AgentEnvSettings unsavedRef={sectionUnsaved} /></Card>
-              </div>
-            ) : activeTab === 'autosync' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="自動同期" description="アプリを開いている間、決まったタイミングでサーバーと同期します。" />
-                <AutoSyncSettings />
-              </div>
-            ) : activeTab === 'suggestions' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="入力候補" description="相談画面の入力欄に表示する候補の設定です。" />
-                <Card className="p-5"><PromptSuggestionSettings /></Card>
-              </div>
-            ) : loading ? loadingState : activeTab === 'apikeys' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="APIキー（このPC）" description="Skill やスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
-                <LegacyKeysNote onOpenOwnKeys={() => setActiveTab('ownkeys')} />
-                <MoveEnvKeysCard companyId={currentCompany.id} rootPath={currentCompany.rootPath} env={envStatus} onMoved={reloadEnvStatus} />
-                <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
-                  <div className="p-5">
-                    <SubHeading>よく使うAPIキー</SubHeading>
-                    <div className="mt-4 space-y-3">
-                      {COMMON_API_KEYS.map(({ key, label, placeholder }) => (
-                        <EnvKeyRow
-                          key={key}
-                          name={key}
-                          label={<label htmlFor={`env-${key}`} className="w-32 shrink-0 text-body text-zinc-600 dark:text-zinc-300">{label}</label>}
-                          inputId={`env-${key}`}
-                          status={envStatus[key]}
-                          draft={envDrafts[key] ?? ''}
-                          placeholder={placeholder}
-                          visible={visibleKeys.has(key)}
-                          removed={removedKeys.has(key)}
-                          onDraft={value => updateDraft(key, value)}
-                          onToggleVisible={() => toggleVisibility(key)}
-                          onToggleRemoved={() => toggleRemoved(key)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="p-5">
-                    <SubHeading>カスタム環境変数</SubHeading>
-                    <div className="mt-4 space-y-3">
-                      {customKeys.map(key => (
-                        <EnvKeyRow
-                          key={key}
-                          name={key}
-                          label={<code className={`${CODE} w-44 shrink-0 truncate py-1.5`} title={key}>{key}</code>}
-                          status={envStatus[key]}
-                          draft={envDrafts[key] ?? ''}
-                          placeholder="値"
-                          visible={visibleKeys.has(key)}
-                          removed={removedKeys.has(key)}
-                          onDraft={value => updateDraft(key, value)}
-                          onToggleVisible={() => toggleVisibility(key)}
-                          onToggleRemoved={() => (key in envStatus ? toggleRemoved(key) : removeAddedKey(key))}
-                        />
-                      ))}
-
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="text"
-                          value={newKeyName}
-                          onChange={(e) => setNewKeyName(e.target.value.toUpperCase())}
-                          placeholder="新しいキー名"
-                          aria-label="新しいキー名"
-                          onKeyDown={(e) => e.key === 'Enter' && addCustomKey()}
-                          className={`${INPUT} w-44 shrink-0 border-dashed font-mono`}
-                        />
-                        <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={addCustomKey} disabled={!newKeyName.trim()}>
-                          <Plus size={14} />追加
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-
-                <Callout tone="info">
-                  <p>APIキーは <code className={CODE}>.env</code> ファイルに保存されます。スクリプトから <code className={CODE}>process.env.OPENAI_API_KEY</code> などで参照できます。</p>
-                  <p className="mt-1">保存したキーは安全のため画面に表示しません（末尾4文字だけ表示します）。変えるときは新しいキーを入力して保存してください。</p>
-                  <p className="mt-1">入力したキーを含む <code className={CODE}>.env</code> は同期されません（このPCにのみ保存されます）。</p>
-                </Callout>
-              </div>
-            ) : activeTab === 'gitignore' ? (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="同期しないファイル" description={<>ここに書いたファイルやフォルダは、チームと共有されません（<code className={CODE}>.gitignore</code>）。</>} />
-                {!gitignoreEditable && (
-                  <Callout tone="info"><p>会社全体に効くので、変えられるのは管理者だけです。</p></Callout>
-                )}
-                <textarea
-                  value={gitignoreContent}
-                  readOnly={!gitignoreEditable}
-                  onChange={(e) => {
-                    if (!gitignoreEditable) return
-                    setGitignoreContent(e.target.value)
-                    setSaved(false)
-                  }}
-                  aria-label=".gitignore の内容"
-                  placeholder="# 同期対象外にするファイル/フォルダ&#10;.DS_Store&#10;node_modules/&#10;*.log"
-                  className={TEXTAREA}
-                  spellCheck={false}
-                />
-                <div className="grid grid-cols-2 gap-4">
-                  <Card className="p-4 text-body text-zinc-600 dark:text-zinc-300">
-                    <SubHeading>自動で追加される項目</SubHeading>
-                    <ul className="mt-2 space-y-1.5">
-                      <li><code className={CODE}>.backups/</code> バックアップフォルダ</li>
-                      <li><code className={CODE}>.env</code> / <code className={CODE}>.env.*</code> APIキーなどの秘密情報</li>
-                      <li><code className={CODE}>100MB以上のファイル</code> 大容量ファイル</li>
-                    </ul>
-                  </Card>
-                  <Card className="p-4 text-body text-zinc-600 dark:text-zinc-300">
-                    <SubHeading>書き方</SubHeading>
-                    <ul className="mt-2 space-y-1.5">
-                      <li><code className={CODE}>*.log</code> すべての .log ファイル</li>
-                      <li><code className={CODE}>folder/</code> フォルダ全体</li>
-                      <li><code className={CODE}># comment</code> コメント</li>
-                    </ul>
-                  </Card>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="環境変数（.env）" description={<>このPCの <code className={CODE}>.env</code> に、まとめて追加・上書きします。1行に1つ、<code className={CODE}>KEY=value</code> の形式で貼り付けてください。</>} />
-                <LegacyKeysNote onOpenOwnKeys={() => setActiveTab('ownkeys')} />
-                <MoveEnvKeysCard companyId={currentCompany.id} rootPath={currentCompany.rootPath} env={envStatus} onMoved={reloadEnvStatus} />
-                <textarea
-                  value={pastedEnv}
-                  onChange={(e) => {
-                    setPastedEnv(e.target.value)
-                    setSaved(false)
-                  }}
-                  aria-label=".env に追加する内容"
-                  placeholder="OPENAI_API_KEY=sk-...&#10;ANTHROPIC_API_KEY=sk-ant-..."
-                  className={TEXTAREA}
-                  spellCheck={false}
-                />
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">ここに書いた名前だけが変わり、ほかの項目はそのまま残ります。<code className={CODE}>#</code> で始まる行と、値が空の行は無視されます。</p>
-                <Card className="p-5">
-                  <SubHeading>保存されている項目</SubHeading>
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">値は安全のため表示しません。</p>
-                  {Object.keys(envStatus).length === 0 ? (
-                    <p className="mt-3 text-body text-zinc-500 dark:text-zinc-400">まだありません。</p>
-                  ) : (
-                    <ul className="mt-3 space-y-2">
-                      {Object.keys(envStatus).map(key => (
-                        <li key={key} className="flex items-center gap-3 text-body">
-                          <code className={`${CODE} truncate`} title={key}>{key}</code>
-                          <span className={removedKeys.has(key) ? 'text-red-600 dark:text-red-300' : 'text-zinc-500 dark:text-zinc-400'}>
-                            {removedKeys.has(key) ? '保存すると削除されます' : envStatusLabel(envStatus[key])}
-                          </span>
-                          <Button variant="ghost" className="ml-auto shrink-0" onClick={() => toggleRemoved(key)}>
-                            {removedKeys.has(key) ? '元に戻す' : <><Trash size={14} />削除</>}
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </Card>
-              </div>
-            )}
-          </div>
-
-          {hasSaveFooter && (
-            <div className="flex items-center justify-between gap-4 border-t border-[color:var(--color-border)] bg-surface-raised px-8 py-3">
-              {error ? (
-                <p role="alert" className="text-body text-red-600 dark:text-red-300">{error}</p>
-              ) : tabDirty ? (
-                <p role="status" className="min-w-0 truncate text-small text-warning-text">まだ保存していません。保存すると反映されます。</p>
-              ) : (
-                <p className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
-                  保存先: <code className={CODE}>{currentCompany.rootPath}/{activeTab === 'gitignore' ? '.gitignore' : '.env'}</code>
-                </p>
-              )}
-              <Button variant="primary" onClick={saveChanges} disabled={saving} className="shrink-0">
-                {saving ? <><SpinnerGap size={14} className="animate-spin" />保存中…</> : saved ? <><Check size={14} />保存しました</> : '保存'}
-              </Button>
-            </div>
-          )}
+      <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-[color:var(--color-border)] bg-bg px-3 py-5">
+        <div className="px-2.5 pb-4">
+          <p className="text-title tracking-tight">設定</p>
+          <p className="mt-0.5 truncate text-small text-text-subtle" title={currentCompany.rootPath}>{currentCompany.name}</p>
         </div>
-        {leaving && (
-          <UnsavedChangesDialog what={leaving.what} verb={leaving.verb} saving={leaveSaving}
-            onSave={() => void saveAndLeave()} onDiscard={() => { const then = leaving.then; setLeaving(null); then() }} onBack={() => setLeaving(null)} />
-        )}
-    </Dialog>
-  )
-}
+        <SettingsNav groups={settingsGroupsFor(ctx)} active={active} unsavedIds={unsavedIds} onChoose={choose} />
+        {/* Always shown, whatever section is open (owner decision: members are told). */}
+        <p className="mt-auto flex shrink-0 gap-1.5 border-t border-[color:var(--color-border)] px-2.5 pt-3 text-caption font-normal leading-relaxed text-text-muted">
+          <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
+          <span><span className="block">{AGENT_LOG_NOTICE_TEXT}</span><span className="mt-1 block">{SANDBOX_NOTICE_TEXT}</span></span>
+        </p>
+      </nav>
 
-/** One .env name: its saved status (never the value), a box for a new value, and removal. */
-function EnvKeyRow({ name, label, inputId, status, draft, placeholder, visible, removed, onDraft, onToggleVisible, onToggleRemoved }: {
-  name: string
-  label: ReactNode
-  inputId?: string
-  status: EnvVarStatus | undefined
-  draft: string
-  placeholder: string
-  visible: boolean
-  removed: boolean
-  onDraft: (value: string) => void
-  onToggleVisible: () => void
-  onToggleRemoved: () => void
-}) {
-  const saved = !!status?.set
-  const statusText = removed ? '保存すると削除されます' : envStatusLabel(status)
-  return (
-    <div className="flex items-center gap-3">
-      {label}
-      <div className="relative flex-1">
-        <input
-          id={inputId}
-          type={visible ? 'text' : 'password'}
-          value={removed ? '' : draft}
-          disabled={removed}
-          onChange={(e) => onDraft(e.target.value)}
-          placeholder={removed ? statusText : saved ? `${statusText}。変更するときだけ入力` : placeholder}
-          aria-label={inputId ? undefined : `${name} の値`}
-          aria-describedby={`env-status-${name}`}
-          className={`${INPUT} w-full pr-10 font-mono disabled:opacity-60`}
-        />
-        <span id={`env-status-${name}`} className="sr-only">{statusText}</span>
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <button
           type="button"
-          onClick={onToggleVisible}
-          aria-label={visible ? '隠す' : '表示する'}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-small p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          onClick={close}
+          aria-label="閉じる"
+          className="absolute right-4 top-4 z-10 rounded-control p-1.5 text-text-subtle transition-colors hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
         >
-          {visible ? <EyeSlash size={16} /> : <Eye size={16} />}
+          <X size={18} />
         </button>
+        {error && <div className="px-8 pt-7"><Callout tone="danger">{error}</Callout></div>}
+        <div className="flex-1 overflow-y-auto">
+          <SettingsSection
+            id={active}
+            company={currentCompany}
+            departments={departments}
+            unsaved={unsaved}
+            env={env}
+            gitignore={gitignore}
+            browserSites={browser.sites}
+            go={choose}
+            focusService={focusService}
+            mineRows={mineRows}
+          />
+        </div>
       </div>
-      {saved || !inputId ? (
-        <button
-          type="button"
-          onClick={onToggleRemoved}
-          aria-label={removed ? `${name} の削除を取り消す` : `${name} を削除`}
-          className="rounded-control p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
-        >
-          {removed ? <ArrowCounterClockwise size={16} /> : <Trash size={16} />}
-        </button>
-      ) : (
-        <span className="w-8 shrink-0" aria-hidden />
+      {leaving && (
+        <UnsavedChangesDialog what={leaving.what} verb={leaving.verb} saving={leaveSaving}
+          onSave={() => void saveAndLeave()} onDiscard={() => { const then = leaving.then; setLeaving(null); then() }} onBack={() => setLeaving(null)} />
       )}
-    </div>
+    </Dialog>
   )
 }

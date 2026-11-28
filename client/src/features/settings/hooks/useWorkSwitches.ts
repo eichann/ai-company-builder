@@ -3,7 +3,7 @@ import type { MyWorkSwitches, WorkSwitch } from '../../../../shared/work-switche
 import { getWorkSwitches, setWorkSwitch } from '../api'
 
 /**
- * The member's own switches (自分の設定), read when the section mounts; a change shows what the
+ * The member's own switches (AI に任せること), read when the section mounts; a change shows what the
  * server answered (the company may have stopped one meanwhile). Errors are the server's words.
  */
 export function useWorkSwitches(companyId: string) {

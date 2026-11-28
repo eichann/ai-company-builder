@@ -54,7 +54,7 @@ interface Props {
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; tab?: 'ownkeys' | 'jobs'; at: number } | null
   onCloseSettings: () => void
-  /** 自分の設定's 「今日のフォルダ」 row. */
+  /** AI に任せること's 「今日のフォルダ」 row. */
   todayFolderSetting?: ReactNode
   /** 「タブを片づける」 (features/editor): 「片づけたタブ」, its ⌘K entry and the daily tidy's setting. */
   tidying: ReturnType<typeof useTabTidying>

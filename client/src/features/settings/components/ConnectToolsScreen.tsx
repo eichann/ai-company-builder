@@ -1,6 +1,7 @@
 // 「仕事の道具をつなぐ」: what connecting Google and Slack lets ACB do, in plain words, with one
 // button per service. Opens by itself once per member and company (`firstRun`, until connected
-// or put off with 「あとで」; again only for what the company adds later), and from 設定.
+// or put off with 「あとで」; again only for what the company adds later). In 設定 it is
+// 「つないでいるサービス」's list, each card with 詳しく to that service's own section.
 import { useState } from 'react'
 import { CheckCircle, Circle, GoogleLogo, SlackLogo, SpinnerGap } from '@phosphor-icons/react'
 import type { ReactNode } from 'react'
@@ -17,9 +18,11 @@ interface Props {
   companyId: string
   /** Opened by itself after sign-in: shown only when something is new, as a dialog with 「あとで」. */
   firstRun?: boolean
+  /** In 設定: opens a service's own section from its card. */
+  onOpenService?: (service: 'google' | 'slack') => void
 }
 
-export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
+export function ConnectToolsScreen({ companyId, firstRun = false, onOpenService }: Props) {
   const writing = useWritingStyle(companyId)
   const tools = useConnectTools(companyId, () => { void writing.afterConnect() })
   // First run: decided once, when the state has loaded, and kept while the member connects
@@ -30,7 +33,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
   if (offer === 'undecided' || offer === 'closed' || offer === null) return firstRun ? <span ref={tools.loadRef} hidden /> : null
   const view = connectToolsView(tools.google, tools.slack, offer.only)
 
-  const title = view.onlyNew ? '新しくつなぐもの' : '仕事の道具をつなぐ'
+  const title = view.onlyNew ? '新しくつなぐもの' : firstRun ? '仕事の道具をつなぐ' : 'つないでいるサービス'
   const connectedNow = [...(view.google?.items ?? []), ...(view.slack?.items ?? [])].some(i => i.state === 'connected')
   const body = (
     <div ref={tools.loadRef} className="space-y-4">
@@ -39,6 +42,8 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
         <p className="mt-1 text-body leading-relaxed text-zinc-600 dark:text-zinc-300">
           {view.onlyNew
             ? '会社で使えるものが増えました。つなぐと、次のことができるようになります。'
+            : !firstRun
+            ? 'サービスごとに、いまの状態と、つなぐとできることが1か所にあります。やめ方や細かい設定は［詳しく］から。'
             : 'ふだん使っている Google や Slack とつなぐと、ACB でできることが増えます。つなぐのは一度だけで、いつでも設定から止められます。'}
         </p>
       </div>
@@ -59,6 +64,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
               action={view.google.canConnect
                 ? <Button variant="primary" disabled={tools.busy || tools.waiting} onClick={() => void tools.connectGoogle()}>Google でつなぐ</Button>
                 : null}
+              onDetail={onOpenService && (() => onOpenService('google'))}
             />
           )}
           {view.slack && (
@@ -71,6 +77,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
               action={view.slack.canConnect
                 ? <Button variant="primary" disabled={tools.busy || tools.waiting} onClick={() => void tools.connectSlack()}>Slack でつなぐ</Button>
                 : null}
+              onDetail={onOpenService && (() => onOpenService('slack'))}
             />
           )}
         </>
@@ -89,7 +96,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
         </div>
       )}
       {firstRun && !connectedNow && (
-        <p className="text-right text-caption font-normal text-zinc-500">あとからでも、設定の「仕事の道具をつなぐ」からつなげます。</p>
+        <p className="text-right text-caption font-normal text-zinc-500">あとからでも、設定の「つないでいるサービス」からつなげます。</p>
       )}
     </div>
   )
@@ -101,13 +108,14 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
   )
 }
 
-function ServiceCard({ icon, name, account, items, hint, action }: {
+function ServiceCard({ icon, name, account, items, hint, action, onDetail }: {
   icon: ReactNode
   name: string
   account: string | null
   items: ConnectToolItem<string>[]
   hint: string | null
   action: ReactNode
+  onDetail?: () => void
 }) {
   return (
     <Card className="space-y-3 p-4">
@@ -126,7 +134,10 @@ function ServiceCard({ icon, name, account, items, hint, action }: {
         ))}
       </ul>
       {hint && <p className="text-small text-zinc-500">{hint}</p>}
-      {action ?? <p className="text-small text-emerald-700 dark:text-emerald-400">つながっています</p>}
+      <div className="flex items-center gap-3">
+        {action ?? <p className="text-small text-emerald-700 dark:text-emerald-400">つながっています</p>}
+        {onDetail && <Button variant="secondary" size="sm" className="ml-auto" aria-label={`${name}を詳しく`} onClick={onDetail}>詳しく</Button>}
+      </div>
     </Card>
   )
 }

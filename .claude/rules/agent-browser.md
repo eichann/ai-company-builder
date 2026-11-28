@@ -206,7 +206,7 @@ run's frames ("Writes within frames, in the app"). Owner decisions
 
 ## The app's window (PR 4: the member opens and logs in; the AI is not connected)
 
-A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「AI と連携」;
+A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「つないでいるサービス」;
 the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and one line on where its
 login lives — `loginNotKept` 「ログインはアプリを閉じるまで覚えています。アプリを開き直すと、もう一度ログインが必要です。」,
 `loginNotKeptBySandbox` when the member's 「AI の囲い」 is not 囲う (`BrowserSiteView.notKeptBySandbox`: the last valid

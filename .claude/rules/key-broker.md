@@ -295,7 +295,7 @@ the sign-in.
    none → 401 `ACB_NO_TOKEN` (whatever the path). **Anything that is not an `acb_tok_` token →
    401 `ACB_REAL_KEY_REFUSED`, never forwarded** (a script with a hard-coded key). Unknown service
    → 404. `validate(token, service)` refusals → 401 `ACB_TOKEN_INVALID` / 403 `ACB_NOT_MEMBER` /
-   403 `ACB_NO_KEY` (「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から
+   403 `ACB_NO_KEY` (「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『Claude・Gemini などの鍵』から
    登録してください。 [ACB_NO_KEY:<service>]」, `brokerNoKeyMessage`; the marker names the service
    only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) /
    403 `ACB_KEY_NOT_CHOSEN` (several company keys, none chosen: above) / 503
@@ -532,7 +532,7 @@ who uses it).
   `ACB_<SERVICE>_API_KEY` / `ACB_<SERVICE>_BASE_URL` and `ACB_BROKER_URL`. Services the company
   has keys for but this member may not use here (`no-key` / `stopped`) get the placeholder
   `acb_tok_none` (`BROKER_NO_KEY_PLACEHOLDER`): the relay answers it with
-  「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。」
+  「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『Claude・Gemini などの鍵』から登録してください。」
   without contacting anyone. Services nobody configured get nothing, so scripts keep their old
   behaviour until K7.
 - **Generic services (K9)** have no SDK names: they get only `ACB_<SERVICE>_API_KEY` (the token)
@@ -584,7 +584,7 @@ admin resumes it). `DELETE /me/broker-keys/:service` always works (also with the
 Every change writes `broker_history` with the member as `changedBy`; the admin page lists the
 keys and the history. Tokens use the key through `resolveKey` (above).
 
-App: Settings → 「自分の鍵」 (`client/src/features/settings/components/OwnKeysSection.tsx`,
+App: Settings → 「Claude・Gemini などの鍵」 (the member's own keys; named so since UX stage 3, `client/src/features/settings/components/OwnKeysSection.tsx`,
 `hooks/useOwnKeys.ts`, `own-keys.ts` = which key the AI will use, following
 `chooseBrokerKeySource`; ports `OwnKeyReads` / `OwnKeyOutbound` in `features/settings/api.ts`).
 Main: `electron/features/broker/ipc.ts` (`brokerKeys:list|save|delete`; the session cookie stays
@@ -594,7 +594,7 @@ in main). The pasted value crosses renderer → main → server once (PUT body),
 request reaches the renderer, and nothing is logged but the method and status. After a save the
 row says how the server's check went (`KEY_CHECK_TEXT`; `KEY_REJECTED` → 「この鍵は使えません
 でした…保存していません。」). The page that used to be 「APIキー」 (the company folder's `.env` on
-this computer) is now 「APIキー（このPC）」.
+this computer) is now 「API キー・環境変数（この PC）」 under the folded 「詳しい設定」.
 
 **「自分の鍵」 is the one place for keys (owner, 2026-10-31).**
 - **From the chat**: when a reply has ended, `features/chat/brokerKeyNeeds.ts` finds the relay's
@@ -609,8 +609,8 @@ this computer) is now 「APIキー（このPC）」.
   channel); a consultation's own window (no handler) → 「メインの画面の「設定 → 自分の鍵」から」. The
   card never shows what was printed around the marker. Tests:
   `src/features/chat/brokerKeyNeeds.test.ts`, `tests/ui/broker-key-card.spec.ts`.
-- **The old pages** 「APIキー（このPC）」 and 「環境変数（.env）」 say they are for older app versions
-  and special cases, recommending 「自分の鍵」 (`features/settings/components/MoveEnvKeysCard.tsx`
+- **The page** 「API キー・環境変数（この PC）」 (詳しい設定; the former 「APIキー（このPC）」 and 「環境変数（.env）」
+  as one since UX stage 3) says it is for older app versions and special cases, recommending 「Claude・Gemini などの鍵」 (`features/settings/components/MoveEnvKeysCard.tsx`
   `LegacyKeysNote`), and offer 「この鍵をサーバーに移す」 for a built-in service's key in the `.env`
   (`ENV_KEY_SERVICES`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`;
   only where the server would take an own key, `own-keys.ts` `envKeysToMove`; last 4 only).

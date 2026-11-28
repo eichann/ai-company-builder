@@ -102,7 +102,7 @@ none fits. Nothing of a message is stored or logged (threads integration test gr
 ## The entry (renderer, `client/src/features/settings/`)
 
 - **One optional check** 「返事の下書きを、わたしの書き方に合わせる」 on 「仕事の道具をつなぐ」 (`ConnectToolsScreen.tsx`: the
-  first run's dialog and 設定 → 仕事の道具をつなぐ; owner: no settings screen of its own), off until the member ticks it,
+  first run's dialog and 設定 → 「サービスの一覧」; owner: no settings screen of its own), off until the member ticks it,
   shown while the company has a tool that could hand samples (`writingCheckOffered`). Its line names the tools by the
   labels the server answered (`writingCheckHint`), never in code. On but nothing readable → 「受信を読む」 is pointed to
   (`writingStatusLine`). A connection finished on the screen (`useConnectTools`' `onConnected`) makes them again while it is on.

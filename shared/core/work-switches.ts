@@ -1,5 +1,5 @@
 /**
- * The switches each member sets for themselves (自分の設定, owner decision
+ * The switches each member sets for themselves (AI に任せること, owner decision
  * 2026-11-02, plan「新しい画面のデモ」J「2つのスイッチは人ごとにも」) — one copy of
  * the rule for the server (the member's API, the clock, the Google client,
  * Slack's signals), the desktop app (whether its AI turns start by themselves)

@@ -101,5 +101,5 @@ export function googleDeclined(asked: readonly GoogleFeature[], after: MyGoogle)
 
 export function googleDeclinedText(declined: readonly GoogleFeature[]): string | null {
   if (declined.length === 0) return null
-  return `次のことは、Google の画面で許可されなかったため使えません：${declined.map(f => TOOL_GOOGLE_TEXT[f].replace(/ます$/, 'る')).join('／')}。使いたくなったら、設定の「仕事の道具をつなぐ」からもう一度つなげます。`
+  return `次のことは、Google の画面で許可されなかったため使えません：${declined.map(f => TOOL_GOOGLE_TEXT[f].replace(/ます$/, 'る')).join('／')}。使いたくなったら、設定の「つないでいるサービス」からもう一度つなげます。`
 }

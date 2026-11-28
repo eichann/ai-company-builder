@@ -91,7 +91,7 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 The company's feature switches (`GET|PUT /features`, `company_features` behind the handle's `tasks`)
 live next to the task settings but in their own table: `records.md` "Features on and off".
 
-## Each member's switches (自分の設定, owner decision 2026-11-02)
+## Each member's switches (設定 →「AI に任せること」, formerly 自分の設定; owner decision 2026-11-02)
 
 - 受信を読む and AI が自動で進める are each member's own, within the company's (rule:
   `shared/core/work-switches.ts`; the company's side: `workSwitchPoliciesOf` over `autoRun` and
@@ -119,7 +119,7 @@ live next to the task settings but in their own table: `records.md` "Features on
   role now (`connector-roles.md`; `choice-needed` counts as connected; asked per request through
   `channelsOf`, late-bound in `composition.ts`; a failure leaves the field out). App: IPC
   `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
-  `client/shared/work-switches.ts`). The screen: 設定 → 自分の設定 (the settings open on it;
+  `client/shared/work-switches.ts`). The screen: 設定 →「AI に任せること」 (the settings open on it;
   `client/src/features/settings/components/MySwitchesSection.tsx`, `hooks/useWorkSwitches.ts`): a switch
   the company does not allow is greyed out and cannot be turned on, with the amber notice
   「会社の設定で止まっています（使いたいときは、管理者に相談してください）」 (the notice itself is not faded;

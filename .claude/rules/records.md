@@ -2295,9 +2295,9 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **The member's own setting** 「AI に完了を頼めるようにする」 (work switch `aiCompletes`, `shared/core/work-switches.ts`):
   **the member's alone** — `MEMBER_ONLY_POLICY` (always allowed, starts off), not in the task settings, so no company or
   admin setting reaches it; `PUT /me/work-switches { switch: 'aiCompletes', on }` (their own only). The app shows it in
-  設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
+  設定 →「AI に任せること」 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
   (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
-  `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
+  `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「AI に任せること」で
   オンにすると…」), nothing written; the AI relays it. **Not for a correction of words** (`aiAskedNeedsSetting` / `isCorrection`: only text
   arguments, nothing else said of the action, "Task version 16"); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
 - **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
