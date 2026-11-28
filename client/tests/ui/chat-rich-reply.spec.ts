@@ -68,6 +68,10 @@ const insideState = (frame: ReturnType<Page['frameLocator']>) => frame.locator('
   }).length,
 }))
 
+/** The reply's own CSS as written (the frame's second <style>), loading from outside. */
+const RAW_CSS = `@import url("https://evil.example/raw-import.css"); @font-face { font-family: E; src: url("https://evil.example/raw-font.woff2") }
+  .acb-root { background: url("https://evil.example/raw-bg.png"); font-family: E } p:hover { background-image: image-set("https://evil.example/raw-set.png" 1x) }`
+
 /** Traps that show in the frame's own document whether they ran (an opaque frame cannot reach the page's globals). */
 const LOCAL_TRAPS = `
 <script>document.title = 'RAN'</script>
@@ -90,7 +94,8 @@ test.describe('in the chat', () => {
     // The closed frame: no script, no origin of its own, and its own policy first in its document.
     expect(await frame.getAttribute('sandbox')).toBe('allow-popups')
     const srcdoc = (await frame.getAttribute('srcdoc'))!
-    expect(srcdoc.indexOf(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:;`)).toBeGreaterThan(0)
+    // The policy exactly (independent review: a later part of it weakened must fail here too).
+    expect(srcdoc).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'">`)
     expect(srcdoc.indexOf('Content-Security-Policy')).toBeLessThan(srcdoc.indexOf('<style'))
     expect(await frame.evaluate((el: HTMLIFrameElement) => el.contentDocument === null), 'the chat cannot reach into it').toBe(true)
     // The words and the HTML in the same frame; nothing of the reply outside it.
@@ -339,7 +344,7 @@ test.describe('the frame alone (the cleaning skipped)', () => {
   test('raw traps in the chat\'s frame run nothing, load nothing, move nothing out of the frame', async ({ page, context }) => {
     const seen = await outside(context)
     const state = await openPreview(page, 'chat-rich-reply')
-    await page.evaluate(html => window.__acbRichReply!.draw({ html, css: '' }), ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS)
+    await page.evaluate(([html, css]) => window.__acbRichReply!.draw({ html, css }), [ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS, RAW_CSS])
     const inside = page.frameLocator('#reply')
     await pokeEverything(page, inside)
     await inside.locator('#top-link').click({ force: true }).catch(() => {})
@@ -348,6 +353,22 @@ test.describe('the frame alone (the cleaning skipped)', () => {
     expect((await insideState(inside)).ran, 'no script ran').toBe(false)
     expect(await page.locator('#reply').evaluate((el: HTMLIFrameElement) => el.contentDocument === null), 'no origin shared with the app').toBe(true)
     expect(page.url(), 'the app was not moved away').toContain('/tests/chat-rich-reply-ui.html')
+    expect(seen.requests, 'nothing loaded or sent').toEqual([])
+    expectNoPageErrors(state)
+  })
+
+  // Independent review: the hidden copy shares the app's origin, so it must be as closed as the shown frame.
+  test('raw traps in the hidden copy the chat measures run nothing, load nothing and are not left in it', async ({ page, context }) => {
+    const seen = await outside(context)
+    const state = await openPreview(page, 'chat-rich-reply')
+    await page.evaluate(([html, css]) => window.__acbRichReply!.measure(html, css), [ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS, RAW_CSS])
+    await page.waitForTimeout(800)
+    const copy = await page.locator('iframe[data-rich-reply-measure]').evaluate((el: HTMLIFrameElement) => {
+      const doc = el.contentDocument!
+      return { ran: doc.title === 'RAN' || doc.documentElement.hasAttribute('data-ran'), at: doc.location.href, left: doc.querySelector('.acb-root')!.childNodes.length }
+    })
+    expect(copy).toEqual({ ran: false, at: 'about:srcdoc', left: 0 })
+    expect(await page.evaluate(() => (window as unknown as PageGlobals).__pwned ?? [])).toEqual([])
     expect(seen.requests, 'nothing loaded or sent').toEqual([])
     expectNoPageErrors(state)
   })

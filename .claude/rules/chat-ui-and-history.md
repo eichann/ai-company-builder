@@ -584,8 +584,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     (`writtenSoFar`), and cleaned like the rest. (2) **The frame the member sees has `sandbox="allow-popups"` only — no
     `allow-scripts`, no `allow-same-origin` (an opaque origin: the chat cannot reach into it, it cannot reach the
     chat) — and its document starts with its own policy** `FRAME_CSP` (`default-src 'none'; img-src data:;
-    style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'`), before
-    anything of the reply. Neither is to be widened for a convenience (no script for the height, no same origin for
+    style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'`) and
+    `x-dns-prefetch-control: off`, before anything of the reply. Neither is to be widened for a convenience (no script for the height, no same origin for
     the links): this is the owner's line.
   - **Links**: the frame's `<base target="_blank">` makes a pressed web link (only `http(s)` survive the cleaning)
     ask for a new window — the one thing `allow-popups` permits —, which the app's window-open handler opens in the
@@ -594,8 +594,13 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   - **Height** (no scroll inside): nothing can leave the shown frame to say how tall it is, so the chat lays the same
     document out in **one hidden copy** (`measureReply`, one per window, one reply at a time): `sandbox="allow-same-origin"`
     (still no script), the same policy, `inert`, `aria-hidden`, off screen and invisible — never pressed, hovered or
-    focused —, and reads its height there (pictures decoded first). Heights are kept per width and text
-    (`knownHeights`, ≤ 200). Over **20,000 px** (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
+    focused —, reads its height there (pictures decoded first) and is emptied again. **The box is as tall as the reply
+    can become** (Codex review: the shown frame cannot say it grew): once written, the copy is also laid out with
+    every `<details>` open, check boxes both ways and each radio choice (`tallestState`, at most 24 inputs: the
+    layouts run on the app's thread), so a step opened or a tab switched is never cut off — a reply that can be
+    opened keeps that room below it while closed. Heights are kept per width, theme and text, only once written
+    (`knownHeights`, ≤ 200). The copy is made again if it left the page; an unmeasured reply keeps the ordinary
+    rendering. Over **20,000 px** as written (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
     途中までを表示しています。続きは［大きく見る］で見られます。」 follows (`onOpenLarge`: the button comes with PR4).
   - **Being written**: drawn again at most every 80 ms (`RICH_UPDATE_MS`), one drawing at a time. The shown frame is
     never rewritten: the next one loads out of sight and takes the old one's place once drawn (two animation frames
@@ -610,21 +615,25 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     (`cssForTheme`); a switch loads the next frame the same way (no empty moment). A slide is scaled to the reply's
     width by CSS alone (`container-type` + `calc(100cqw / 1280px)`).
   - **Long conversations**: a frame is drawn only within 600 px of the list's view (one IntersectionObserver per
-    list) and taken down farther away, its box keeping its height; on top of `MessageList`'s latest-50 window.
+    list, disconnected with its last reply) and taken down farther away, its box keeping its height; on top of
+    `MessageList`'s latest-50 window.
   - Selection and copy across the reply's words, tables and boxes work inside the one frame. A ```` ```mermaid ````
     block or a page card inside such a reply stays code / a plain link (the frame draws neither).
   Tests: `src/features/chat/richReply.test.ts` (which replies and pieces, cut-off pieces, the theme rewrite),
   `tests/ui/chat-rich-reply.spec.ts` (real chat `chat-header-ui.html?turn=manual`, and the frame alone on
   `chat-rich-reply-ui.html`): the sandbox, policy and hidden copy as above, words and HTML in one frame, selection,
   ```` ```html ```` stays code; the demo's traps streamed 400 characters at a time then pressed, hovered, checked and
-  tabbed: nothing ran, no request and no window left, nothing fixed, no endless motion; a web link leaves only as one
-  new window to its address; every piece cleaned and kept in its place; height = content, the 20,000 px stop; no empty
+  tabbed: nothing ran, no request and no window left, nothing fixed, no endless motion; the uncleaned traps and raw CSS
+  measured in the hidden copy run and load nothing and are not left there; a web link leaves only as one
+  new window to its address; every piece cleaned and kept in its place; height = content, the 20,000 px stop; a step
+  opened, a tab switched and a taller dark layout never cut off; no empty
   moment and at most about one frame per 80 ms while written; following / not moving the reader; light / dark with the
   reply's own dark colours; a slide scaled whole; `?history=long&rich=1` keeps ≤ 8 frames live while scrolling and the
   list's height unchanged; **the frame alone with uncleaned traps** runs and loads nothing, shares no origin and cannot
   move the app — and with its policy off the traps load, with its sandbox off a link moves the app (the checks can
-  fail). Mutation-checked: the sandbox, the policy, following, the double frame, near-screen drawing, the height and
-  the theme rewrite each fail a test when taken out. `SCREENSHOTS=<dir>` shoots a reply light and dark.
+  fail). The policy is pinned whole. Mutation-checked: the sandbox, the policy, following, the double frame,
+  near-screen drawing, the height, the tallest state, heights per theme and the theme rewrite each fail a test when
+  taken out. `SCREENSHOTS=<dir>` shoots a reply light and dark.
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

@@ -12,19 +12,19 @@ import { useAppStore } from '../../../stores/appStore'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { ChatFollowContext } from '../chatFollow'
 import { RICH_MAX_HEIGHT, RICH_UPDATE_MS, richPiecesOf } from '../richReply'
-import { frameContentOf, frameDocument, measureReply, shownFrame } from '../richReplyFrame'
+import { frameContentOf, frameDocument, measureReply, shownFrame, type ReplyHeight } from '../richReplyFrame'
 
 /** Heights already measured, by width, theme and text: a reply drawn again (scrolled back, the window moved) keeps its place. */
-const knownHeights = new Map<string, number>()
+const knownHeights = new Map<string, ReplyHeight>()
 const heightKey = (width: number, isDark: boolean, content: string) => `${Math.round(width)}|${isDark ? 'd' : 'l'}|${content}`
-function rememberHeight(key: string, height: number) {
+function rememberHeight(key: string, height: ReplyHeight) {
   knownHeights.set(key, height)
   if (knownHeights.size > 200) knownHeights.delete(knownHeights.keys().next().value as string)
 }
 
 /** Within this of the screen a reply is drawn; farther away its frame is taken down. */
 const NEAR_MARGIN = '600px 0px'
-const observers = new Map<Element | null, IntersectionObserver>()
+const observers = new Map<Element | null, { observer: IntersectionObserver; watching: number }>()
 const nearWatchers = new Map<Element, (near: boolean) => void>()
 function scrollParent(element: Element): Element | null {
   for (let el = element.parentElement; el; el = el.parentElement) {
@@ -32,19 +32,26 @@ function scrollParent(element: Element): Element | null {
   }
   return null
 }
-/** One observer per scrolling list (a margin on the window would be clipped by the list). */
+/** One observer per scrolling list (a margin on the window would be clipped by the list), gone with its last reply. */
 function watchNear(element: Element, onChange: (near: boolean) => void): () => void {
   const root = scrollParent(element)
-  let observer = observers.get(root)
-  if (!observer) {
-    observer = new IntersectionObserver(entries => {
-      for (const entry of entries) nearWatchers.get(entry.target)?.(entry.isIntersecting)
+  let entry = observers.get(root)
+  if (!entry) {
+    const observer = new IntersectionObserver(entries => {
+      for (const seen of entries) nearWatchers.get(seen.target)?.(seen.isIntersecting)
     }, { root, rootMargin: NEAR_MARGIN })
-    observers.set(root, observer)
+    entry = { observer, watching: 0 }
+    observers.set(root, entry)
   }
+  const watched = entry
+  watched.watching++
   nearWatchers.set(element, onChange)
-  observer.observe(element)
-  return () => { nearWatchers.delete(element); observer.unobserve(element) }
+  watched.observer.observe(element)
+  return () => {
+    nearWatchers.delete(element)
+    watched.observer.unobserve(element)
+    if (--watched.watching === 0) { watched.observer.disconnect(); observers.delete(root) }
+  }
 }
 
 export function ChatRichReply({ content, fallback, onOpenLarge }: {
@@ -60,7 +67,7 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
   const hostRef = useRef<HTMLDivElement>(null)
   const [near, setNear] = useState(false)
   const [width, setWidth] = useState(0)
-  const [height, setHeight] = useState<number | null>(null)
+  const [height, setHeight] = useState<ReplyHeight | null>(null)
   const [ready, setReady] = useState(false)
   const latest = useLatestRef({ content, isDark, follow, near })
   const draw = useRef({ shownDoc: '', running: false, again: false, lastStart: 0, timer: null as number | null, shown: null as HTMLIFrameElement | null })
@@ -99,13 +106,18 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
     state.lastStart = performance.now()
     try {
       const { content: text, isDark: dark } = latest.current
-      const frameContent = frameContentOf(richPiecesOf(text), dark)
+      const pieces = richPiecesOf(text)
+      const settled = !pieces.some(piece => piece.open)
+      const frameContent = frameContentOf(pieces, dark)
       const doc = frameDocument(frameContent, dark)
       const at = host.clientWidth
       const key = heightKey(at, dark, text)
-      const measured = knownHeights.get(key) ?? await measureReply(frameContent, at, dark)
-      rememberHeight(key, measured)
-      const visible = Math.min(measured, RICH_MAX_HEIGHT)
+      const measured = knownHeights.get(key) ?? await measureReply(frameContent, at, dark, settled)
+      // Not measured (no hidden copy): the ordinary rendering stays.
+      if (!measured || !measured.tallest) return
+      // A block still being written is measured again on every drawing: not kept.
+      if (settled) rememberHeight(key, measured)
+      const visible = Math.min(measured.tallest, RICH_MAX_HEIGHT)
       if (!hostRef.current || !latest.current.near) return
       if (doc !== state.shownDoc) {
         const next = shownFrame(visible, dark)
@@ -152,8 +164,9 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
   // A new height: follow the bottom if the list was following.
   useLayoutEffect(() => { if (height !== null) latest.current.follow() }, [height, latest])
 
-  const over = shownHeight !== null && shownHeight > RICH_MAX_HEIGHT
-  const boxHeight = shownHeight === null ? undefined : Math.min(shownHeight, RICH_MAX_HEIGHT)
+  // The line about the rest: when what is written, unopened, is past the stop.
+  const over = shownHeight !== null && shownHeight.shown > RICH_MAX_HEIGHT
+  const boxHeight = shownHeight === null ? undefined : Math.min(shownHeight.tallest, RICH_MAX_HEIGHT)
   return (
     <div data-rich-reply data-rich-reply-state={ready ? 'frame' : shownHeight !== null ? 'placeholder' : 'fallback'}>
       <div ref={wrapRef} className="relative" style={ready || shownHeight !== null ? { height: boxHeight } : undefined}>

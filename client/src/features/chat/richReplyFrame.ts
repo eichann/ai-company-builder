@@ -167,7 +167,9 @@ const FRAME_CSS = `
 export function frameDocument({ body, css }: FrameContent, isDark: boolean): string {
   const font = getComputedStyle(document.body).fontFamily.replace(/[<>{};]/g, '')
   return `<!doctype html><html lang="ja"${isDark ? ' class="dark"' : ''}><head>`
-    + `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}"><meta charset="utf-8"><base target="_blank">`
+    + `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}"><meta charset="utf-8">`
+    // No name lookups ahead of a press for the links' hosts (Blink does that on http pages).
+    + '<meta http-equiv="x-dns-prefetch-control" content="off"><base target="_blank">'
     + `<style>${appCss()}\nbody { font-family: ${font}; }\n${FRAME_CSS}</style><style>${css}</style></head>`
     + `<body><div class="acb-root ${CHAT_MARKDOWN_CLASS}">${body}</div></body></html>`
 }
@@ -187,10 +189,12 @@ export function shownFrame(height: number, isDark: boolean): HTMLIFrameElement {
 // --- the hidden copy that is measured ------------------------------------------------------------------------------
 
 let measurer: Promise<HTMLIFrameElement> | null = null
+let measurerFrame: HTMLIFrameElement | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
 function measureFrame(): Promise<HTMLIFrameElement> {
-  if (measurer) return measurer
+  // Made again if it was taken out of the page (a measure there would read 0 and hide the reply).
+  if (measurer && measurerFrame?.isConnected) return measurer
   measurer = new Promise(resolve => {
     const frame = document.createElement('iframe')
     // sandbox before srcdoc: the document is never parsed without it.
@@ -202,26 +206,34 @@ function measureFrame(): Promise<HTMLIFrameElement> {
     frame.style.cssText = 'position:fixed;left:-20000px;top:0;height:100px;border:0;visibility:hidden;pointer-events:none'
     frame.onload = () => resolve(frame)
     frame.srcdoc = frameDocument({ body: '', css: '' }, false)
+    measurerFrame = frame
     document.body.append(frame)
   })
   return measurer
 }
 
-/** At most this many radio choices are tried per reply (see `tallestState`). */
-const MAX_CHOICES = 24
+/** At most this many inputs are tried per reply, and only once it is written (see `tallestState`): the layouts run on the app's thread. */
+const MAX_INPUTS = 24
+
+export interface ReplyHeight {
+  /** As written: nothing opened or switched. */
+  shown: number
+  /** The tallest it becomes when the member opens or switches what it holds. */
+  tallest: number
+}
 
 /**
  * The tallest the reply can become when the member opens or switches what it holds — every `<details>` open, every
  * check box either way, each choice of each radio group —, as the shown frame cannot tell the chat it grew.
- * A reply with none of those is measured once.
  */
-function tallestState(root: HTMLElement): number {
+function tallestState(root: HTMLElement, shown: number): number {
   const measure = () => Math.ceil(root.getBoundingClientRect().height)
-  let tallest = measure()
   const details = Array.from(root.querySelectorAll('details'))
-  const boxes = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-  const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="radio"]')).slice(0, MAX_CHOICES)
-  if (!details.length && !boxes.length && !radios.length) return tallest
+  const inputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"], input[type="radio"]')).slice(0, MAX_INPUTS)
+  const boxes = inputs.filter(input => input.type === 'checkbox')
+  const radios = inputs.filter(input => input.type === 'radio')
+  if (!details.length && !inputs.length) return shown
+  let tallest = shown
   for (const d of details) d.open = true
   for (const checked of [true, false]) {
     for (const box of boxes) box.checked = checked
@@ -236,23 +248,29 @@ function tallestState(root: HTMLElement): number {
 }
 
 /**
- * How tall `content` is at `width` in the app's theme, at its tallest (`tallestState`): laid out in the hidden copy
- * (its pictures decoded first). One at a time. The copy is never pressed or hovered (inert, off screen) and runs
- * nothing (no `allow-scripts`, and the policy).
+ * How tall `content` is at `width` in the app's theme — as written, and (`settled`: the reply is written) at its
+ * tallest —, laid out in the hidden copy (its pictures decoded first), which is emptied again afterwards. One at a
+ * time. The copy is never pressed or hovered (inert, off screen) and runs nothing (no `allow-scripts`, and the policy).
  */
-export function measureReply(content: FrameContent, width: number, isDark: boolean): Promise<number> {
-  const run = async () => {
+export function measureReply(content: FrameContent, width: number, isDark: boolean, settled: boolean): Promise<ReplyHeight | null> {
+  const run = async (): Promise<ReplyHeight | null> => {
     const frame = await measureFrame()
     const doc = frame.contentDocument
     const root = doc?.querySelector<HTMLElement>('.acb-root')
     const styles = doc?.querySelectorAll('style')
-    if (!doc || !root || !styles || styles.length < 2) return 0
+    if (!doc || !root || !styles || styles.length < 2) return null
     frame.style.width = `${Math.max(1, Math.round(width))}px`
     doc.documentElement.classList.toggle('dark', isDark)
     styles[styles.length - 1].textContent = content.css
     root.innerHTML = content.body
-    await Promise.all(Array.from(root.querySelectorAll('img')).map(img => img.decode().catch(() => undefined)))
-    return tallestState(root)
+    try {
+      await Promise.all(Array.from(root.querySelectorAll('img')).map(img => img.decode().catch(() => undefined)))
+      const shown = Math.ceil(root.getBoundingClientRect().height)
+      return { shown, tallest: settled ? tallestState(root, shown) : shown }
+    } finally {
+      root.replaceChildren()
+      styles[styles.length - 1].textContent = ''
+    }
   }
   const result = queue.then(run, run)
   queue = result.catch(() => undefined)
