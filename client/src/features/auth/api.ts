@@ -25,7 +25,10 @@ export type AppLinkReads = ElectronPort<'getAppLinkServerOffer'>
  */
 export type AppLinkWrites = ElectronPort<'acceptAppLinkServer' | 'dismissAppLinkServer'>
 
-/** Signing in: the email and password are sent to the company server. */
+/**
+ * Signing in: the email and password are sent to the company server — only when `server` (the
+ * address the screen showed) is still this computer's server; main refuses otherwise.
+ */
 export type SignInOutbound = ElectronPort<'signIn'>
 /** Signing up: the email, password and name are sent and the server creates an account. */
 export type SignUpOutbound = ElectronPort<'signUp'>
@@ -65,8 +68,8 @@ export function dismissAppLinkServer(writes: AppLinkWrites = window.electronAPI)
   return writes.dismissAppLinkServer()
 }
 
-export function signIn(email: string, password: string, outbound: SignInOutbound = window.electronAPI) {
-  return outbound.signIn(email, password)
+export function signIn(email: string, password: string, server: string, outbound: SignInOutbound = window.electronAPI) {
+  return outbound.signIn(email, password, server)
 }
 
 export function signUp(email: string, password: string, name?: string, outbound: SignUpOutbound = window.electronAPI) {

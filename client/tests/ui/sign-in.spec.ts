@@ -69,6 +69,30 @@ test('a newer link replacing the address after the screen showed it: the old add
   expect(await callsOf(page, 'signIn')).toEqual([])
 })
 
+test('an address typed before a link came, whose check ends after ログイン on the link: not saved, the password goes only to the address on screen', async ({ page }) => {
+  const state = await openPreview(page, 'sign-in', { screen: 'server', accept: 'ok', validate: 'hold' })
+  await page.getByRole('button', { name: '招待のメールが見当たらないとき' }).click()
+  await page.getByLabel('会社のアドレス').fill('typed.example.com')
+  await page.getByRole('button', { name: '次へ' }).click()
+  await expect.poll(() => callsOf(page, 'validateServerUrl')).toHaveLength(1)
+  // The invitation's link arrives while the typed address is still being checked.
+  await page.evaluate(() => (window as unknown as { __acbSignIn: Control }).__acbSignIn.offer('https://invited.example.com'))
+  await expect(page.getByRole('region', { name: 'つなぎ先' })).toContainText('invited.example.com')
+  await signInWith(page)
+  await expect(page.getByRole('alert')).toHaveText('メールアドレスかパスワードが違います')
+  // Now the typed address's check answers: what started on the screen that is gone is not applied.
+  await page.evaluate(() => (window as unknown as { __acbSignIn: Control & { release: () => void } }).__acbSignIn.release())
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 50)))
+  await page.getByRole('button', { name: 'ログイン' }).click()
+  await expect.poll(() => callsOf(page, 'signIn')).toHaveLength(2)
+  expect(await callsOf(page, 'setServerUrl')).toEqual([])
+  // Each sign-in names the address on screen, so main can refuse when it is not the saved one.
+  expect((await callsOf(page, 'signIn')).map(call => call[2])).toEqual(['https://invited.example.com', 'https://invited.example.com'])
+  expect(await callsOf(page, 'passwordSentTo')).toEqual([['passwordSentTo', 'https://invited.example.com'], ['passwordSentTo', 'https://invited.example.com']])
+  expect(await callsOf(page, 'complete')).toEqual([])
+  expectNoPageErrors(state)
+})
+
 test('a wrong password after connecting stays on the same address and retries only the sign-in', async ({ page }) => {
   await openPreview(page, 'sign-in', { screen: 'offer', accept: 'ok' })
   await signInWith(page)
@@ -94,6 +118,8 @@ test('the login screen of a configured app shows where the password goes', async
   await expect(page.getByRole('heading', { name: 'ログイン' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'つなぎ先' })).toContainText('acb.example.com')
   await expect(page.getByRole('button', { name: 'つながない' })).toHaveCount(0)
+  await signInWith(page)
+  await expect.poll(() => callsOf(page, 'signIn')).toEqual([['signIn', 'yamada@example.com', 'https://acb.example.com']])
 })
 
 test('a newer link while the member types: the new address is said, and what was typed for the old one is cleared', async ({ page }) => {

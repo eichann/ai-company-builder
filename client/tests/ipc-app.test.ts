@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { commitRepo, git, loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harness/main-harness.ts'
 import type { ChatSession } from '../shared/chat-history'
+import { AUTH_SERVER_CHANGED } from '../electron/features/auth/ipc.ts'
 
 let h: MainHarness
 const LINK_ESCAPE = 'このファイル（またはフォルダ）は会社フォルダの外を指すリンク（シンボリックリンク）のため、アプリでは開いたり変更したりできません。'
@@ -156,6 +157,30 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
   h.server.offline = false
   assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null })
   assert.equal(h.server.to('/api/me').length, asked)
+})
+
+test('auth:signIn with the address the screen showed: sent only while it is this computer\'s server, else nothing leaves', async () => {
+  // The sign-in screens name the server they showed (ipc-and-main-process.md "The invitation's
+  // 「アプリを開く」"): a server saved meanwhile by another step (a typed address whose check finished
+  // late) must not receive the password the member typed for the address on screen.
+  const user = { id: 'u1', email: 'me@example.com', name: 'Me' }
+  h.server.on('POST', '/api/auth/sign-in/email', { json: { user }, headers: { 'Set-Cookie': 'better-auth.session_token=tok.shown; Path=/; HttpOnly' } })
+  h.server.on('GET', '/api/me', { json: { success: true, data: user } })
+  h.server.on('POST', '/api/auth/sign-out', { json: { success: true } })
+  const sent = () => h.server.to('/api/auth/sign-in/email').length
+  const before = sent()
+
+  for (const shown of ['https://invited.example.com', `${SERVER_URL}.evil.test`, `${SERVER_URL}/api`, '', 42, null]) {
+    assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'secret-pw', shown), { success: false, error: AUTH_SERVER_CHANGED }, String(shown))
+  }
+  assert.equal(sent(), before, 'no password left for a server other than the one on screen')
+  assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null })
+
+  // The address on screen is this computer's server (a trailing slash is the same address): signed in.
+  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'secret-pw', `${SERVER_URL}/`), { success: true })
+  assert.equal(sent(), before + 1)
+  assert.deepEqual(JSON.parse(h.server.to('/api/auth/sign-in/email').at(-1)!.body!), { email: 'me@example.com', password: 'secret-pw' })
+  await h.invoke('auth:signOut')
 })
 
 test('auth:signIn / auth:signUp never hand the session token (or anything of the answer) to the renderer', async () => {

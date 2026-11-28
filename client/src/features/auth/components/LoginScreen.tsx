@@ -14,7 +14,7 @@ export function LoginScreen({ serverUrl }: { serverUrl: string }) {
         note="招待されたメールアドレスでログインします"
         busy={isLoading}
         onSignIn={async (email, password) => {
-          const result = await signIn(email, password)
+          const result = await signIn(email, password, serverUrl)
           return result.success ? null : (result.error || 'ログインできませんでした')
         }}
       />

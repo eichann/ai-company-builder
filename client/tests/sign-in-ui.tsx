@@ -7,9 +7,11 @@
 //   ?theme=dark   dark mode (the `dark` class on <html>, as the app sets it)
 //   &accept=ok      the offered address is accepted (default: refused with a message)
 //   &signin=ok      sign-in succeeds (default: fails with a message, the error box)
+//   &validate=hold  a typed address's check answers only at window.__acbSignIn.release() (a slow server)
 // A server address containing "bad" is refused, any other is accepted. Calls the page made are
 // in window.__acbSignIn.calls; window.__acbSignIn.offer(server) changes the link's address (as a
 // newer link would) and accepting checks the address the screen passes against it, as main does.
+// Sign-in, like main, sends nothing when the address the screen names is not the one saved.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -24,25 +26,33 @@ if (params.get('theme') === 'dark') document.documentElement.classList.add('dark
 const screen = params.get('screen') ?? 'login'
 const calls: unknown[][] = []
 let offered: string | null = screen === 'offer' ? 'https://acb.example.com' : null
-;(window as unknown as { __acbSignIn: unknown }).__acbSignIn = { calls, offer: (server: string | null) => { offered = server } }
+// This computer's server (main's config): set by setServerUrl or an accepted link.
+let saved = screen === 'login' ? 'https://acb.example.com' : ''
+let release: () => void = () => {}
+const held = new Promise<void>(resolve => { release = resolve })
+;(window as unknown as { __acbSignIn: unknown }).__acbSignIn = { calls, offer: (server: string | null) => { offered = server }, release: () => release() }
 
 installElectronAPI({
   getServerUrl: async () => 'https://acb.example.com',
-  signIn: async email => {
-    calls.push(['signIn', email])
+  signIn: async (email, _password, server) => {
+    calls.push(['signIn', email, server])
+    if (server !== undefined && server !== saved) return { success: false, error: 'つなぎ先が変わったため、ログインしませんでした。' }
+    calls.push(['passwordSentTo', saved])
     return params.get('signin') === 'ok' ? { success: true } : { success: false, error: 'メールアドレスかパスワードが違います' }
   },
   getSession: async () => ({ success: true, user: { id: 'u1', email: 'yamada@example.com', name: '山田 太郎', image: null, emailVerified: true } }),
   validateServerUrl: async url => {
     calls.push(['validateServerUrl', url])
+    if (params.get('validate') === 'hold') await held
     return url.includes('bad') ? { valid: false, error: 'このアドレスの会社のサーバーが見つかりません' } : { valid: true }
   },
-  setServerUrl: async url => { calls.push(['setServerUrl', url]); return true },
+  setServerUrl: async url => { calls.push(['setServerUrl', url]); saved = url; return true },
   getAppLinkServerOffer: async () => (offered ? { server: offered } : null),
   acceptAppLinkServer: async shown => {
     calls.push(['acceptAppLinkServer', shown])
     if (shown !== offered) return { success: false, error: '招待のリンクが新しくなりました。' }
     if (params.get('accept') !== 'ok') return { success: false, error: 'つなげませんでした。' }
+    saved = offered
     offered = null
     return { success: true }
   },
