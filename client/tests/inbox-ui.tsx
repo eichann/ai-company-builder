@@ -122,7 +122,7 @@ const planView = (id: string): BrowserPlanView => ({
 
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
-// `?contact=own|draft|waiting|other|made|conflict|changed`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
+// `?contact=own|draft|waiting|other|made|conflict|changed|archived`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
 // with a notice; a fake server keeps the two records like the real one (one finish ends both, its undo brings both back,
 // `conflict` refuses the finish as 「先に変えた」). What a press sent shows in `#acted`. Synthetic data only.
 const CONTACT = params.get('contact')
@@ -226,6 +226,8 @@ function Preview() {
     getContact: async (_companyId, id) => (contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }),
     finishContact: async (_companyId, _id, input) => { setActed(`finish ${JSON.stringify(input)}`); return finishOnServer(input) },
     undoContactFinish: async (_companyId, _id, input) => { setActed(`undo ${JSON.stringify(input)}`); return undoOnServer(input) },
+    // `?contact=archived`: ACB archived the mail in Gmail right after the 「済んだ」 (its note follows the finish's entry 8).
+    getContactArchived: async (_companyId, _id, afterVersion) => ({ success: true, stays: CONTACT === 'archived' && afterVersion === 8 }),
   })
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({

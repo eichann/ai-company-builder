@@ -4,6 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createContactApi } from '../electron/features/inbox/contact-ipc'
+import { archiveStays } from '../shared/contact-card'
 
 type Sent = { url: string; method: string; body: unknown }
 function api(answer: (s: Sent) => { status: number; json: unknown } | 'down') {
@@ -71,4 +72,21 @@ test('only an explicit true from the server is a button the card may show', asyn
   // A view of the wrong shape is not shown as a contact.
   const { contact: broken } = api(() => ({ status: 200, json: { success: true, data: { interaction: { id: 'x' } } } }))
   assert.equal((await broken.read('co-1', 'interaction-bbb222')).success, false)
+})
+
+test('after ［取り消す］ the mail is said to stay archived only when the contact\'s ledger has ACB\'s archive note after the finish, not taken back', async () => {
+  const entry = (version: number, action: string, extra: Record<string, unknown> = {}) => ({ version, action, actorId: 'acb:inbox', ...extra })
+  const finishAt = 8
+  assert.equal(archiveStays([entry(8, 'settle', { actorId: 'u-me' }), entry(9, 'archived_there')], finishAt), true)
+  // An earlier archive (before this finish), one taken back since, one not by the inbox, or none: no line.
+  assert.equal(archiveStays([entry(5, 'archived_there'), entry(8, 'settle', { actorId: 'u-me' })], finishAt), false)
+  assert.equal(archiveStays([entry(9, 'archived_there'), entry(10, 'undo', { actorId: 'u-me', reversesVersion: 9 })], finishAt), false)
+  assert.equal(archiveStays([entry(9, 'archived_there', { actorId: 'u-me' })], finishAt), false)
+  assert.equal(archiveStays(null, finishAt), false)
+  // Main reads the contact's own history with the session, and says nothing when it cannot.
+  const { contact, sent } = api(s => (s.url.includes('interaction-bbb222') ? { status: 200, json: { success: true, data: { entries: [entry(9, 'archived_there')] } } } : { status: 404, json: {} }))
+  assert.deepEqual(await contact.archived('co-1', 'interaction-bbb222', 8), { success: true, stays: true })
+  assert.equal(sent[0].url, 'https://acb.example/api/companies/co-1/records/item/interaction-bbb222/history')
+  assert.deepEqual(await contact.archived('co-1', 'interaction-ccc333', 8), { success: false })
+  assert.deepEqual(await contact.archived('co-1', '../x', 8), { success: false })
 })

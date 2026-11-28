@@ -78,7 +78,7 @@ import type { WritingStyleResult } from './writing-style'
 import type { WritingAudience, WritingStyle } from '../../shared/core/writing-style'
 // lane A ▲
 // lane B ▼
-import type { ContactFinishAnswer, ContactFinishRequest, ContactReadResult, ContactUndoAnswer, ContactUndoRequest } from './contact-card'
+import type { ContactArchivedResult, ContactFinishAnswer, ContactFinishRequest, ContactReadResult, ContactUndoAnswer, ContactUndoRequest } from './contact-card'
 // lane B ▲
 // lane C ▼
 import type { BrowserActionResult, BrowserSitesResult } from './browser-operation'
@@ -950,6 +950,8 @@ export interface IpcInvokeChannels {
   'inbox:contact': { args: [companyId: string, recordId: string]; result: ContactReadResult }
   'inbox:finishContact': { args: [companyId: string, interactionId: string, input: ContactFinishRequest]; result: ContactFinishAnswer }
   'inbox:undoContact': { args: [companyId: string, interactionId: string, input: ContactUndoRequest]; result: ContactUndoAnswer }
+  // After that ［取り消す］: whether the mail stays archived in Gmail (ACB's archive note after the finish's entry `afterVersion`).
+  'inbox:contactArchived': { args: [companyId: string, interactionId: string, afterVersion: number]; result: ContactArchivedResult }
   // lane B ▲
   // lane C ▼
   /** 「ブラウザ操作」: the member's sites now (empty when off, unknown or unreadable; main window only). */
@@ -1458,6 +1460,7 @@ export interface ElectronAPI {
   getContact: Invoke<'inbox:contact'>
   finishContact: Invoke<'inbox:finishContact'>
   undoContactFinish: Invoke<'inbox:undoContact'>
+  getContactArchived: Invoke<'inbox:contactArchived'>
   // lane B ▲
   // lane C ▼
   getBrowserSites: Invoke<'browser:sites'>

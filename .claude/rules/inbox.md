@@ -494,7 +494,12 @@ pressing each record's own action.
   (both or neither); a press that did not reach the server (or whose answer was lost) says to check what is shown and
   offers ［もう一度送る］ — the same request; the server answers `already` for a part it wrote, with the entry to undo — and
   an undo not reached keeps ［取り消す］; two clicks before the next draw are one press; every press reads the contact again,
-  answered or not. ［詳しく見る］ opens the 来た連絡's record card. A contact with no
+  answered or not. **After ［取り消す］ of a contact ACB archived in Gmail** (owner decision 2026-11-29: Gmail is not put
+  back) the words add 「メールは Gmail でアーカイブされたままです」 — decided from the server's ledger only: IPC
+  `inbox:contactArchived(companyId, interactionId, afterVersion)` reads `GET /records/item/:id/history` with the session and
+  `archiveStays` (`client/shared/contact-card.ts`) looks for an `archived_there` by `INBOX_ACTOR` after the finish's own entry
+  and not taken back; asked only when the contact's part was in the undo; not known → no line. Tests:
+  `contact-ipc.test.ts`, `contactPress.test.ts`, `contact-card.spec.ts` (`?contact=archived`). ［詳しく見る］ opens the 来た連絡's record card. A contact with no
   返事のお願い has no button here (its ［済んだ］ / ［取り込まない］ stay on the record card).
 - **One row** (`model.ts`): a notice about an `interaction` or a `reply_request` whose contact the store has read becomes
   the row `contact:<interaction id>` (`asContact`: source 「連絡」, the contact's title, `openContact`); its badge is the

@@ -2,12 +2,14 @@
 //   inbox:contact        the contact as the member reads it (GET …/inbox/items/:id/contact; a 返事のお願い's id works too)
 //   inbox:finishContact  the card's ［返した］/［済んだ］: the 返事のお願い's end and the contact's 「済んだ」, both or neither
 //   inbox:undoContact    its ［取り消す］: both entries taken back, both or neither
+//   inbox:contactArchived  after it: whether the mail stays archived in Gmail (the contact's history: ACB's archive note
+//                        written after the finish and not taken back)
 // The server decides who may do what and answers only what the member reads; main checks the shapes and adds nothing.
 // Nothing of a contact is logged (only the status and the code).
 import { RECORD_ID_RE } from '../../../../shared/core/records'
 import {
-  CONTACT_OFFLINE_TEXT, readContactView, readFinishResult, readUndoResult,
-  type ContactFinishAnswer, type ContactFinishRequest, type ContactReadResult, type ContactRefusal, type ContactUndoAnswer, type ContactUndoRequest,
+  archiveStays, CONTACT_OFFLINE_TEXT, readContactView, readFinishResult, readUndoResult,
+  type ContactArchivedResult, type ContactFinishAnswer, type ContactFinishRequest, type ContactReadResult, type ContactRefusal, type ContactUndoAnswer, type ContactUndoRequest,
 } from '../../../shared/contact-card'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -105,6 +107,14 @@ export function createContactApi(deps: ContactDeps) {
       return result ? { success: true, result } : refusal('finish', a)
     },
 
+    /** After ［取り消す］: does the mail stay archived in Gmail (the contact's ledger, read with the session)? */
+    async archived(companyId: unknown, interactionId: unknown, afterVersion: unknown): Promise<ContactArchivedResult> {
+      if (typeof companyId !== 'string' || !COMPANY.test(companyId) || !recordId(interactionId) || !version(afterVersion)) return { success: false }
+      const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(interactionId)}/history`)
+      if (a?.status !== 200) { refusal('history', a); return { success: false } }
+      return { success: true, stays: archiveStays((a.json?.data as { entries?: unknown } | undefined)?.entries, afterVersion) }
+    },
+
     async undo(companyId: unknown, interactionId: unknown, input: unknown): Promise<ContactUndoAnswer> {
       const body = undoBody(input)
       if (typeof companyId !== 'string' || !COMPANY.test(companyId) || !recordId(interactionId) || !body) return BAD_INPUT
@@ -120,4 +130,5 @@ export function registerContactIpc(ipc: IpcRegistrar, deps: ContactDeps): void {
   ipc.handle('inbox:contact', (_event, companyId, id) => api.read(companyId, id))
   ipc.handle('inbox:finishContact', (_event, companyId, interactionId, input) => api.finish(companyId, interactionId, input))
   ipc.handle('inbox:undoContact', (_event, companyId, interactionId, input) => api.undo(companyId, interactionId, input))
+  ipc.handle('inbox:contactArchived', (_event, companyId, interactionId, afterVersion) => api.archived(companyId, interactionId, afterVersion))
 }

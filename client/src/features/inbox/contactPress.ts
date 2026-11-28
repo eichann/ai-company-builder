@@ -2,7 +2,7 @@
 // answered, refused or not reached alike. Bound to the company era it started in (shared/lib/companyEra.ts): an answer that
 // comes back after a company change or a sign-out says nothing and reads nothing (the request itself was the last
 // company's and stays so). Pure TypeScript: the card hands in its ports and what it shows.
-import type { ContactFinishAnswer, ContactFinishRequest, ContactReplyEnd, ContactUndoAnswer, ContactUndoRequest } from '../../../shared/contact-card'
+import { STILL_ARCHIVED_TEXT, type ContactFinishAnswer, type ContactFinishRequest, type ContactReplyEnd, type ContactUndoAnswer, type ContactUndoRequest } from '../../../shared/contact-card'
 import { finishedWords, refusalWords, undoneWords, undoRequestOf } from './contactModel'
 import { SCREEN_ERA, type EraPort } from './contactStore'
 
@@ -35,11 +35,23 @@ export async function pressFinish(send: (request: ContactFinishRequest) => Promi
   deps.reread()
 }
 
-export async function pressUndo(send: (request: ContactUndoRequest) => Promise<ContactUndoAnswer>, request: ContactUndoRequest, deps: PressDeps): Promise<void> {
+/**
+ * `stillArchived`: after the contact's own part came back, whether its mail stays archived in Gmail (the server's
+ * ledger: ACB's archive note after the finish) — then the words say so (owner decision 2026-11-29: Gmail is not put back).
+ */
+export async function pressUndo(send: (request: ContactUndoRequest) => Promise<ContactUndoAnswer>, request: ContactUndoRequest,
+  deps: PressDeps & { stillArchived?: (afterVersion: number) => Promise<boolean> }): Promise<void> {
   const era = deps.era ?? SCREEN_ERA
   const started = era.now()
   const r = await send(request)
   if (!era.holds(started)) return
+  const after = r.success && r.result.interaction && request.interaction ? request.interaction.version : null
+  if (after !== null && deps.stillArchived && await deps.stillArchived(after)) {
+    if (!era.holds(started)) return
+    deps.say({ text: `${undoneWords((r as Extract<ContactUndoAnswer, { success: true }>).result)}。${STILL_ARCHIVED_TEXT}`, refused: false, undo: null })
+    deps.reread()
+    return
+  }
   // A refused undo keeps nothing to undo (the card reads again and offers what is true now); one that did not reach the
   // server keeps ［取り消す］ to press again (the server answers `already` for a part taken back meanwhile).
   deps.say(r.success ? { text: undoneWords(r.result), refused: false, undo: null } : { text: refusalWords(r, 'undo'), refused: true, undo: r.offline ? request : null })

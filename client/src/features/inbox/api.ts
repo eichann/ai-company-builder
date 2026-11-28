@@ -14,8 +14,8 @@ export async function hasFullAccessIn(companyId: string, reads: CompanyRoleReads
   return role === undefined ? null : role === 'owner' || role === 'admin'
 }
 
-/** Reading one contact (an interaction, or a 返事のお願い of it). */
-export type ContactReads = ElectronPort<'getContact'>
+/** Reading one contact (an interaction, or a 返事のお願い of it), and whether its mail stays archived in Gmail. */
+export type ContactReads = ElectronPort<'getContact' | 'getContactArchived'>
 /** Ending a contact's 返事のお願い with its 「済んだ」, and taking that back: both records or neither (the server's). */
 export type ContactWrites = ElectronPort<'finishContact' | 'undoContactFinish'>
 
@@ -24,6 +24,11 @@ const UNREACHED = { success: false as const, gone: false, offline: true, error: 
 export function readContact(companyId: string, recordId: string, reads: ContactReads = window.electronAPI): Promise<ContactReadResult> {
   // No answer at all (an older main without the channel) reads as not reached, never as a contact.
   return reads.getContact(companyId, recordId).then(r => r ?? UNREACHED, () => UNREACHED)
+}
+
+/** Not known (offline, an older main) → false: the card says nothing rather than something wrong. */
+export function contactMailStaysArchived(companyId: string, interactionId: string, afterVersion: number, reads: ContactReads = window.electronAPI): Promise<boolean> {
+  return reads.getContactArchived(companyId, interactionId, afterVersion).then(r => !!r?.success && r.stays, () => false)
 }
 
 const NOT_SENT = { ...UNREACHED, code: null, part: null }

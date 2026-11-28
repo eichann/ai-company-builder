@@ -4,7 +4,7 @@ import { Button, StatusBadge, type StatusBadgeVariant } from '../../../shared/ui
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { CALM, NEXT_STEP } from '../../../../shared/thing-words'
-import { finishContact, undoContactFinish, type ContactWrites } from '../api'
+import { contactMailStaysArchived, finishContact, undoContactFinish, type ContactReads, type ContactWrites } from '../api'
 import { contactLook, finishRequestOf, type ContactButton, type ContactTone } from '../contactModel'
 import { pressFinish, pressUndo, type ContactResend, type ContactSaid } from '../contactPress'
 import type { ContactStore, EraPort } from '../contactStore'
@@ -19,6 +19,8 @@ interface Props {
   /** Read again each time it changes (the card opened). */
   readKey: string
   writes?: ContactWrites
+  /** Whether the mail stays archived in Gmail after ［取り消す］ (the contact's ledger). */
+  reads?: ContactReads
   /** A member's name (the task list's), null when not known. */
   nameOf?: (memberId: string) => string | null
   onOpenTask: (taskId: string) => void
@@ -37,7 +39,7 @@ const TONE: Record<ContactTone, StatusBadgeVariant> = { info: 'info', ai: 'ai', 
  * the contact together (both or neither: the server's). Only the buttons the server says the member may press are shown.
  * Knows no frame: it is drawn wherever it is placed (the inbox's card window today, the 連絡 destination later).
  */
-export function ContactCard({ companyId, contactId, store, readKey, writes, nameOf, onOpenTask, onCheckDraft, onOpenRecord, era }: Props) {
+export function ContactCard({ companyId, contactId, store, readKey, writes, reads, nameOf, onOpenTask, onCheckDraft, onOpenRecord, era }: Props) {
   const entry = useContacts(store, companyId, [`${contactId}@${readKey}`]).get(contactId)
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<ContactSaid | null>(null)
@@ -71,7 +73,9 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, name
   const undo = () => run(async () => {
     if (!said?.undo) return
     // At the versions the finish answered (`undoRequestOf`): a change made in between refuses it on the server.
-    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), said.undo, { era, say: setSaid, reread })
+    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), said.undo, {
+      era, say: setSaid, reread, stillArchived: after => contactMailStaysArchived(companyId, view.interaction.id, after, reads),
+    })
   })
   const press = (b: ContactButton) => {
     if (b.kind === 'checkDraft') onCheckDraft(b.draftId)

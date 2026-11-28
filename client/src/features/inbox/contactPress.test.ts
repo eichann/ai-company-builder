@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { endCompanyEra } from '../../shared/lib/companyEra'
-import type { ContactFinishAnswer, ContactReadResult, ContactUndoAnswer, ContactView } from '../../../shared/contact-card'
+import type { ContactFinishAnswer, ContactReadResult, ContactUndoAnswer, ContactUndoRequest, ContactView } from '../../../shared/contact-card'
 import { pressFinish, pressUndo, type ContactSaid } from './contactPress'
 import { createContactStore } from './contactStore'
 
@@ -120,4 +120,24 @@ test('a ［返した］ whose answer was lost can be sent again as it was; a ref
   await pressFinish(async () => ({ success: false, offline: true, gone: false, code: null, part: null, error: 'つながりません' }), press, deps)
   await pressFinish(async () => ({ success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'interaction', error: '先に変えました' }), press, deps)
   assert.deepEqual(said.map(s => s.resend), [press, undefined])
+})
+
+test('the 「Gmail でアーカイブされたまま」 line is asked after the contact came back, at its finish entry, and shown only when the ledger says so', async () => {
+  const both = { interaction: { version: 8, expectedVersion: 8 }, replyRequest: { id: 'reply_request-aaa111', version: 5, expectedVersion: 5 } }
+  const back: ContactUndoAnswer = { success: true, result: {
+    interaction: { recordId: 'interaction-bbb222', outcome: 'done', state: 'unsure', recordVersion: 9, version: 9 },
+    replyRequest: { recordId: 'reply_request-aaa111', outcome: 'done', state: 'preparing', recordVersion: 6, version: 6 },
+  } }
+  const asked: number[] = []
+  const run = async (stays: boolean, request: ContactUndoRequest = both, answer = back) => {
+    const said: ContactSaid[] = []
+    await pressUndo(async () => answer, request, { say: s => said.push(s), reread: () => {}, stillArchived: async v => { asked.push(v); return stays } })
+    return said[0].text
+  }
+  assert.match(await run(true), /元に戻しました（返事のお願いも連絡も）。メールは Gmail でアーカイブされたままです/)
+  assert.doesNotMatch(await run(false), /Gmail/)
+  // Only the 返事のお願い came back (the contact was not this finish's): Gmail is not asked.
+  const replyOnly: ContactUndoAnswer = { success: true, result: { interaction: null, replyRequest: back.success ? back.result.replyRequest : null! } }
+  assert.doesNotMatch(await run(true, { replyRequest: both.replyRequest }, replyOnly), /Gmail/)
+  assert.deepEqual(asked, [8, 8])
 })

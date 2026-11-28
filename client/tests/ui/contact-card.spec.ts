@@ -51,6 +51,18 @@ test('with a draft the main button checks and sends it; ［返した（下書き
   await expect(page.locator('#acted')).toHaveText('')
 })
 
+test('［取り消す］ of a contact ACB archived in Gmail says the mail stays archived; one never archived says nothing of Gmail', async ({ page }) => {
+  for (const [scene, stays] of [['archived', true], ['own', false]] as const) {
+    await openPreview(page, 'inbox', { contact: scene })
+    await openCard(page)
+    await card(page).getByRole('button', { name: '返した', exact: true }).click()
+    await card(page).getByRole('button', { name: '取り消す' }).click()
+    await expect(card(page).getByRole('status')).toContainText('元に戻しました（返事のお願いも連絡も）')
+    if (stays) await expect(card(page).getByRole('status')).toContainText('メールは Gmail でアーカイブされたままです')
+    else await expect(card(page).getByRole('status')).not.toContainText('Gmail')
+  }
+})
+
 test('one press of ［返した］ ends both records; ［取り消す］ brings both back', async ({ page }) => {
   const state = await openPreview(page, 'inbox', { contact: 'own' })
   await openCard(page)

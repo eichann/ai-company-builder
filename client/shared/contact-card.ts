@@ -2,6 +2,7 @@
 // the server's view as read (checked, nothing added or left out) — and the answers of 「返した」/「済んだ」 and its
 // ［取り消す］. Pure: main checks the server's answer here, the renderer reads the same shapes.
 import { RECORD_ID_RE } from '../../shared/core/records'
+import { INBOX_ACTIONS, INBOX_ACTOR } from '../../shared/core/core-types'
 import type { ContactFinishResult, ContactPartResult, ContactReplyView, ContactUndoResult, ContactView } from '../../shared/types/inbox'
 
 export type { ContactFinishRequest, ContactFinishResult, ContactPartResult, ContactReplyEnd, ContactUndoRequest, ContactUndoResult, ContactView, ContactReplyView } from '../../shared/types/inbox'
@@ -99,6 +100,24 @@ export function readFinishResult(v: unknown): ContactFinishResult | null {
   const interaction = partOf(r?.interaction)
   const replyRequest = partOf(r?.replyRequest)
   return interaction && replyRequest ? { interaction, replyRequest } : null
+}
+
+/** Whether the contact's mail stays archived in Gmail after its finish was taken back (owner decision 2026-11-29). */
+export type ContactArchivedResult = { success: true; stays: boolean } | { success: false }
+
+/** The line the card adds then: the undo does not put the mail back (the archive's own notice does). */
+export const STILL_ARCHIVED_TEXT = 'メールは Gmail でアーカイブされたままです'
+
+/**
+ * From the contact's ledger as the server answers it: the inbox's 「Gmail でもアーカイブしました」 (`archived_there`, by
+ * `INBOX_ACTOR`) written after the finish's own entry (`afterVersion`) and not taken back since. Anything that is not
+ * exactly such an entry says nothing (no line rather than a wrong one).
+ */
+export function archiveStays(entries: unknown, afterVersion: number): boolean {
+  if (!Array.isArray(entries)) return false
+  const list = entries.filter((e): e is { action: unknown; actorId: unknown; version: unknown; reversesVersion?: unknown } => !!record(e))
+  return list.some(e => e.action === INBOX_ACTIONS.archivedThere && e.actorId === INBOX_ACTOR.id && typeof e.version === 'number' && e.version > afterVersion
+    && !list.some(u => u.action === 'undo' && u.reversesVersion === e.version))
 }
 
 export function readUndoResult(v: unknown): ContactUndoResult | null {

@@ -479,6 +479,7 @@ const api: ElectronAPI = {
   getContact: (companyId: string, recordId: string) => invoke('inbox:contact', companyId, recordId),
   finishContact: (companyId: string, interactionId: string, input: ContactFinishRequest) => invoke('inbox:finishContact', companyId, interactionId, input),
   undoContactFinish: (companyId: string, interactionId: string, input: ContactUndoRequest) => invoke('inbox:undoContact', companyId, interactionId, input),
+  getContactArchived: (companyId: string, interactionId: string, afterVersion: number) => invoke('inbox:contactArchived', companyId, interactionId, afterVersion),
   // lane B ▲
   // lane C ▼
   getBrowserSites: (companyId: string) => invoke('browser:sites', companyId),
