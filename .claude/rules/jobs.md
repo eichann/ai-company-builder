@@ -2144,10 +2144,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   (schema 5 refused), the routes test (a consultation's and a run's token 401, the session 200), permission matrix row +
   `CROSS`. Mutation check: 14 guards removed or inverted one at a time (the body's shape, the first look at the candidate,
   the reader check before the fingerprint, schema 4 only, the look again in the write, the submit's fingerprint again in its
-  write, the repository's compare-and-set and its discarded exclusion); each fails a test except: the fingerprint check in
+  write, the repository's compare-and-set and its discarded exclusion, `rightsFit` in the write — a shelf Skill's place lost
+  while the places are asked, after the independent review); each fails a test except: the fingerprint check in
   the write and the compare-and-set (each alone suffices; both removed fail 「two changes sent at once」), the first
-  fingerprint check (the write's check answers the same; it only saves the git reads), `rightsFit` in the write (the
-  places check reads the rights again after the awaits, as in the create: defence) and the `actingUser` check (the
+  fingerprint check (the write's check answers the same; it only saves the git reads) and the `actingUser` check (the
   candidate is read by its creator, who is always its responsible person: defence).
 - **The zone** (owner decision 2026-11-22): the candidate's view says `timeZone` — the company's zone as the clock uses it
   (`JobProposalDeps.timeZoneOf`, today `DEFAULT_COMPANY_TIME_ZONE` for every company: there is no per-company setting yet) —

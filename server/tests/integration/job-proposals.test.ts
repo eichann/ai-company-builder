@@ -704,6 +704,14 @@ describe('revise: the member changes the card in place, the server builds and ch
       expect(await revise(carol, c, { minutes: 30 })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
     } finally { between = null; db.prepare("DELETE FROM scope_rules WHERE id = 'jp-sales-c'").run() }
     expect(stored(c.id).fingerprint).toBe(c.fingerprint)
+    // The shelf Skill's place lost after it was pinned, while the places are asked: only the rights check in the write sees it.
+    const shelf = proposalsWith({ folder: false })
+    const s = ok(await shelf.createCandidate(alice, null, input({ skill: 'shelf-1' })))
+    duringGit = () => { shelfHidden = true }
+    try {
+      expect(await shelf.revise(alice, s.id, { fingerprint: s.fingerprint, input: input({ skill: 'shelf-1', minutes: 30 }) })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    } finally { duringGit = null; shelfHidden = false }
+    expect(stored(s.id).fingerprint).toBe(s.fingerprint)
   })
 })
 
