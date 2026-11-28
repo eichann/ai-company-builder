@@ -853,6 +853,25 @@ test('raw HTML is judged as the Markdown reader reads it: a tag broken over line
   assert.equal(saved(spliced, view), text, 'nothing was written')
 })
 
+test('an image on the internet the passage did not have is never taken from the AI; the passage\'s own and an image beside the document are', () => {
+  const text = '# メモ\n\n図のとおりです。![旧図](https://example.com/old.png)\n\n次の行はそのまま。\n'
+  const { spliced, view } = open(text)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '図のとおり'))!
+  const refused = { ok: false, reason: 'remoteImage' }
+  const cases: Array<[string, string]> = [
+    ['a new https image', '図のとおりです。![旧図](https://example.com/old.png)![](https://tracker.example/p.png?d=1)'],
+    ['http, in capitals', '図のとおりです。![図](HTTP://tracker.example/p.png)'],
+    ['without a scheme', '図のとおりです。![図](//tracker.example/p.png)'],
+    ['by reference', '図のとおりです。![図][p]\n\n[p]: https://tracker.example/p.png'],
+    ['inside a link', '[![図](https://tracker.example/p.png)](images/a.png) 図のとおりです。'],
+    ['in a table cell', '| 図 |\n|---|\n| ![](https://tracker.example/p.png) |'],
+  ]
+  for (const [what, fix] of cases) assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, fix), refused, what)
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '図のとおりでございます。![旧図](https://example.com/old.png)').ok, 'the passage\'s own')
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '図のとおりです。![新図](images/20261129-120000.png)').ok, 'an image beside the document')
+  assert.equal(saved(spliced, view), text, 'nothing was written')
+})
+
 test('a comment\'s quote finds the block holding it; the fix shown under it is never written', async () => {
   const host = document.createElement('div')
   document.body.appendChild(host)

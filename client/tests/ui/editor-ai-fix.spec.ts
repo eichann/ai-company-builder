@@ -88,14 +88,20 @@ test('asking hands over only the passage and a little around it; the fix shows r
   await expect.poll(() => saved(page)).toBe(TEXT.replace('までに送る', 'までにお送りします'))
 })
 
-test('the fix is drawn as the chat draws a reply (no image loaded); raw HTML the passage did not have is never offered', async ({ page }) => {
+test('the fix is drawn as the chat draws a reply (no image loaded); raw HTML or an image on the internet the passage did not have is never offered', async ({ page }) => {
   await open(page)
   await ask(page, '来週は研修です', '3行に縮めて')
-  await answer(page, { ok: true, reply: '```acb-fix\n予定です。**研修**です。![図](https://example.com/t.png)\n```' })
+  await answer(page, { ok: true, reply: '```acb-fix\n予定です。**研修**です。![図](images/図.png)\n```' })
   await expect(card(page).locator('[data-ai-fix-preview] strong')).toHaveText('研修')
   await expect(card(page).locator('[data-ai-fix-preview]')).toContainText('画像「図」')
   expect(await card(page).locator('[data-ai-fix-preview] img').count()).toBe(0)
   await card(page).getByRole('button', { name: 'やめる' }).click()
+
+  await ask(page, '来週は研修です', '3行に縮めて')
+  await answer(page, { ok: true, reply: '```acb-fix\n予定です。![](https://tracker.example/p.png)\n```' })
+  await expect(card(page)).toContainText('文書になかったインターネット上の画像が入っている')
+  await expect(card(page).getByRole('button', { name: '採用' })).toHaveCount(0)
+  await card(page).getByRole('button', { name: '閉じる' }).click()
 
   await ask(page, '来週は研修です', '3行に縮めて')
   await answer(page, { ok: true, reply: '```acb-fix\n予定です。<img src=x onerror="window.__pwned=1"><b>太</b>\n```' })

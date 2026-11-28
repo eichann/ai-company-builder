@@ -110,9 +110,9 @@ export type InPlaceFixPreview =
   | { ok: true; removed: string[]; added: string[] }
   /**
    * `changed`: the document changed since the passage was taken; `unwritable`: the fix cannot be written faithfully;
-   * `html`: the fix brings raw HTML the passage did not have.
+   * `html`: the fix brings raw HTML the passage did not have; `remoteImage`: an image on the internet it did not have.
    */
-  | { ok: false; reason: 'changed' | 'unwritable' | 'html' }
+  | { ok: false; reason: 'changed' | 'unwritable' | 'html' | 'remoteImage' }
 
 export type InPlaceOpening = { ok: true; surface: InPlaceSurface } | { ok: false; reason: InPlaceRefusal }
 

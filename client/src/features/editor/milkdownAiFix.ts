@@ -38,6 +38,19 @@ function firstTextPos(doc: PMNode, index: number): number {
   try { return start + 1 + Selection.atStart(doc.child(index)).from } catch { return start + 1 }
 }
 
+/** Addresses of the images on the internet in `nodes` (http, https, or `//host`); an image beside the document is not one. */
+function remoteImages(nodes: readonly PMNode[]): string[] {
+  const out: string[] = []
+  for (const n of nodes) {
+    n.descendants(d => {
+      const src = d.type.name === 'image' ? String(d.attrs.src ?? '').trim() : ''
+      if (/^(https?:)?\/\//i.test(src)) out.push(src)
+      return true
+    })
+  }
+  return out
+}
+
 /** Where top-level node `index` starts in `doc`. */
 function nodeStart(doc: PMNode, index: number): number {
   let pos = 0
@@ -89,6 +102,10 @@ export function fixedDocument(view: EditorView, spliced: SplicedDocument, shown:
   // A fix that takes the passage away entirely is not a fix the card offers.
   const nodes = markdown.trim() ? spliced.read(markdown) : null
   if (!nodes || nodes.length === 0) return { ok: false as const, reason: 'unwritable' as const }
+  // Nor an image on the internet the passage did not have (a planted instruction's tracking image: the document is
+  // opened elsewhere too). Read as the reader reads it, so a reference-style image counts.
+  const ownImages = new Set(remoteImages(spliced.read(passage.markdown) ?? []))
+  if (remoteImages(nodes).some(src => !ownImages.has(src))) return { ok: false as const, reason: 'remoteImage' as const }
   const doc = view.state.doc
   const from = nodeStart(doc, passage.at.nodeFrom)
   const to = nodeStart(doc, passage.at.nodeTo)

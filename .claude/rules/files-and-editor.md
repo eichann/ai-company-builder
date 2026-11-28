@@ -634,7 +634,10 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   have (the preview never shows them — a tracking image, a hidden link: judged by the editor's own Markdown reader,
   `SplicedDocument.rawHtml` — every `html` node at any depth, tags, comments and HTML blocks, compared whole — never by a
   pattern, so a tag broken over lines or attributes, in capitals or slipped into a comment is HTML all the same, and a
-  tag written as code is words), or is empty. Two faithful ways are
+  tag written as code is words), an image on the internet the passage did not have (owner decision 2026-11-29: a
+  planted instruction's tracking image — the document is opened on other computers and in other apps; `remoteImages` over
+  the nodes the reader made, so a reference-style image counts: `http:`, `https:` or `//host`; the passage's own and an
+  image beside the document, `images/…`, are taken), or is empty. Two faithful ways are
   tried — the AI's Markdown as written over the passage (`writeSource`: reads back as the screen shows, neighbours keep their
   bytes) and the write-back's smallest edit (`write`) — and the one changing fewer lines is written (a tie: the AI's), so a
   list the AI rewrote with `-` bullets changes only the line whose words changed, and a table is written as the AI wrote
@@ -656,12 +659,13 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   the next block's start and to a list's first words; a `-` list fix written as its one `*` line; 「表にして」 written as
   the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; raw HTML read by the reader — a tag over lines,
   a line break in an attribute, capitals, a tag beside or inside the passage's own comment, a new comment, an HTML block, a tag in a
-  table cell refused, the passage's own HTML and a tag in code kept; a comment's quote → its block; the card
+  table cell refused, the passage's own HTML and a tag in code kept; a new image on the internet — https, HTTP, `//host`,
+  by reference, inside a link, in a table — refused, the passage's own and `images/…` kept; a comment's quote → its block; the card
   shown in the flow and not written), `tests/inline-fix.test.ts` (the message's outside-text blocks, a passage that spells a
   footer, the ask as a quoted line, the comment as outside text, the command's limits, `contextAround`, the answer's
   block, `restoreBrackets`, the pane's answer read strictly, a turn answering only its own request),
   `tests/ui/editor-ai-fix.spec.ts` (asking hands over the passage only and the card stands right after the list;
-  ［採用］ writes one line; the fix drawn without raw HTML or script; ［やめる］ before and after the answer, the dropped answer,
+  ［採用］ writes one line; the fix drawn without raw HTML or script, a new image on the internet refused; ［やめる］ before and after the answer, the dropped answer,
   a refusal; typing meanwhile and a change from outside refused; with edits not saved, a change from outside before the answer and a
   delete after it refused, the edits kept, nothing written; a completed review's comment → its words handed over, the
   fix adopted, no reply file, the review file byte for byte, ［レビューに戻る］), `tests/ui/chat-panel.spec.ts` 「chat.askToFix…」
