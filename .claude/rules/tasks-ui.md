@@ -473,7 +473,9 @@ state the server's type allows it from — reply_request v5: every open state, t
 included; an older server's type (返事をする / 返事待ち only) shows it only there — and in 「…」
 **［もう返した］** (`replied_elsewhere`), each at the card's version (refused → the card reads again);
 ［取り消す］ after 終わりにする (not after もう返した, whose drafts were put away). Tasks-list rows have no menu
-for it. Test: `record-card.spec.ts` (「a 返事のお願い in the AI's turn …」, `?record=reply`, `&type=v4`).
+for it. Test: `record-card.spec.ts` (「a 返事のお願い in the AI's turn …」, `?record=reply`, `&type=v4`). The inbox shows the
+two as one card 「連絡」 whose ［返した］/［済んだ］ ends both in one press and whose ［取り消す］ brings both back, drafts included
+(`inbox.md` "One contact in the app"); this record card is unchanged.
 A **案件・プロジェクト** (any type implementing `bundle`, `bundleDetailOf`): なんのため (`purpose`), 責任者
 (`owner`, else `assignee`), 進み具合 (its やること done of all), its approval requests still waiting as
 the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんなのやること** by whose turn —

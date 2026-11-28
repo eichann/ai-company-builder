@@ -442,10 +442,15 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
   reading it moves on uncounted (「AI が読んでいます…」); finished it is 新着 again until looked at on this PC
   (`onMeetingSeen`, the minutes feature's closed list); 「あと1日で読めなくなります」 on one still waiting from its second day.
   A notice kind 「読み終わりました」 does not exist on the server: none was added (the look is per PC, like the banner's ×).
+- **「連絡」1枚** (UX stage 2 「5番」, `inbox.md` "One contact in the app"): the notices about a 来た連絡 and its 返事のお願い are
+  one row `contact:<interaction id>` (source 「連絡」, the card's status as its badge) that opens the contact's card; never a
+  row of the 返事のお願い alone once the contact is read (`GET …/inbox/items/:id/contact`, the only read the inbox adds: the
+  records its newest notices name, ≤ 30). A contact whose reply is over with a やること left is in 「確認したもの」.
 - **Visibility is the server's**: every row comes from `/records/my-turn`, `/me/notifications`, the arrivals and the plans,
-  which already left out what the member cannot read; the inbox never filters on the client instead. AppShell is keyed by
-  company and `useNotices` drops another company's answer. **Nothing is stored** (`inboxView` rebuilds every answer; no new
-  server table, API or IPC).
+  which already left out what the member cannot read (and the contacts, read the same way); the inbox never filters on the
+  client instead. AppShell is keyed by company and `useNotices` drops another company's answer; a contact's read or press
+  answered after a company change shows nothing (the company era). **Nothing is stored** (`inboxView` rebuilds every
+  answer; no new server table; the contact IPC of `inbox.md` is the only addition).
 - **Nothing irreversible from a row**: `InboxAction` has no approve or send — ［承認する…］ / ［開く…］ open the approval card
   (`ApprovalCard`), ［確かめて送る…］ the mail draft card, a plan's ［承認する…］ / ［確かめる…］ its card (`InboxCardDialog`).
   The type test in `model.test.ts` and the hook's exhaustive switch fail to compile when an action kind that approves,
