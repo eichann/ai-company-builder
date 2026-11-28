@@ -1,5 +1,5 @@
 /**
- * The settings panel's "ダウンロードするフォルダ" draft: which folders the
+ * The settings panel's 「この PC に置くフォルダ」 draft: which folders the
  * member wants left out, edited as a tree of tri-state checkboxes and applied
  * in one go. Pure — the main process applies it (electron/sync/sparse.ts).
  *

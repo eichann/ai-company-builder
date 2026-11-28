@@ -666,7 +666,7 @@ export interface IpcInvokeChannels {
   'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
   /** Turn it on / off (off: nothing is counted or asked). */
   'jobRepeatAsks:set': { args: [companyId: string, on: boolean]; result: JobRepeatAskSetting }
-  // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
+  // AI に任せること → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
   /** The member's switches (+ the company's 使ってよいか / 初めの値). */
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
   /** Turn one on / off (a switch the company does not allow cannot be turned on: `WORK_SWITCH_COMPANY_OFF`). */
@@ -1293,7 +1293,7 @@ export interface ElectronAPI {
   createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
   getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
   setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
-  // 自分の設定 → 「受信を読む」「AI が自動で進める」.
+  // AI に任せること → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>
   // 見られる人 for the lists.

@@ -1,4 +1,4 @@
-// Folder listing with sizes for the settings panel's "ダウンロードするフォルダ"
+// Folder listing with sizes for the settings panel's 「この PC に置くフォルダ」
 // tree, one level at a time.
 //
 // Sizes come from the server (GET /api/companies/:id/folder-sizes): a partial

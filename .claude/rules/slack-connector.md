@@ -182,7 +182,7 @@ switches"), or no longer members. Taking broadcasts in for every member later ne
   戻り先 and the fixed 知らせの届け先 with 「コピー」, the note that Token Rotation stays off, the
   practice / operator / vault notices, 「メンバーの許可」 with 「止める」 (confirmation). Test:
   `admin/tests/integrations.test.tsx` 「つなぎ先 → Slack」.
-- App 設定 →「Slack」 (tab after 「Google」 in 「AI と連携」: `SlackSection.tsx`, `hooks/useSlack.ts`,
+- App 設定 →「Slack」 (after 「Google」 in 「つないでいるサービス」: `SlackSection.tsx`, `hooks/useSlack.ts`,
   ports `SlackReads` / `SlackOutbound` in `features/settings/api.ts`; words and the view in
   `client/shared/slack.ts`). Main: `client/electron/features/slack/ipc.ts` (registered under
   lane A in `main.ts`) — `slack:status`, `slack:connect(companyId, features)`,

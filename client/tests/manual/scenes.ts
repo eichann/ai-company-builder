@@ -774,7 +774,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-download-folders',
-    about: '設定 →「ダウンロードするフォルダ」: sizes, what is downloaded, 過去資料 left out.',
+    about: '設定 →「この PC に置くフォルダ」: sizes, what is downloaded, 過去資料 left out.',
     page: 'download-folders',
     query: { manual: '1' },
     steps: [{ waitFor: 'text=/をダウンロード済み/' }],
@@ -1569,7 +1569,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-my-switches',
-    about: '設定 →「自分の設定」: 「AI が自動で進める」, 「受信を読む」 and 「AI から定期の仕事を提案してもらう」.',
+    about: '設定 →「AI に任せること」: 「AI が自動で進める」, 「受信を読む」 and 「AI から定期の仕事を提案してもらう」.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 1000 },
@@ -1663,7 +1663,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'broker-key-card',
-    about: 'In a consultation: 「Google Gemini の鍵がありません」 with the way to 設定 →「自分の鍵」.',
+    about: 'In a consultation: 「Google Gemini の鍵がありません」 with the way to 設定 →「Claude・Gemini などの鍵」.',
     page: 'broker-key-card',
     viewport: { width: 900, height: 700 },
     steps: [{ waitFor: 'role=group[name="Google Gemini の鍵がありません"] >> role=button' }],
@@ -1674,7 +1674,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-own-keys',
-    about: '設定 →「自分の鍵」: the key stays on the company server; ［自分の鍵を登録］.',
+    about: '設定 →「Claude・Gemini などの鍵」: the key stays on the company server; ［自分の鍵を登録］.',
     page: 'download-folders',
     query: { tab: 'ownkeys', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 700 },
@@ -2054,9 +2054,9 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-today-tabs',
-    about: '設定 →「自分の設定」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
+    about: '設定 →「AI に任せること」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
     ...EXTRA,
-    steps: [{ click: ME }, { click: menuItem('設定') }, { click: 'role=dialog >> role=button[name=/自分の設定/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
+    steps: [{ click: ME }, { click: menuItem('設定') }, { click: 'role=dialog >> role=button[name=/AI に任せること/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
     crop: { region: { x: 380, y: 185, width: 760, height: 280 } },
     annotations: [
       { box: 'role=combobox[name="今日のフォルダを置く部署"]' }, { marker: { target: 'role=combobox[name="今日のフォルダを置く部署"]', label: '1', at: 'left' } },
@@ -2431,7 +2431,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'settings-mine-company-off',
-    about: '設定 →「自分の設定」 when the company turned 受信を読む off: greyed, 「会社の設定で止まっています」.',
+    about: '設定 →「AI に任せること」 when the company turned 受信を読む off: greyed, 「会社の設定で止まっています」.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', company: 'off' },
     viewport: { width: 1100, height: 800 },
@@ -2501,36 +2501,36 @@ export const scenes: Scene[] = [
   // ── 44章 設定の見取り図と、アカウント ──────────────────────────────────
   {
     id: 'settings-nav',
-    about: 'The top of the settings\' list of sections: あなた, 同期, AI と連携.',
+    about: 'The top of the settings\' list of sections: AI, つないでいるサービス, 知らせ.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
     viewport: { width: 1100, height: 800 },
-    steps: [{ waitFor: 'role=button[name="自分の設定"]' }],
+    steps: [{ waitFor: 'role=button[name="AI に任せること"]' }],
     crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
     annotations: [
-      { marker: { target: 'text="あなた"', label: '1', at: 'right' } },
-      { marker: { target: 'text="同期"', label: '2', at: 'right' } },
-      { marker: { target: 'text="AI と連携"', label: '3', at: 'right' } },
+      { marker: { target: 'text="AI"', label: '1', at: 'right' } },
+      { marker: { target: 'text="つないでいるサービス"', label: '2', at: 'right' } },
+      { marker: { target: 'text="知らせ"', label: '3', at: 'right' } },
     ],
   },
   {
     id: 'settings-nav-more',
-    about: 'The settings\' list scrolled to its end: the three settings for the company\'s technical staff, 仕事 and 入力.',
+    about: 'The settings\' list scrolled to its end with 詳しい設定 opened: ファイルと同期 and the three settings for the company\'s technical staff.',
     page: 'download-folders',
     query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
     viewport: { width: 1100, height: 800 },
     steps: [
-      { waitFor: 'role=button[name="自分の設定"]' },
+      { waitFor: 'role=button[name="AI に任せること"]' },
+      { click: 'role=button[name="詳しい設定"]' },
       // The list scrolls inside the window (its height stays the same).
       { run: 'for (const el of document.querySelectorAll(\'nav[aria-label="設定の項目"] *\')) if (el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight' },
       SETTLE,
     ],
     crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
     annotations: [
-      { box: 'role=button[name="APIキー（このPC）"]' }, { box: 'role=button[name="環境変数（.env）"]' }, { box: 'role=button[name="AIに渡す環境変数"]' },
-      { marker: { target: 'role=button[name="環境変数（.env）"]', label: '4', at: 'right' } },
-      { marker: { target: 'text="仕事"', label: '5', at: 'right' } },
-      { marker: { target: 'text="入力"', label: '6', at: 'right' } },
+      { marker: { target: 'text="ファイルと同期"', label: '4', at: 'right' } },
+      { box: 'role=button[name="同期しないファイル"]' }, { box: 'role=button[name="API キー・環境変数（この PC）"]' }, { box: 'role=button[name="AIに渡す環境変数"]' },
+      { marker: { target: 'role=button[name="詳しい設定"]', label: '5', at: 'right' } },
     ],
   },
   {
@@ -2568,9 +2568,9 @@ scenes.push(
   forAdminGuide('browser-plan-card', 'admin-app-plan-card'),
   {
     id: 'admin-app-env-move',
-    about: '設定 →「APIキー（このPC）」: the note that it is for older apps, and ［この鍵をサーバーに移す］ for a key in the .env.',
+    about: '設定 →「API キー・環境変数（この PC）」: the note that it is for older apps, and ［この鍵をサーバーに移す］ for a key in the .env.',
     page: 'download-folders',
-    query: { tab: 'apikeys', manual: '1', role: 'member' },
+    query: { tab: 'envkeys', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 760 },
     steps: [{ waitFor: 'role=button[name="この鍵をサーバーに移す"]' }, SETTLE],
     crop: { target: 'role=dialog', padding: 0 },

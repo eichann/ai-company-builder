@@ -1,4 +1,4 @@
-// ACB foundation (settings: 自分の設定's row; app: 「今日のフォルダを開く」, the task card's new file, the
+// ACB foundation (settings: AI に任せること's row; app: 「今日のフォルダを開く」, the task card's new file, the
 // chat's instructions): which department holds the member's 今日のフォルダ, per company on this PC
 // (localStorage). Unset = the default (client/shared/today-folder.ts `todayFolderDepartment`).
 

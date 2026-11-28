@@ -1,7 +1,7 @@
 import type { MyWorkSwitches, WorkSwitch } from '../../shared/types/work-switches'
 
 /**
- * 自分の設定 → 「受信を読む」「AI が自動で進める」 (owner decision 2026-11-02) and
+ * AI に任せること → 「受信を読む」「AI が自動で進める」 (owner decision 2026-11-02) and
  * 「AI に完了を頼めるようにする」 (owner decision 2026-11-26, the member's alone; records.md "The AI at the
  * member's request"; shared/core/work-switches.ts): the member's own switches, read and changed
  * with the member's session in main (IPC `workSwitches:*`).
@@ -12,10 +12,10 @@ import type { MyWorkSwitches, WorkSwitch } from '../../shared/types/work-switche
 
 export type { MyWorkSwitches, WorkSwitch }
 
-/** Each switch's name, as 自分の設定 shows it; other screens that point to a switch say this name. */
+/** Each switch's name, as AI に任せること shows it; other screens that point to a switch say this name. */
 export const WORK_SWITCH_NAMES: Readonly<Record<WorkSwitch, string>> = { readIncoming: '受信を読む', autoRun: 'AI が自動で進める', aiCompletes: 'AI に完了を頼めるようにする' }
 
-export const WORK_SWITCHES_OFFLINE_TEXT = 'サーバーにつながらないため、いまは自分の設定を読み込めません。つながると自動で読み直します。'
+export const WORK_SWITCHES_OFFLINE_TEXT = 'サーバーにつながらないため、いまは「AI に任せること」の設定を読み込めません。つながると自動で読み直します。'
 export const WORK_SWITCH_COMPANY_OFF_TEXT = '会社の設定で止まっています'
 
 export type WorkSwitchesFailure = { success: false; offline: boolean; code: string | null; error: string }
@@ -33,7 +33,7 @@ export function companyHasMailOrChat(switches: Pick<MyWorkSwitches, 'channels'>)
   return !switches.channels || switches.channels.mail || switches.channels.chat
 }
 
-/** 自分の設定's one line in place of 受信を読む while the company has neither (where connecting starts). */
+/** AI に任せること's one line in place of 受信を読む while the company has neither (where connecting starts). */
 export const CONNECT_MAIL_CHAT_TEXT = {
   title: 'Gmail・Slack をつなぐと、返事の追いかけを AI がします',
   body: '来た連絡から「返事のお願い」を作り、返事が来ないときは催促の下書きを用意します。管理者が会社の Google か Slack をつなぐと、ここでオンにできます。',

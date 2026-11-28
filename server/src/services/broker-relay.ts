@@ -444,7 +444,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
 
       // 1. The token, before anything else (no token → 401, whatever the path).
       const builtin = builtinBrokerService(req.service) ?? null
-      const realKey = () => jsonError(401, 'ACB_REAL_KEY_REFUSED', '本物の API キーが送られてきたため、送らずに止めました。鍵はスクリプトや .env に書かず、ACB に預けてください（管理者に頼むか、設定の『自分の鍵』から登録）。')
+      const realKey = () => jsonError(401, 'ACB_REAL_KEY_REFUSED', '本物の API キーが送られてきたため、送らずに止めました。鍵はスクリプトや .env に書かず、ACB に預けてください（管理者に頼むか、設定の『Claude・Gemini などの鍵』から登録）。')
       if (credentialValues(req.headers, query).includes(BROKER_NO_KEY_PLACEHOLDER)
         || (!builtin && req.headers.some(([, v]) => v.trim().endsWith(BROKER_NO_KEY_PLACEHOLDER)))) {
         // The app had no key for this member and service: say so in plain Japanese.

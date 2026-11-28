@@ -202,7 +202,7 @@ client/src/features/settings/components/MoveEnvKeysCard.tsx palette-color=14 whi
 client/src/features/settings/components/MySwitchesSection.tsx palette-color=8 white-black=1
 client/src/features/settings/components/OwnKeysSection.tsx arbitrary-value=1 palette-color=19 white-black=4
 client/src/features/settings/components/PromptSuggestionSettings.tsx palette-color=6
-client/src/features/settings/components/SettingsPanel.tsx arbitrary-value=2 opacity-scale=1 palette-color=49 type-scale=3 white-black=8 z-index=1
+client/src/features/settings/components/SettingsPanel.tsx arbitrary-value=2 z-index=1
 client/src/features/settings/components/SlackSection.tsx palette-color=7 white-black=1
 client/src/features/settings/components/TidyTabsSetting.tsx palette-color=3
 client/src/features/settings/components/TodayFolderSetting.tsx arbitrary-value=1 palette-color=17 white-black=2

@@ -111,7 +111,7 @@ export function useMeetingInboxRows({ companyId, items, aiTurns, onView, onChang
     if (!r.success) { say({ text: r.error || 'できませんでした。' }); return }
     suggestion.answered(r)
     say({
-      text: '社外の人がいる会議は、次から AI が自動で読みます（設定 →「自分の設定」で変えられます）',
+      text: '社外の人がいる会議は、次から AI が自動で読みます（設定 →「AI に任せること」で変えられます）',
       undo: () => void setMeetingAutoRead(companyId, 'off').then(back => { if (back.success) suggestion.answered(back); else say({ text: back.error }) }),
     })
   }

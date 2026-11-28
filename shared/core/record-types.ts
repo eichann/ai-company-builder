@@ -414,7 +414,7 @@ export const AI_ASKED_SETTING_WORDS: readonly string[] = [
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
 export const AI_ASKED_REFUSALS = {
   /** The member's own setting is off (asked only for an action that ends the record: `aiAskedNeedsSetting`). */
-  off: { code: 'AI_ASK_OFF', error: `「AI に完了を頼めるようにする」がオフのため、AI からはできません（${AI_ASKED_SETTING_WORDS.join('・')}）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。` },
+  off: { code: 'AI_ASK_OFF', error: `「AI に完了を頼めるようにする」がオフのため、AI からはできません（${AI_ASKED_SETTING_WORDS.join('・')}）。設定の「AI に任せること」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。` },
   /** The AI's undo outside a turn the member started (a plain token, a run). */
   undoNotAsked: { code: 'NOT_ALLOWED', error: '取り消しは、メンバー本人がこの会話で頼んだときだけ AI からできます。' },
   /** The AI's undo of someone else's change. */

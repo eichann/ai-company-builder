@@ -206,7 +206,7 @@ export function createTidyStore(storage: () => KeyValue | null) {
       write(DAY_KEY(companyId), today)
       return read(AUTO_KEY) !== 'off' && dueForDailyTidy(last, today)
     },
-    /** The daily tidy's switch (自分の設定), per Mac; on unless turned off. */
+    /** The daily tidy's switch (AI に任せること), per Mac; on unless turned off. */
     dailyTidyOn: () => read(AUTO_KEY) !== 'off',
     setDailyTidy: (on: boolean) => { write(AUTO_KEY, on ? null : 'off'); notify() },
     noticeShown: () => read(NOTICE_KEY) === '1',

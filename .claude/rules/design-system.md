@@ -545,7 +545,7 @@ fine), `color-opacity` (`bg-warning/10`).
   the half pixels above.
 - **Guarded by** `client/tests/ui/sizes-type-corners.spec.ts` (light and dark: the Button's two sizes and
   secondary colours, the confirm's / name dialog's / new folder dialog's buttons, the switches' size and
-  colours in 「自分の設定」 and 自動同期, the tri-state and native check boxes, the settings' left list —
+  colours in 「AI に任せること」 and 自動同期, the tri-state and native check boxes, the settings' left list —
   each against what its token resolves to on the page) and `admin/tests/switch-and-corners.test.tsx`
   (the generated CSS of the admin `Switch`, the native check box rule). Each fails with its change
   reverted (checked by mutation).

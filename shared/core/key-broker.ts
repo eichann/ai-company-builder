@@ -484,7 +484,7 @@ const NO_KEY_MARKER = /\[ACB_NO_KEY:([a-z0-9][a-z0-9_-]{0,39})\]/g
 /** The relay's plain-Japanese answer when no key may be used, with the marker for the app. */
 export function brokerNoKeyMessage(label: string, service: string): string {
   const marker = isValidBrokerServiceName(service) ? ` [ACB_NO_KEY:${service}]` : ''
-  return `この作業には ${label} の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。${marker}`
+  return `この作業には ${label} の鍵が必要です。管理者に頼むか、設定の『Claude・Gemini などの鍵』から登録してください。${marker}`
 }
 
 /** Services named by "needs a key" markers in a text (first seen first, each once). */

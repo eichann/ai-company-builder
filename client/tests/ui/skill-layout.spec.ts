@@ -406,8 +406,10 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   await page.getByRole('button', { name: 'あなたのメニュー' }).click()
   await expect(page.getByRole('menuitem', { name: 'バックアップ履歴' })).toHaveCount(0)
   await page.getByRole('menuitem', { name: '設定' }).click()
-  await expect(page.getByRole('button', { name: '自分の設定' })).toBeVisible()
-  for (const name of ['ダウンロードするフォルダ', '自動同期', '同期しないファイル']) await expect(page.getByRole('button', { name })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'AI に任せること' })).toBeVisible()
+  await page.getByRole('button', { name: '詳しい設定' }).click()
+  await expect(page.getByRole('button', { name: 'API キー・環境変数（この PC）' })).toBeVisible()
+  for (const name of ['この PC に置くフォルダ', '自動同期', '同期しないファイル']) await expect(page.getByRole('button', { name })).toHaveCount(0)
   expect(await calls(page, 'gitSync')).toEqual([])
 })
 

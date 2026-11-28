@@ -21,7 +21,7 @@ export function OwnKeysSection({ companyId, focusService, unsavedRef }: { compan
   const setSecret = (service: string, value: string) => setSecrets(prev => ({ ...prev, [service]: value }))
   useImperativeHandle(unsavedRef, () => ({
     pending: () => typed.length === 0 ? null
-      : `自分の鍵（${typed.map(([service]) => data?.services.find(x => x.service === service)?.label ?? service).join('、')}）の入力`,
+      : `Claude・Gemini などの鍵（${typed.map(([service]) => data?.services.find(x => x.service === service)?.label ?? service).join('、')}）の入力`,
     save: async () => {
       for (const [service, secret] of typed) {
         const result = await save(service, secret)
@@ -35,7 +35,7 @@ export function OwnKeysSection({ companyId, focusService, unsavedRef }: { compan
   return (
     <div className="space-y-5 px-8 pb-8 pt-7">
       <SectionHeader
-        title="自分の鍵"
+        title="Claude・Gemini などの鍵"
         description="AI が Skill の中で外部サービス（Gemini・OpenAI など）を使うときの鍵です。鍵は会社のサーバーで暗号化して預かり、このPCにも AI にも渡しません。AI には短い時間だけ使える通行証が渡されます。"
       />
       {loading && !data ? (

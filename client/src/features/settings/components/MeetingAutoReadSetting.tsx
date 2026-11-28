@@ -1,4 +1,4 @@
-// 設定 → 自分の設定 →「届いた議事録を AI が自動で読む」 (4b-4 design memo 1.1, minutes.md): the member's
+// 設定 → AI に任せること →「届いた議事録を AI が自動で読む」 (4b-4 design memo 1.1, minutes.md): the member's
 // own choice of which arriving meetings their AI reads without a press. Hidden when the server does
 // not answer it (an older server, records off). A member who never chose and starts at 「自動では読まない」
 // is told what is recommended (D1-1); picking 「全部」 says once that past per-series 「読まない」 are gone (D1-4).

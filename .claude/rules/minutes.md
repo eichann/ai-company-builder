@@ -464,7 +464,7 @@ or the decision service stops calling it, or another module uses the older per-m
 - **「届いた議事録を AI が自動で読む」 in the app** (4b-4 A2b; owner decisions D1-1…D1-4): main's
   `minutes:autoRead` / `minutes:setAutoRead` (`GET|PUT /me/minutes/auto-read`, session; an answer that is
   not 200 with a known mode → `{ success: false, error: '' }`: the setting stays hidden, quietly; an
-  unknown mode is never sent). **Settings** → 自分の設定 (`features/settings/components/MeetingAutoReadSetting.tsx`):
+  unknown mode is never sent). **Settings** →「AI に任せること」 (`features/settings/components/MeetingAutoReadSetting.tsx`):
   the three choices (`MEETING_AUTO_READ_CHOICES`, 「社外の人がいる会議だけ（おすすめ）」 first) with
   `MEETING_AUTO_READ_NOTE` (this PC's AI; a closed PC reads when it opens; Claude Code only); a member who
   never chose and starts at 自動では読まない (`suggestsAutoRead`) is told the recommendation; picking

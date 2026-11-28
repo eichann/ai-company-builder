@@ -72,7 +72,8 @@ test.describe('settings', () => {
 
   test('APIキー: a saved key shows only 「設定済み（末尾 …）」; a save sends typed keys and removals only', async ({ page }) => {
     await openPreview(page, 'download-folders')
-    await page.getByRole('button', { name: 'APIキー' }).click()
+    await page.getByRole('button', { name: '詳しい設定' }).click()
+    await page.getByRole('button', { name: 'API キー・環境変数（この PC）' }).click()
     const anthropic = page.getByRole('textbox', { name: 'Anthropic', exact: true })
     await expect(anthropic).toHaveValue('')
     await expect(anthropic).toHaveAttribute('placeholder', '設定済み（末尾 ab12）。変更するときだけ入力')
@@ -85,9 +86,10 @@ test.describe('settings', () => {
     expect(updates).toEqual([{ OPENAI_API_KEY: 'sk-FAKE-typed', ANTHROPIC_API_KEY: null }])
   })
 
-  test('APIキー（このPC）: says it is for older apps, and moves a built-in key to the server (last 4 only)', async ({ page }) => {
+  test('API キー・環境変数（この PC）: says it is for older apps, and moves a built-in key to the server (last 4 only)', async ({ page }) => {
     await openPreview(page, 'download-folders')
-    await page.getByRole('button', { name: 'APIキー' }).click()
+    await page.getByRole('button', { name: '詳しい設定' }).click()
+    await page.getByRole('button', { name: 'API キー・環境変数（この PC）' }).click()
     await expect(page.getByText('古い版のアプリや、特別な場合のための画面です')).toBeVisible()
     const row = page.getByRole('listitem', { name: 'Anthropic（Claude API）（ANTHROPIC_API_KEY）' })
     await expect(row).toContainText('末尾 ab12')
@@ -137,6 +139,7 @@ test.describe('settings', () => {
   test('同期しないファイル: a member reads the list but cannot change it; an admin can', async ({ page }) => {
     const textarea = () => page.getByRole('textbox', { name: '.gitignore の内容' })
     await openPreview(page, 'download-folders', { role: 'member' })
+    await page.getByRole('button', { name: '詳しい設定' }).click()
     await page.getByRole('button', { name: '同期しないファイル' }).click()
     await expect.poll(() => page.evaluate(() => (window as unknown as { __acbRoleAnswered?: boolean }).__acbRoleAnswered)).toBe(true)
     await expect(textarea()).toHaveValue(/node_modules\//)
@@ -145,12 +148,29 @@ test.describe('settings', () => {
     await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
 
     await openPreview(page, 'download-folders', { role: 'admin' })
+    await page.getByRole('button', { name: '詳しい設定' }).click()
     await page.getByRole('button', { name: '同期しないファイル' }).click()
     await expect(textarea()).toBeEditable()
     await expect(page.getByText('会社全体に効くので、変えられるのは管理者だけです。')).toHaveCount(0)
     await textarea().fill('node_modules/\n*.tmp\n')
     await page.getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as unknown as { __acbWrites?: unknown[] }).__acbWrites)).toEqual([['/Users/demo/会社/.gitignore', 'node_modules/\n*.tmp\n']])
+  })
+
+  // An admin's editor opens only once the file itself arrived: typing before it would be overwritten,
+  // and saving after a failed read would replace the company's file with just that text.
+  test('同期しないファイル: an admin edits only after the file arrived; never after a failed read', async ({ page }) => {
+    const textarea = () => page.getByRole('textbox', { name: '.gitignore の内容' })
+    await openPreview(page, 'download-folders', { role: 'admin', tab: 'gitignore', gitignore: 'slow' })
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __acbRoleAnswered?: boolean }).__acbRoleAnswered)).toBe(true)
+    await expect(textarea()).not.toBeEditable()
+    await expect(textarea()).toHaveValue(/node_modules\//)
+    await expect(textarea()).toBeEditable()
+
+    await openPreview(page, 'download-folders', { role: 'admin', tab: 'gitignore', gitignore: 'fail' })
+    await expect(page.getByText('読み込めませんでした')).toBeVisible()
+    await expect(textarea()).not.toBeEditable()
+    await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
   })
 })
 

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
-// Preview page for the "ダウンロードするフォルダ" settings and the file tree's
+// Preview page for the settings (opening on 「この PC に置くフォルダ」) and the file tree's
 // 未ダウンロード placeholders, with the preload API mocked (no Electron, no
 // git, no server). Open /tests/download-folders-ui.html?view=…&theme=…&state=…
 //
@@ -8,7 +8,8 @@
 //   state  normal (default) | offline | slow (apply takes long) | confirm
 //          (leaving out a folder with local edits) | applyOffline (download fails)
 //   role   owner (default) | admin | member — the member's role in the company
-//   tab    a settings section to open first (default: ダウンロードするフォルダ; mine = 自分の設定)
+//   tab    a settings section to open first (src/features/settings/sections.ts; default: sync = この PC に置くフォルダ;
+//          mine = AI に任せること, envkeys = API キー・環境変数（この PC）, input = 入力（音声・候補）)
 //   company  the company's 受信を読む: allowed (default) | off | later (stopped after the page read it:
 //            shown allowed, turning it on is refused with WORK_SWITCH_COMPANY_OFF)
 //   mail   no = Google has not let ACB read the member's mail yet
@@ -36,12 +37,14 @@ import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { SettingsPanel } from '../src/features/settings/components/SettingsPanel'
+import type { SettingsUnsavedAsk } from '../src/features/settings/unsaved'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { dispatchFileChanges } from '../src/shared/lib/fileEvents'
 import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
 import { setWatchProposalDefinition } from '../../shared/core/job-proposals'
 import { JOB_SET_WATCH_OPENED } from '../../shared/core/jobs'
 import type { BrowserOperatorToolset } from '../shared/browser-operator-toolset-choice'
+import { DEFAULT_VOICE_INSTRUCTIONS } from '../shared/voice-prompt'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
@@ -204,11 +207,18 @@ type RecView =
   | { state: 'recording'; host: string; lines: number; notes: string[] }
   | { state: 'review'; host: string; lines: typeof REC_LINES; message: string | null; notes: string[]; words: Array<{ word: string; count: number }>; hosts: Array<{ host: string; loaded: boolean }>; titles: { lines: string; words: string; hosts: string } }
 let rec: RecView = { state: 'none', message: null, notes: [REC_NOTE] }
+let voicePrompt: string | null = null
 const recAnswer = () => ({ ok: true as const, view: rec })
 
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
+    // 「入力（音声・候補）」: the voice instructions as main would keep them (default until changed).
+    voiceInput: {
+      getPrompt: async () => ({ instructions: voicePrompt ?? DEFAULT_VOICE_INSTRUCTIONS, isDefault: voicePrompt === null }),
+      setPrompt: async (value: string) => { voicePrompt = value; return { instructions: value, isDefault: false } },
+      resetPrompt: async () => { voicePrompt = null; return { instructions: DEFAULT_VOICE_INSTRUCTIONS, isDefault: true } },
+    },
     // 「ブラウザ操作」: `?browser=1` gives the member one site (else the company has it off); `?browser=clearFails` fails 「ログインを消す」;
     // `?browser=kept` keeps its login on this PC.
     getBrowserSites: async () => ({ sites: params.get('browser') ? [{ host: 'manager.example.net', ...(params.get('browser') === 'kept' ? { kept: true } : params.get('browser') === 'observe' ? { notKeptBySandbox: true } : {}) }] : [] }),
@@ -321,7 +331,14 @@ Object.assign(window, {
         return { success: true, proposal: { id: `jp.${'c'.repeat(32)}`, jobId: `job.${'2'.repeat(32)}`, proposerId: 'u-yamada', candidateId, submittedVersion: 1, submittedFingerprint: fingerprint, state: 'submitted', returnReason: null, decidedBy: null, decidedAt: null, createdAt: '2026-11-24T06:00:00.000Z' } }
       },
     } : {}),
+    // 「つないでいるサービス」: a server without 「わたしの書き方に合わせる」 (the check is not offered).
+    getWritingStyle: async () => ({ success: false, error: '' }),
     listOwnBrokerKeys: async () => ({ success: true, data: ownKeys }),
+    // A typed own key: the server keeps it (encrypted) and answers the list with its last 4 only.
+    saveOwnBrokerKey: async (_companyId: string, service: string, secret: string) => {
+      ownKeys.services = ownKeys.services.map(x => (x.service === service ? { ...x, key: { id: `k-${service}`, displayName: '自分の鍵', last4: secret.slice(-4), hosts: x.ownKey.hosts, status: 'active', secretUpdatedAt: '2026-11-20T01:30:00.000Z' } } : x)) as typeof ownKeys.services
+      return { success: true, data: { ...ownKeys, check: { service, result: 'valid' } } }
+    },
     // Main reads the value, sends it and removes it from the .env once the server kept it.
     moveEnvKeyToServer: async (_companyId: string, _root: string, name: string) => {
       ;((window as unknown as { __acbMoved: unknown[] }).__acbMoved ??= []).push(name)
@@ -333,13 +350,23 @@ Object.assign(window, {
       ;(window as unknown as { __acbRoleAnswered: boolean }).__acbRoleAnswered = true
       return { success: true, data: [{ id: 'demo', name: COMPANY_NAME, slug: 'demo', ownerId: 'u1', repoPath: null, role, createdAt: '', updatedAt: '' }] }
     },
-    readFile: async () => '.backups/\n.env*\nnode_modules/\n',
+    // ?gitignore=slow: the file arrives after the member's role (an admin's editor must wait for it); fail: it cannot be read.
+    readFile: async () => {
+      if (params.get('gitignore') === 'slow') await sleep(1500)
+      if (params.get('gitignore') === 'fail') throw new Error('読み込めませんでした')
+      return '.backups/\n.env*\nnode_modules/\n'
+    },
     writeFile: async (p: string, content: string) => {
       ;((window as unknown as { __acbWrites: unknown[] }).__acbWrites ??= []).push([p, content])
       return true
     },
     updateEnv: async (_root: string, changes: Record<string, string | null>) => {
       ;((window as unknown as { __acbEnvUpdates: unknown[] }).__acbEnvUpdates ??= []).push(changes)
+      // As main answers env:status afterwards: set or not, the last 4 of a long value, never the value.
+      for (const [name, value] of Object.entries(changes)) {
+        if (value === null) delete envVars[name]
+        else envVars[name] = value.length >= 12 ? { set: true, last4: value.slice(-4) } : { set: true }
+      }
       return { success: true }
     },
     getDepartments: async () => ({ success: true, data: DEPARTMENTS }),
@@ -395,6 +422,10 @@ Object.assign(window, {
 
 useAppStore.setState({ currentCompany: { id: 'demo', name: COMPANY_NAME, rootPath: ROOT, departments: [], createdAt: new Date() } })
 
+// What the settings have typed and not saved, asked from outside them (settings-sections.spec.ts).
+const settingsUnsaved: { current: SettingsUnsavedAsk | null } = { current: null }
+;(window as unknown as { __settingsUnsaved: typeof settingsUnsaved }).__settingsUnsaved = settingsUnsaved
+
 function Preview() {
   const [settingsOpen, setSettingsOpen] = useState(params.get('closed') !== '1')
   if (view === 'filetree') {
@@ -410,7 +441,7 @@ function Preview() {
   return (
     <main className="h-screen bg-zinc-100 dark:bg-zinc-950">
       {params.get('closed') === '1' && <button type="button" className="m-6" onClick={() => setSettingsOpen(true)}>設定を開く</button>}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} initialTab={tab as never} />}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} initialTab={tab as never} unsavedRef={settingsUnsaved} />}
     </main>
   )
 }

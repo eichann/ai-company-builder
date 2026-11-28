@@ -391,7 +391,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 - **Daily tidy**: when a company's tabs are restored (`useEditorPersistence` `onRestored`) on a
   company day (`companyDay`, Japan time like 今日のフォルダ) later than the one remembered, the
   restored tabs are tidied the same way (`auto`). No day remembered (first open after the update,
-  a new company) → nothing is closed. Once per company day; 設定 → 自分の設定 「前の日のタブを自動で
+  a new company) → nothing is closed. Once per company day; 設定 →「AI に任せること」 「前の日のタブを自動で
   片づける」 (per Mac, on by default) turns it off. The first time it closes something:
   「毎日、前の日のタブを自動で片づけます（設定でオフにできます）」 with 「片づけたタブを見る」. Only on
   open: an app left open overnight is not tidied under the member.

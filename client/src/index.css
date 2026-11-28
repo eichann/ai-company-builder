@@ -387,7 +387,7 @@ body {
   color: #60a5fa;
 }
 
-/* Indeterminate progress bar (settings → ダウンロードするフォルダ) */
+/* Indeterminate progress bar (settings → この PC に置くフォルダ) */
 @keyframes acb-indeterminate {
   0% { left: -35%; }
   100% { left: 100%; }

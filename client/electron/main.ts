@@ -492,7 +492,7 @@ registerJobsIpc(ipc, {
     return outside ? { ok: false, message: outside } : { ok: true, ref: folder.id }
   },
 })
-// 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
+// AI に任せること → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
 registerWorkSwitchesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // 見られる人 for the lists (features/viewers): with the session.
 registerViewersIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })

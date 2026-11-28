@@ -40,10 +40,10 @@ export const BrokerKeyNeededCard = memo(function BrokerKeyNeededCard({ service }
         ? (
           <button type="button" onClick={() => void runCommand('settings.openOwnKey', { service })}
             className={`mt-2 rounded-control px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
-            {registered ? '「自分の鍵」を開く' : '自分の鍵を登録する'}
+            {registered ? '「Claude・Gemini などの鍵」を開く' : '自分の鍵を登録する'}
           </button>
         )
-        : <p className="mt-1 text-caption font-normal text-gray-500">メインの画面の「設定 → 自分の鍵」から登録できます。</p>)}
+        : <p className="mt-1 text-caption font-normal text-gray-500">メインの画面の「設定 → Claude・Gemini などの鍵」から登録できます。</p>)}
     </div>
   )
 })

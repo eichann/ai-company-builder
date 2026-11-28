@@ -5,7 +5,7 @@ import { todayFolderSetting } from '../../../shared/lib/todayFolderSetting'
 import { getMyDepartmentIds, todayFolderFs } from '../api'
 
 export interface TodayFolder extends TodayFolderChoice<DepartmentConfig> {
-  /** The departments it may be in (downloaded here), for 自分の設定's choice. */
+  /** The departments it may be in (downloaded here), for AI に任せること's choice. */
   choices: DepartmentConfig[]
   chosenId: string | null
   /** What おまかせ uses (the first 所属 department downloaded here). */

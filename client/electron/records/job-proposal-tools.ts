@@ -58,7 +58,7 @@ const DESCRIPTION_CREATE =
   '(2) フォルダは job_proposal_places で出たものだけ（置く場所は write: true のもの）。読めないフォルダは入れられない。' +
   '(3) 会議・記録・メールの題や引用、人の名前などの文を案に入れない（自由な文の欄は無い。仕事の名前はサーバーが「Skill名（いつ）」で作る）。' +
   '(4) できないことは、できないと先に言う：メールは下書きまで（送るのは人）、出来事で動く仕事は作れない（時刻だけ）。' +
-  '(5) 必ず「何があったら動くか」を選ぶ。新しいものが無い回は AI は動かない：「毎回必ず動きます」とは言わない。会社の設定や本人の「AI が自動で進める」（自分の設定）で動かないこともある。\n' +
+  '(5) 必ず「何があったら動くか」を選ぶ。新しいものが無い回は AI は動かない：「毎回必ず動きます」とは言わない。会社の設定や本人の「AI が自動で進める」（設定の「AI に任せること」）で動かないこともある。\n' +
   'Make a candidate for a job that runs at a set time, when the member asks for one. The server builds and pins it and the app shows a card in the chat. ' +
   'This does NOT send it to an admin: only the member\'s press on the card does; you cannot submit or approve it — never say it was sent or approved. To change it, make a new candidate. ' +
   'Rules: existing Skills only (none fits → say a Skill must be made first and stop); folders only from job_proposal_places; never put titles, quotes or names into it; ' +

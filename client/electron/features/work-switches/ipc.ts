@@ -1,4 +1,4 @@
-// 自分の設定 → 「受信を読む」「AI が自動で進める」 (shared/core/work-switches.ts): the member's own
+// AI に任せること → 「受信を読む」「AI が自動で進める」 (shared/core/work-switches.ts): the member's own
 // two switches, read and changed with the member's **session**.
 //   workSwitches:get   the member's switches (+ the company's 使ってよいか / 初めの値)
 //   workSwitches:set   turn one of them on / off { switch, on }

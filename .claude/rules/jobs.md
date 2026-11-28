@@ -2285,7 +2285,7 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     words, any other 「時間帯 <id>」; the server's `timeZone` kept only as a zone id; absent from an older server 「（会社の時刻で）」), what makes it run, what it does (the member is the responsible person),
     the grant's lines (tools, read places, the deliverable place, what it may make, the minutes route, mail drafts only, the
     limits — 1 run a day), missed runs, the deadline, and the notes (`JOB_CANDIDATE_NOTES`): nothing runs before an admin's
-    approval and their own 受け取る, it runs only when something is new, the company's settings or their own 「AI が自動で進める」 (`WORK_SWITCH_NAMES.autoRun`, the name 自分の設定 shows) may
+    approval and their own 受け取る, it runs only when something is new, the company's settings or their own 「AI が自動で進める」 (`WORK_SWITCH_NAMES.autoRun`, the name 「AI に任せること」 shows) may
     stop it, an admin may change name / time / check (a new 受け取る only for a new consent). Never 「必ず毎週動きます」.
     「これで管理者に出す」 sends **the candidate's id and the fingerprint shown** (`jobProposalCardState`'s `submit`; IPC
     `jobProposals:submit` → `POST /me/job-candidates/:id/submit { fingerprint }`); 「やめる」 discards the candidate on the server
@@ -2428,7 +2428,7 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     afterwards is marked too and nothing was asked (fails quiet — never asked twice; decision on the simple side). A turn
     that carried it without loading it marks nothing (it is carried again). Known: two consultations at once on that day may
     both carry it before either marks it.
-  - **The switch** 「AI から定期の仕事を提案してもらう」 (設定 → 自分の設定, `JobRepeatAskSetting.tsx`, IPC `jobRepeatAsks:get` /
+  - **The switch** 「AI から定期の仕事を提案してもらう」 (設定 →「AI に任せること」, `JobRepeatAskSetting.tsx`, IPC `jobRepeatAsks:get` /
     `jobRepeatAsks:set`; on unless turned off; per member and company, this PC only): off → no turn is asked or counted and
     the counts are forgotten (the asked marks stay, so turning it on again never re-asks). No reset of the asked marks (owner
     question).

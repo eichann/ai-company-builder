@@ -236,7 +236,7 @@ export function markSlackSeen(companyId: string, outbound: ConnectToolsOutbound 
   return outbound.markSlackSeen(companyId)
 }
 
-/** 自分の設定: the member's own 受信を読む / AI が自動で進める, as the company server holds them. */
+/** AI に任せること: the member's own 受信を読む / AI が自動で進める, as the company server holds them. */
 export type WorkSwitchReads = ElectronPort<'getWorkSwitches'>
 /** Turning one of them on or off (the server refuses turning on what the company does not allow). */
 export type WorkSwitchWrites = ElectronPort<'setWorkSwitch'>
@@ -249,7 +249,7 @@ export function setWorkSwitch(companyId: string, which: WorkSwitch, on: boolean,
   return writes.setWorkSwitch(companyId, which, on)
 }
 
-/** 自分の設定 →「届いた議事録を AI が自動で読む」: the member's own choice, as the company server holds it. */
+/** AI に任せること →「届いた議事録を AI が自動で読む」: the member's own choice, as the company server holds it. */
 export type MeetingAutoReadSettingPort = ElectronPort<'getMeetingAutoRead' | 'setMeetingAutoRead'>
 
 export function getMeetingAutoReadSetting(companyId: string, port: MeetingAutoReadSettingPort = window.electronAPI) {
