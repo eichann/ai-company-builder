@@ -1,7 +1,9 @@
 // The inbox's contacts as last read (「連絡」1枚, inbox.md "One contact"): one store per inbox, which the rows (one row per
 // contact) and the card read alike, so a press on the card moves its row at once. Memory only; each read and each press
 // is bound to the company era it started in (shared/lib/companyEra.ts): an answer that comes back after a company change
-// or a sign-out changes nothing on screen. Pure TypeScript (no React): the hook useContacts subscribes.
+// or a sign-out changes nothing on screen. One contact's ids (its interaction and each 返事のお願い) are one group: when one
+// of them is no longer the member's to read, the whole group goes, so the contact's title is shown by no id of it.
+// Pure TypeScript (no React): the hook useContacts subscribes.
 import { currentCompanyEra, inEra, type CompanyEra } from '../../shared/lib/companyEra'
 import type { ContactReadResult, ContactView } from '../../../shared/contact-card'
 
@@ -43,6 +45,8 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
   const newest = new Map<string, number>()
   /** The read (its ticket) whose answer each id shows now. */
   const written = new Map<string, number>()
+  /** Each id's contact group (every id one shown contact answered for; the same set object for all of them). */
+  const groups = new Map<string, Set<string>>()
   let company: string | null = null
   let seq = 0
   const listeners = new Set<() => void>()
@@ -51,8 +55,18 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
   const forCompany = (companyId: string) => {
     if (company === companyId) return
     company = companyId
-    entries = new Map(); asked.clear(); newest.clear(); written.clear()
+    entries = new Map(); asked.clear(); newest.clear(); written.clear(); groups.clear()
   }
+
+  /** The ids as one group, merged with the groups any of them was in already. */
+  const join = (ids: readonly string[]) => {
+    const group = new Set<string>()
+    for (const id of ids) for (const known of groups.get(id) ?? [id]) group.add(known)
+    for (const id of group) groups.set(id, group)
+    return group
+  }
+  /** The ids of `recordId`'s contact as last read (itself alone when none was). */
+  const groupOf = (recordId: string): ReadonlySet<string> => groups.get(recordId) ?? new Set([recordId])
 
   function start(companyId: string, recordId: string) {
     const ticket = ++seq
@@ -64,15 +78,20 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
       // Each id keeps the read that started last: an older read through another id of the same contact (its
       // 返事のお願い, read for a notice before the card's press) never puts back what a newer one replaced.
       const put = (id: string, entry: ContactEntry) => {
-        if ((written.get(id) ?? 0) > ticket) return
+        if ((written.get(id) ?? 0) >= ticket) return
         written.set(id, ticket)
         entries.set(id, entry)
       }
       if (r.success) {
         // One contact answers for its interaction and every 返事のお願い of it: a row keyed by either finds it.
         const shown: ContactEntry = { kind: 'shown', view: r.contact }
-        for (const id of [recordId, r.contact.interaction.id, ...r.contact.replyRequests.map(x => x.id)]) put(id, shown)
-      } else if (r.gone) put(recordId, { kind: 'gone' })
+        for (const id of join([recordId, r.contact.interaction.id, ...r.contact.replyRequests.map(x => x.id)])) put(id, shown)
+      } else if (r.gone) {
+        // Not the member's to read (or removed): every id of that contact goes — an older view kept under its 返事のお願い
+        // would show the title the server no longer shows them —, and no read already on its way may put it back.
+        const gone: ContactEntry = { kind: 'gone' }
+        for (const id of groupOf(recordId)) { written.set(id, seq); entries.set(id, gone); groups.delete(id) }
+      }
       // A failure keeps what was shown (offline must not empty the card); only a first read shows the failure.
       else if (!entries.has(recordId)) put(recordId, { kind: 'failed', offline: r.offline, error: r.error })
       notify()

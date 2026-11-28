@@ -525,11 +525,16 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
   Gmail keeps the mail not known → no Gmail line, never 「元に戻せませんでした」.
 - **Another company**: AppShell is keyed by company (the look starts again), every list's order, place and line are
   forgotten (`forgetAllWork`) and the inbox's ［取り消す］ and a contact's press are bound to the company era — answered after
-  the switch they change nothing on screen.
+  the switch they change nothing on screen. **Every card beside the list reaches the list through one entry**
+  (`besideDone.ts`: `openBeside` stamps the era the card was opened in — `Beside.era`, no card without one —, and
+  `finishBeside` is the `onDone` of an approval, a mail draft, a browser plan and a 連絡 alike): a press answered in
+  another era moves no row and says no 「『…』を片づけました」 — the old screen's callback once put company A's 件名 on
+  company B's list (Codex review of UX stage 2). A new kind of card gets the same `onDone`. Test: `besideDone.test.ts`.
 - **Not here (stage 5, 案4's skeleton)**: folding the consultation list when a card opens beside (decision 5: today the chat
   pane is beside the middle, the bottom panel under it — folding the list would give the inbox no room), the 「連絡」
   destination with ［返事待ち］, the counts on the left destination, 案B (the card large with 前へ・次へ) on a narrow window.
-- Tests: `src/features/inbox/workModel.test.ts` (案2's complement, replies 新着, kept in place and not counted, never twice,
+- Tests: `src/features/inbox/besideDone.test.ts` (a card of the company left behind finished late changes nothing, every
+  kind; in its own era the next row comes), `src/features/inbox/workModel.test.ts` (案2's complement, replies 新着, kept in place and not counted, never twice,
   kinds and counts, 15 and the next page, 「その他」, which rows open beside), `src/shared/lib/workThrough.test.ts` (an undo's own
   words), `tests/ui/inbox.spec.ts` (countless chips, the card beside, the next one after 承認 without ［取り消す］, the keys, 15
   rows and the rest with no read, kinds and 「その他」 at 360 px, 案2's line), `tests/ui/contact-card.spec.ts` (the next one

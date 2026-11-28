@@ -487,7 +487,11 @@ pressing each record's own action.
   request a press sends, what ［取り消す］ sends, the words after a press or a refusal, `contactPlace`); `contactStore.ts`
   (the contacts as last read, one store per inbox shared by the rows and the card; reads bound to the company era,
   `shared/lib/companyEra.ts`; each id shows the read that started last, also through another id of the same contact — an
-  older read of its 返事のお願い never puts back what the card's read after a press replaced); `contactPress.ts` (a press and its undo, era-bound:
+  older read of its 返事のお願い never puts back what the card's read after a press replaced; **one contact's ids are one
+  group** — the interaction and each 返事のお願い one shown read answered for: when any of them answers the missing 404 (taken
+  off 「この人たちだけ」, someone's owner-only one, removed) every id of the group becomes `gone` at once and no read
+  already on its way may put it back, so the contact's title is shown by no id, row or card — Codex review of UX stage 2:
+  the 返事のお願い kept showing it; `contactStore.test.ts`); `contactPress.ts` (a press and its undo, era-bound:
   an answer after a company change or a sign-out says nothing and reads nothing); `hooks/useContacts.ts` (the reads
   start from the subscription, no effect); `components/ContactCard.tsx` (props in: the store, the ports, `nameOf`,
   `onOpenTask` / `onCheckDraft` / `onOpenRecord` — it knows no frame, so the 連絡 destination of stage 5 can place it as
@@ -526,7 +530,8 @@ pressing each record's own action.
   their own rows as before (offline included). No new count, kind or server call per list beyond these reads.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
   one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
-  and a read answered after a company change show nothing; the newest read wins), `model.test.ts` (one row, 確認したもの,
+  and a read answered after a company change show nothing; the newest read wins), `contactStore.test.ts` (one id's 404 takes the whole contact's
+  views with it, also against a read on its way), `model.test.ts` (one row, 確認したもの,
   what is read), `tests/ui/contact-card.spec.ts` on `tests/inbox-ui.html?contact=own|draft|waiting|other|made|conflict`
   (one row, only the allowed buttons, the draft, one press ends both and ［取り消す］ brings both back, the refusal,
   確認したもの) — mutation-checked.
