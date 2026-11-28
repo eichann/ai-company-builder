@@ -20,7 +20,8 @@ export interface AuthDeps {
   onSignedIn?: (userId: string) => void
 }
 
-export const AUTH_SERVER_CHANGED = 'つなぎ先が変わったため、ログインしませんでした。画面のつなぎ先を確かめて、もう一度押してください。'
+// Pressing again would be refused the same way (the screen keeps its address): opening the app again shows the saved one.
+export const AUTH_SERVER_CHANGED = 'つなぎ先が変わったため、ログインしませんでした。アプリをいったん閉じて開き直し、表示されるつなぎ先を確かめてからログインしてください。'
 
 /** The address a screen showed is the configured server (trailing slashes aside; '' is never one). */
 function sameServer(shown: unknown, configured: string): boolean {
