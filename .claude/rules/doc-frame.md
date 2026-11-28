@@ -775,7 +775,12 @@ hosts, and nothing else):
   `acb-plugin`), the app's session not serving `acb-doc`; navigations refused (`data:`,
   `local-file:`, `file:`, `acb-plugin:`, another token, the web, its own `.css`) and its own page
   allowed; the app's reload closes the view and revokes its grant.
-- A2 in `doc-frame-electron.test.ts` (the window shown and focused): the keyboard stays the app's
+- A2 in `doc-frame-electron.test.ts` (the window shown and focused — the harness takes the system's focus
+  (`app.focus({ steal: true })`) before the shown keyboard measurement and before the click + keys one, and takes
+  either again, at most 3 times, when the window lost the system's focus during it: on the shared CI Macs
+  something else took it now and then, leaving neither the app nor the document the keyboard, or handing it to
+  the app on the way back (the "Known" above); a measurement the window kept the focus through is never taken
+  again): the keyboard stays the app's
   while the document loads, calls `focus()` every 100 ms and has `autofocus`, hidden and shown, and
   is the document's after a click; a click no longer counts once the member went back to the app
   (a page reloading on blur takes nothing); placed at the app page's zoom (CSS px × 1.25), visible and

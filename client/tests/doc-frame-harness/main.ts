@@ -240,7 +240,33 @@ async function run() {
   // Shown and focused: the keyboard focus is measured (a hidden window has none).
   const win = new BrowserWindow({ show: true, width: 900, height: 700, webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true } })
   await win.loadFile(path.join(dir, 'app.html'))
-  win.focus()
+  // The keyboard is measured only while the window is the system's key window (otherwise neither the app nor
+  // the document has it). On the shared CI Macs something else now and then took the system's focus in the
+  // middle of a measurement: the app and the document both unfocused, or — the window given the focus back —
+  // the document's `focus` event coming again without a click, which by design hands the keyboard to the app
+  // (doc-frame.md "Focus stealing"). So the window takes the focus before each measurement, and a measurement
+  // during which the window lost it is taken again (a few times at most). One the window kept the focus
+  // through is never taken again: the guards are measured exactly as before.
+  let windowBlurs = 0
+  win.on('blur', () => { windowBlurs++ })
+  const holdFocus = async () => {
+    for (let i = 0; i < 30 && !win.isFocused(); i++) {
+      if (process.platform === 'darwin') app.focus({ steal: true })
+      win.focus()
+      await wait(100)
+    }
+  }
+  let focusRetries = 0
+  const whileFocused = async <T>(measure: () => Promise<T>): Promise<T> => {
+    for (let attempt = 1; ; attempt++) {
+      await holdFocus()
+      const blurs = windowBlurs
+      const value = await measure()
+      if ((windowBlurs === blurs && win.isFocused()) || attempt === 3) return value
+      focusRetries++
+    }
+  }
+  await holdFocus()
   win.webContents.focus()
   const openView = async (file: string) => {
     const checked = await docFrames.check(file)
@@ -286,60 +312,66 @@ async function run() {
   // The viewer shows it over its tab: placed (times the app page's zoom), visible, unmuted.
   win.webContents.setZoomFactor(1.25)
   views.place(doc.viewId, win.webContents.id, { x: 40, y: 30, width: 400, height: 300 })
-  await wait(800)
-  result.shown = { bounds: viewOf(doc.viewId).getBounds(), visible: viewOf(doc.viewId).getVisible(), muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState'), keyboard: keyboard() }
+  result.shown = await whileFocused(async () => {
+    await wait(800)
+    return { bounds: viewOf(doc.viewId).getBounds(), visible: viewOf(doc.viewId).getVisible(), muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState'), keyboard: keyboard() }
+  })
   win.webContents.setZoomFactor(1)
   // A placement from another window, or not four sane numbers, never moves it somewhere else.
   views.place(doc.viewId, win.webContents.id + 1000, { x: 0, y: 0, width: 800, height: 600 })
   result.otherWindowPlace = viewOf(doc.viewId).getBounds()
   views.place(doc.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
-  // The member clicks into it: the keyboard is the document's (slides take ← →).
-  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
-  doc.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
-  doc.contents.focus()
-  await wait(500)
-  result.focusAfterClick = keyboard()
-  // The app's shortcuts reach the app while the document has the keyboard; its own keys stay with it.
-  const mod = process.platform === 'darwin' ? 'meta' : 'control'
-  const press = (keyCode: string, modifiers: Array<'meta' | 'control' | 'shift' | 'isAutoRepeat'> = []) => {
-    doc.contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
-    if (!modifiers.length) doc.contents.sendInputEvent({ type: 'char', keyCode })
-    doc.contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
-  }
-  const shortcuts = () => events.filter(e => (e as { kind: string }).kind === 'shortcut').map(e => {
-    const { key } = e as { key: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean } }
-    return `${key.metaKey || key.ctrlKey ? 'mod+' : ''}${key.shiftKey ? 'shift+' : ''}${key.key.toLowerCase()}`
+  // The member clicks into it: the keyboard is the document's (slides take ← →); then the app's shortcuts reach the
+  // app while the document has the keyboard, and its own keys stay with it.
+  const clickedAndKeys = await whileFocused(async () => {
+    doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+    doc.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
+    doc.contents.focus()
+    await wait(500)
+    const focusAfterClick = keyboard()
+    const mod = process.platform === 'darwin' ? 'meta' : 'control'
+    const press = (keyCode: string, modifiers: Array<'meta' | 'control' | 'shift' | 'isAutoRepeat'> = []) => {
+      doc.contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+      if (!modifiers.length) doc.contents.sendInputEvent({ type: 'char', keyCode })
+      doc.contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+    }
+    const shortcuts = () => events.filter(e => (e as { kind: string }).kind === 'shortcut').map(e => {
+      const { key } = e as { key: { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean } }
+      return `${key.metaKey || key.ctrlKey ? 'mod+' : ''}${key.shiftKey ? 'shift+' : ''}${key.key.toLowerCase()}`
+    })
+    events.length = 0
+    await js(`window.__keys = ''; document.getElementById('grab').value = ''; 0`)
+    press('K', [mod])
+    await wait(200)
+    const afterFind = { shortcuts: shortcuts(), keys: await js('window.__keys') }
+    events.length = 0
+    press('Right')
+    press('a')
+    press('Space')
+    await wait(200)
+    const ownKeys = { shortcuts: shortcuts(), keys: await js('window.__keys'), typed: await js(`document.getElementById('grab').value`) }
+    events.length = 0
+    press('V', [mod, 'shift'])
+    press('B', [mod])
+    press('B', [mod, 'isAutoRepeat'])
+    await js(`window.__keys = ''; 0`)
+    press('F', [mod])
+    await wait(200)
+    const more = { shortcuts: shortcuts(), keys: await js('window.__keys') }
+    // A Mac's Ctrl+K is a text field's own key (delete to the line's end): it stays with the document.
+    events.length = 0
+    await js(`window.__keys = ''; 0`)
+    if (mod === 'meta') press('K', ['control'])
+    await wait(200)
+    const macControl = { shortcuts: shortcuts(), keys: await js('window.__keys') }
+    // The document's own synthetic key presses run nothing of the app.
+    events.length = 0
+    await js(`for (const o of [{ key: 'k', metaKey: true }, { key: 'k', ctrlKey: true }, { key: 'b', metaKey: true, ctrlKey: true }]) { document.dispatchEvent(new KeyboardEvent('keydown', { ...o, bubbles: true })); document.getElementById('grab').dispatchEvent(new KeyboardEvent('keydown', { ...o, bubbles: true })) } 0`)
+    await wait(300)
+    return { focusAfterClick, keys: { afterFind, ownKeys, more, macControl, synthetic: shortcuts(), keyboard: keyboard(), mac: mod === 'meta' } }
   })
-  events.length = 0
-  await js(`window.__keys = ''; document.getElementById('grab').value = ''; 0`)
-  press('K', [mod])
-  await wait(200)
-  const afterFind = { shortcuts: shortcuts(), keys: await js('window.__keys') }
-  events.length = 0
-  press('Right')
-  press('a')
-  press('Space')
-  await wait(200)
-  const ownKeys = { shortcuts: shortcuts(), keys: await js('window.__keys'), typed: await js(`document.getElementById('grab').value`) }
-  events.length = 0
-  press('V', [mod, 'shift'])
-  press('B', [mod])
-  press('B', [mod, 'isAutoRepeat'])
-  await js(`window.__keys = ''; 0`)
-  press('F', [mod])
-  await wait(200)
-  const more = { shortcuts: shortcuts(), keys: await js('window.__keys') }
-  // A Mac's Ctrl+K is a text field's own key (delete to the line's end): it stays with the document.
-  events.length = 0
-  await js(`window.__keys = ''; 0`)
-  if (mod === 'meta') press('K', ['control'])
-  await wait(200)
-  const macControl = { shortcuts: shortcuts(), keys: await js('window.__keys') }
-  // The document's own synthetic key presses run nothing of the app.
-  events.length = 0
-  await js(`for (const o of [{ key: 'k', metaKey: true }, { key: 'k', ctrlKey: true }, { key: 'b', metaKey: true, ctrlKey: true }]) { document.dispatchEvent(new KeyboardEvent('keydown', { ...o, bubbles: true })); document.getElementById('grab').dispatchEvent(new KeyboardEvent('keydown', { ...o, bubbles: true })) } 0`)
-  await wait(300)
-  result.keys = { afterFind, ownKeys, more, macControl, synthetic: shortcuts(), keyboard: keyboard(), mac: mod === 'meta' }
+  result.focusAfterClick = clickedAndKeys.focusAfterClick
+  result.keys = clickedAndKeys.keys
   // Full screen (the viewer's 「全画面」 is the app page's HTML full screen): Escape in the document leaves it.
   win.webContents.focus()
   await win.webContents.executeJavaScript('document.documentElement.requestFullscreen()', true).catch(() => {})
@@ -565,6 +597,7 @@ async function run() {
     viewGone: !allWebContents.fromId(doc.viewId) || allWebContents.fromId(doc.viewId)!.isDestroyed(),
     served: (await docFrames.serve({ url: doc.url, method: 'GET' })).status,
   }
+  result.focusRetries = focusRetries
   result.partitionFolders = fs.existsSync(path.join(dir, 'userData', 'Partitions')) ? fs.readdirSync(path.join(dir, 'userData', 'Partitions')) : []
   result.connections = net0.connections
   net0.close()
