@@ -66,3 +66,21 @@ test('「返事の形」: the plain reply adds nothing, a rich one adds the diag
   const apiKey = await turnOf({ replyStyle: 'rich', authMode: 'api-key' })
   assert.doesNotMatch(apiKey.system + apiKey.standing, /mermaid/)
 })
+
+// A rich reply's page goes to the member's 今日のフォルダ only (reply-style.ts: never synced, the member's alone until
+// moved). A request cannot point the AI anywhere else: a today folder not of the app's shape gives no page line.
+test('「返事の形：リッチ」 names the member\'s 今日のフォルダ as where a page goes; no today folder, another shape or ふつう: no page line', async () => {
+  const today = '営業部/.personal/inbox/日付別/2026/20261128'
+  const rich = await turnOf({ replyStyle: 'rich', todayFolder: today })
+  assert.ok(rich.system.includes(`「${os.tmpdir().replace(/[\\/]+$/, '')}/${today}/ページ/」に作り`), rich.system)
+  assert.doesNotMatch(rich.standing, /HTML ファイル/)
+  for (const todayFolder of [undefined, '営業部/共有/ページ', '../.ssh', '営業部/.personal/inbox/日付別/2026/20261128/../../../共有']) {
+    const other = await turnOf({ replyStyle: 'rich', todayFolder })
+    assert.match(other.system, /mermaid か ```svg/)
+    assert.doesNotMatch(other.system, /HTML ファイル/, String(todayFolder))
+  }
+  const plain = await turnOf({ todayFolder: today })
+  assert.doesNotMatch(plain.system + plain.standing, /HTML ファイル/)
+  const apiKey = await turnOf({ replyStyle: 'rich', todayFolder: today, authMode: 'api-key' })
+  assert.doesNotMatch(apiKey.system + apiKey.standing, /HTML ファイル/)
+})

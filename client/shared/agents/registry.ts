@@ -123,8 +123,9 @@ export interface AgentCapabilities {
   /** The model list comes from the agent at run time (e.g. `model/list`), not from `models`. */
   readonly liveModelCatalog: boolean
   /**
-   * 「返事の形：リッチ」 is offered beside the model (reply-style.ts): the turn then says diagrams are welcome.
-   * The chat draws a reply's diagrams whatever the agent (chat-ui-and-history.md "Diagrams in a reply").
+   * 「返事の形：リッチ」 is offered beside the model (reply-style.ts): the turn then says diagrams are welcome, and that a
+   * page may be written to the member's 今日のフォルダ (an agent that writes files). The chat draws a reply's diagrams
+   * and page cards whatever the agent (chat-ui-and-history.md "Diagrams in a reply", "Page cards in a reply").
    */
   readonly richReplies: boolean
 }

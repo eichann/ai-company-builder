@@ -153,7 +153,39 @@ setInterval(() => {
   fs.symlinkSync('../other/secret.png', path.join(folder, 'link.png'))
   fs.writeFileSync(path.join(dir, 'preload.js'), "require('electron').contextBridge.exposeInMainWorld('electronAPI', { marker: 'acb' })\n")
   fs.writeFileSync(path.join(dir, 'app.html'), '<!doctype html><p>app</p><input id="typing"><script>document.getElementById("typing").focus()</script>')
-  return { company, folder }
+  // A page the AI made for a rich reply (reply-style.ts), in the member's 今日のフォルダ's page folder, written as if
+  // the AI had read a planted mail: it tries the day's own files, the member's other personal files, the company's,
+  // a key file outside the company, the app and the web (chat-ui-and-history.md "Page cards in a reply").
+  const today = path.join(folder, '.personal', 'inbox', '日付別', '2026', '20261128')
+  const pages = path.join(today, 'ページ')
+  fs.mkdirSync(pages, { recursive: true })
+  fs.mkdirSync(path.join(dir, 'home', '.ssh'), { recursive: true })
+  fs.writeFileSync(path.join(today, 'メモ.png'), PNG)
+  fs.writeFileSync(path.join(folder, '.personal', '鍵.png'), PNG)
+  fs.writeFileSync(path.join(dir, 'home', '.ssh', 'id.png'), PNG)
+  fs.writeFileSync(path.join(pages, '図.png'), PNG)
+  const fromPage = (p: string) => encodeURI(path.relative(pages, p))
+  fs.writeFileSync(path.join(pages, 'planted.html'), `<!doctype html><meta charset="utf-8"><p>比べる表</p><script>
+const r = {}
+const img = src => new Promise(resolve => { const i = new Image(); i.onload = () => resolve('loaded'); i.onerror = () => resolve('failed'); i.src = src; document.body.appendChild(i) })
+;(async () => {
+  r.ownImage = await img('図.png')
+  r.dayFile = await img('${fromPage(path.join(today, 'メモ.png'))}')
+  r.encodedDayFile = await img('%2e%2e/' + encodeURIComponent('メモ.png'))
+  r.personalFile = await img('${fromPage(path.join(folder, '.personal', '鍵.png'))}')
+  r.companyFile = await img('${fromPage(path.join(folder, 'images', 'graph.png'))}')
+  r.keyFile = await img('file://${encodeURI(path.join(dir, 'home', '.ssh', 'id.png'))}')
+  r.localKeyFile = await img('local-file://${encodeURI(path.join(dir, 'home', '.ssh', 'id.png'))}')
+  r.electronAPI = typeof window.electronAPI
+  r.parentAPI = (() => { try { return typeof window.parent.electronAPI } catch (e) { return 'threw' } })()
+  r.top = window.top === window
+  r.fetchWeb = await fetch('${WEB('fetch')}/page?d=' + encodeURIComponent(document.body.innerText)).then(() => 'reached', () => 'refused')
+  r.webImage = await img('${WEB('img')}/page.png')
+  try { localStorage.setItem('k', 'v'); r.localStorage = 'ok' } catch (e) { r.localStorage = 'threw' }
+  window.__r = r
+})()
+</script>`)
+  return { company, folder, pagePath: path.join(pages, 'planted.html') }
 }
 
 async function listen() {
@@ -173,7 +205,7 @@ async function listen() {
 
 async function run() {
   const net0 = await listen()
-  const { company, folder } = setUp()
+  const { company, folder, pagePath } = setUp()
   const docFrames = createDocFrames({
     paths: {
       validate: p => { if (!path.resolve(p).startsWith(company + path.sep)) throw new Error('outside'); return path.resolve(p) },
@@ -482,6 +514,15 @@ async function run() {
     plainCloseThenOpen: await again.contents.executeJavaScript('window.scrollY', true),
   }
   views.close(again.viewId, win.webContents.id)
+
+  // A rich reply's page in the 今日のフォルダ, opened as the chat's card opens it (the same check and grant).
+  const aiPage = await open(pagePath)
+  views.place(aiPage.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  for (let i = 0; i < 100 && !(await aiPage.contents.executeJavaScript('window.__r', true)); i++) await wait(100)
+  result.aiPage = await aiPage.contents.executeJavaScript('window.__r', true)
+  views.close(aiPage.viewId, win.webContents.id)
+  // Its page goes before the next view is made (a view made at once left one whose close threw on the app's reload).
+  await wait(500)
 
   // Review: the page's synthetic events read nothing; the member's real drag reads the real words,
   // through the piece's own built-ins (the page's replaced ones are never called); the marks draw.
