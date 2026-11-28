@@ -41,7 +41,7 @@ test('the button: a blue 新着 count and a red あなた待ち count, both name
   expectNoPageErrors(state)
 })
 
-test('opening a 新着 row opens its record, marks only its notice read and lowers the blue count by one; it stays in 確認したもの', async ({ page }) => {
+test('opening a 新着 row opens its record, marks only its notice read and lowers the blue count by one; kept in place until the chips change, then in 確認したもの', async ({ page }) => {
   const state = await openPreview(page, 'title-bar-notices')
   await openInbox(page)
   const row = news(page).locator('[data-inbox-row="record:task-preview03"]')
@@ -49,7 +49,8 @@ test('opening a 新着 row opens its record, marks only its notice read and lowe
   await row.getByRole('button', { name: '開く' }).click()
   await expect(page.locator('#opened')).toHaveText('record task-preview03')
   await expect(page.locator('#read')).toHaveText('n-1')
-  await expect(news(page).locator('[data-inbox-row]')).toHaveCount(0)
+  // Kept where it was in this look (owner decision 2026-11-28, 11番-3), with no dot and not counted.
+  await expect(row.getByRole('img', { name: '新着' })).toHaveCount(0)
   // 0 is not shown.
   await expect(button(page).locator('[data-inbox-news]')).toHaveCount(0)
   await panel(page).getByRole('button', { name: /^確認したもの/ }).click()

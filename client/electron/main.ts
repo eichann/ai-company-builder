@@ -110,6 +110,7 @@ import { createWritingSummarizer } from './features/writing-style/summarize'
 import { registerWritingStyleIpc } from './features/writing-style/ipc'
 // lane A ▲
 // lane B ▼
+import { registerContactIpc } from './features/inbox/contact-ipc'
 // lane B ▲
 // lane C ▼
 import { createBrowserWindowShell } from './browser-window'
@@ -635,6 +636,7 @@ const writingStyles = createWritingStyles({
 registerWritingStyleIpc(ipc, writingStyles)
 // lane A ▲
 // lane B ▼
+registerContactIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, changed: companyId => inFlightReads.changed(companyId) })
 // lane B ▲
 // lane C ▼
 registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots, isWorkingFolder: root => workingFolders.has(root) })

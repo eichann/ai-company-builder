@@ -43,6 +43,8 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds } from '../../src/adapters/system'
 import { JOB_MINUTES_ROUTE } from '../../../shared/core/jobs'
+import { proposalInputOf } from '../../../shared/core/job-proposals'
+import { holdPoints } from '../helpers/hold'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -513,6 +515,206 @@ describe('「やめる」: the creator discards a candidate not submitted yet (o
   })
 })
 
+describe('revise: the member changes the card in place, the server builds and checks it again (UX 段3 #13)', () => {
+  const stored = (id: string) => db.prepare('SELECT definition, fingerprint, created_at, expires_at FROM ai_job_candidates WHERE company_id = ? AND id = ?').get(CO, id) as Json
+  const revise = (who: Json, c: Json, o: Record<string, unknown>, fingerprint = c.fingerprint) => proposals.revise(who, c.id, { fingerprint, input: input(o) })
+
+  it('the same candidate, rebuilt by the one builder: a new fingerprint, the old one never submits, the name still the server’s', async () => {
+    const c = await candidate()
+    const row = stored(c.id)
+    const r = ok(await revise(alice, c, { trigger: { every: 'day', at: '08:30', businessDaysOnly: true }, deliverable: null, mailDrafts: true }))
+    expect(r.id).toBe(c.id)
+    expect(r.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(r.fingerprint).not.toBe(c.fingerprint)
+    // Exactly what a new candidate of that input would be (the server's builder, the member responsible, the name made).
+    const fresh = await candidate(alice, { trigger: { every: 'day', at: '08:30', businessDaysOnly: true }, deliverable: null, mailDrafts: true })
+    expect(r.definition).toEqual({ ...fresh.definition })
+    expect(r.definition).toMatchObject({ actingUser: 'u-alice', name: 'weekly-minutes（毎営業日 08:30）', grant: { outbound: 'draft_only', writes: { area: 'none' } } })
+    expect(r.proposal).toBeNull()
+    // Its creator and its 24 hours unchanged; the stored row holds the new content.
+    expect(stored(c.id)).toMatchObject({ created_at: row.created_at, expires_at: row.expires_at, fingerprint: r.fingerprint })
+    expect(ok(proposals.candidate(alice, c.id))).toMatchObject({ fingerprint: r.fingerprint, definition: r.definition })
+    // The card that still shows the old one: refused, nothing made; the new one submits as it stands.
+    const before = jobCount()
+    expect(await proposals.submit(alice, c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'JOB_VERSION_FINGERPRINT' } })
+    expect(jobCount()).toBe(before)
+    const p = ok(await proposals.submit(alice, c.id, { fingerprint: r.fingerprint })).proposal
+    expect(versionDef(p.jobId, 1)).toEqual(r.definition)
+  })
+
+  it('proposalInputOf gives back what the card changes: unchanged, the fingerprint stays; the deliverable folder stays the candidate’s', async () => {
+    for (const o of [{}, { check: { kind: 'new_files', path: '営業部/週報' }, reads: ['営業部'] }, { check: { kind: 'new_files', path: '営業部' }, reads: ['営業部', '総務'] }, { readRecords: false, deliverable: null, reads: [] }]) {
+      const c = await candidate(alice, o)
+      const back = proposalInputOf(c.definition)
+      // The input the card shows: the read places as chosen (the check's place not listed twice).
+      expect(back).toEqual(input(o))
+      const same = ok(await proposals.revise(alice, c.id, { fingerprint: c.fingerprint, input: back }))
+      expect(same.fingerprint).toBe(c.fingerprint)
+      expect(same.definition).toEqual(c.definition)
+    }
+    const c = await candidate()
+    const r = ok(await revise(alice, c, { minutes: 30 }))
+    expect(r.definition.grant.writes).toEqual({ area: 'deliverable', place: '営業部/週報', folder: `job-${c.id.slice(3, 11)}` })
+  })
+
+  it('a place not theirs, a deliverable they cannot write, a missing Skill, free text: the create’s own refusals, nothing changed, no name told', async () => {
+    const c = await candidate(bob)
+    const mc = await candidate(mallory, { reads: [], deliverable: null })
+    const answers = [
+      await revise(bob, c, { reads: ['経理部'] }),
+      await revise(bob, c, { reads: ['ない部'] }),
+      await revise(bob, c, { deliverable: '経理部' }),
+      await revise(bob, c, { check: { kind: 'new_files', path: '経理部' } }),
+      await revise(mallory, mc, { deliverable: '総務', reads: [] }),
+      await revise(mallory, mc, { reads: ['秘書室'], deliverable: null }),
+    ]
+    for (const a of answers) expect(a).toEqual(answers[0])
+    expect(answers[0]).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    expect(answers[0]).toEqual(await proposals.createCandidate(bob, null, input({ reads: ['経理部'] })))
+    expect(JSON.stringify(answers)).not.toContain('経理部')
+    tree = null
+    try {
+      expect(await revise(bob, c, { skill: 'no-such-skill' })).toMatchObject({ ok: false, body: { code: 'JOB_SKILL_MISSING' } })
+    } finally { tree = 'a'.repeat(40) }
+    for (const extra of [{ name: '経理部の給与まとめ' }, { actingUser: 'u-alice' }, { folder: 'x' }]) {
+      expect(await proposals.revise(bob, c.id, { fingerprint: c.fingerprint, input: { ...input(), ...extra } })).toMatchObject({ ok: false, body: { code: 'BAD_JOB_CANDIDATE', problems: ['UNKNOWN_KEY'] } })
+    }
+    expect(await proposals.revise(bob, c.id, { fingerprint: c.fingerprint, input: input(), name: 'x' })).toMatchObject({ ok: false, body: { code: 'BAD_REQUEST' } })
+    expect(await proposals.revise(bob, c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'BAD_REQUEST' } })
+    // Nothing of the candidate changed by any refusal.
+    expect(ok(proposals.candidate(bob, c.id)).fingerprint).toBe(c.fingerprint)
+    expect(ok(proposals.candidate(mallory, mc.id)).fingerprint).toBe(mc.fingerprint)
+  })
+
+  it('only the creator’s own, live, not submitted, not discarded, as the card showed it', async () => {
+    const c = await candidate()
+    const missing = await proposals.revise(bob, `jc.${'0'.repeat(32)}`, { fingerprint: c.fingerprint, input: input() })
+    expect(missing).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+    expect(await revise(bob, c, { minutes: 30 })).toEqual(missing)
+    expect(await revise(m('u-alice', 'member', OTHER), c, { minutes: 30 })).toEqual(missing)
+    expect(await proposals.revise(alice, 'jc.x', { fingerprint: c.fingerprint, input: input() })).toEqual(missing)
+    // An owner / admin is no exception: a candidate is its creator's alone.
+    expect(await revise(owner, c, { minutes: 30 })).toEqual(missing)
+    // A card showing an older content.
+    expect(await revise(alice, c, { minutes: 30 }, `sha256:${'0'.repeat(64)}`)).toMatchObject({ ok: false, body: { code: 'JOB_VERSION_FINGERPRINT' } })
+    expect(ok(proposals.candidate(alice, c.id)).fingerprint).toBe(c.fingerprint)
+    // Submitted: never changed (an admin's approval reads what was submitted), the proposal and its job as they were.
+    const { c: s, p } = await submitted(newMember())
+    const proposer = m(p.proposerId, 'member')
+    expect(await revise(proposer, s, { minutes: 30 })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_SUBMITTED' } })
+    expect(ok(proposals.candidate(proposer, s.id)).fingerprint).toBe(s.fingerprint)
+    expect(latestFingerprint(p.jobId)).toBe(s.fingerprint)
+    // …also after the content's 24 hours (the proposal outlives it).
+    shift = 25 * HOUR
+    try {
+      expect(await revise(proposer, s, { minutes: 30 })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_SUBMITTED' } })
+      expect(await revise(alice, c, { minutes: 30 })).toEqual(missing)
+    } finally { shift = 0 }
+    // Discarded: 410, never brought back.
+    const d = await candidate()
+    ok(proposals.discard(alice, d.id))
+    expect(await revise(alice, d, { minutes: 30 })).toMatchObject({ ok: false, kind: 'gone', body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    expect(await proposals.revise(alice, d.id, { fingerprint: 'discarded', input: input() })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    expect(proposals.candidate(alice, d.id)).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+  })
+
+  it('a candidate naming a place no longer theirs: the one 404 whatever fingerprint was sent (no oracle), nothing changed', async () => {
+    const c = await candidate(alice, { reads: ['経理部'] })
+    db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-priv-a'").run()
+    try {
+      const right = await revise(alice, c, { reads: [] })
+      expect(right).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+      expect(await revise(alice, c, { reads: [] }, `sha256:${'0'.repeat(64)}`)).toEqual(right)
+      expect(JSON.stringify(right)).not.toContain('経理部')
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
+    }
+    expect(stored(c.id).fingerprint).toBe(c.fingerprint)
+  })
+
+  it('the repository’s compare-and-set: only from the fingerprint it holds, never a discarded row, only its creator’s', async () => {
+    const repo = companyData.forCompany(CO).jobs
+    const c = await candidate(carol)
+    const next = `sha256:${'1'.repeat(64)}`
+    expect(repo.reviseCandidate(c.id, 'u-carol', `sha256:${'0'.repeat(64)}`, '{}', next)).toBe(false)
+    expect(repo.reviseCandidate(c.id, 'u-alice', c.fingerprint, '{}', next)).toBe(false)
+    expect(stored(c.id).fingerprint).toBe(c.fingerprint)
+    ok(proposals.discard(carol, c.id))
+    expect(repo.reviseCandidate(c.id, 'u-carol', 'discarded', '{}', next)).toBe(false)
+    expect(stored(c.id).fingerprint).toBe('discarded')
+  })
+
+  it('two changes sent at once from the same card: one wins, the other is told the card is stale', async () => {
+    const c = await candidate(carol)
+    const [a, b] = await Promise.all([revise(carol, c, { minutes: 30 }), revise(carol, c, { minutes: 45 })])
+    const won = [a, b].filter(x => x.ok)
+    expect(won).toHaveLength(1)
+    expect([a, b].find(x => !x.ok)).toMatchObject({ ok: false, body: { code: 'JOB_VERSION_FINGERPRINT' } })
+    expect(stored(c.id).fingerprint).toBe(ok(won[0]).fingerprint)
+  })
+
+  it('a change landing while a submit awaits the Skill: the submit is refused inside its write, nothing made', async () => {
+    const hold = holdPoints<'skill'>()
+    const heldJobs = createJobService({ companyData, memberships, transactions, clock, ids: randomIds, skillTree: hold.stopAfter('skill', skillTree), hasCompanyFolder: () => true, shelfSkill: shelfFake })
+    const heldProposals = createJobProposals({
+      companyData, memberships, transactions, clock, ids: randomIds, jobs: heldJobs, skillTree, hasCompanyFolder: () => true,
+      placeExists: async (_co, p) => EXISTS.has(p), placeFolders: async (_co, p) => FOLDERS[p] ?? null,
+    })
+    const who = newMember()
+    const c = await candidate(who)
+    const before = jobCount()
+    const h = hold.held('skill')
+    const submit = heldProposals.submit(who, c.id, { fingerprint: c.fingerprint })
+    await h.arrived
+    const r = ok(await proposals.revise(who, c.id, { fingerprint: c.fingerprint, input: input({ minutes: 30 }) }))
+    h.release()
+    expect(await submit).toMatchObject({ ok: false, body: { code: 'JOB_VERSION_FINGERPRINT' } })
+    expect(jobCount()).toBe(before)
+    expect(ok(proposals.candidate(who, c.id)).fingerprint).toBe(r.fingerprint)
+  })
+
+  it('a submit landing while a change awaits the Skill: the change is refused inside its write, the submitted content kept', async () => {
+    const hold = holdPoints<'skill'>()
+    const heldProposals = createJobProposals({
+      companyData, memberships, transactions, clock, ids: randomIds, jobs, skillTree: hold.stopAfter('skill', skillTree), hasCompanyFolder: () => true,
+      placeExists: async (_co, p) => EXISTS.has(p), placeFolders: async (_co, p) => FOLDERS[p] ?? null,
+    })
+    const who = newMember()
+    const c = await candidate(who)
+    const h = hold.held('skill')
+    const change = heldProposals.revise(who, c.id, { fingerprint: c.fingerprint, input: input({ minutes: 30 }) })
+    await h.arrived
+    const p = ok(await proposals.submit(who, c.id, { fingerprint: c.fingerprint })).proposal
+    h.release()
+    expect(await change).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_SUBMITTED' } })
+    expect(stored(c.id).fingerprint).toBe(c.fingerprint)
+    expect(latestFingerprint(p.jobId)).toBe(c.fingerprint)
+  })
+
+  it('a discard or a lost right while a change awaits: refused inside the write, nothing changed', async () => {
+    const d = await candidate(dave)
+    between = () => { ok(proposals.discard(dave, d.id)) }
+    expect(await revise(dave, d, { minutes: 30 })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    // 営業部 taken from her while the Skill is read: the places check (read again after the awaits) refuses it.
+    const c = await candidate(carol)
+    between = () => {
+      db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('jp-sales-c', ?, 'jp-sales', 'user', 'u-carol', 0, 0, ?)").run(CO, TS)
+    }
+    try {
+      expect(await revise(carol, c, { minutes: 30 })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    } finally { between = null; db.prepare("DELETE FROM scope_rules WHERE id = 'jp-sales-c'").run() }
+    expect(stored(c.id).fingerprint).toBe(c.fingerprint)
+    // The shelf Skill's place lost after it was pinned, while the places are asked: only the rights check in the write sees it.
+    const shelf = proposalsWith({ folder: false })
+    const s = ok(await shelf.createCandidate(alice, null, input({ skill: 'shelf-1' })))
+    duringGit = () => { shelfHidden = true }
+    try {
+      expect(await shelf.revise(alice, s.id, { fingerprint: s.fingerprint, input: input({ skill: 'shelf-1', minutes: 30 }) })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    } finally { duringGit = null; shelfHidden = false }
+    expect(stored(s.id).fingerprint).toBe(s.fingerprint)
+  })
+})
+
 describe('approve, withdraw, return: one wins, only from submitted', () => {
   it('the three at once: exactly one wins, the others are told it is decided', async () => {
     const { p } = await submitted(bob)
@@ -794,6 +996,16 @@ describe('the routes: the AI’s token makes a candidate, never a run’s; the s
     expect((await call({ token: consultation, method: 'POST', path: `/api/companies/${co}/me/job-candidates/${spare.id}/discard` })).status).toBe(401)
     expect(await as('jq-alice', 'POST', `/me/job-candidates/${spare.id}/discard`)).toMatchObject({ status: 200, body: { data: { discarded: true } } })
     expect((await as('jq-alice', 'GET', `/me/job-candidates/${spare.id}`)).status).toBe(410)
+    // A change from the card is the session's too: a record token alone is not signed in, so the AI never changes a candidate.
+    const changing = (await placed(['人事部'])).body.data
+    const revisePath = `/api/companies/${co}/me/job-candidates/${changing.id}/revise`
+    const changed = { fingerprint: changing.fingerprint, input: input({ skill: item, reads: ['人事部'], deliverable: null, minutes: 30 }) }
+    expect((await call({ token: consultation, method: 'POST', path: revisePath, body: changed })).status).toBe(401)
+    expect((await call({ token: runToken, method: 'POST', path: revisePath, body: changed })).status).toBe(401)
+    const revised = await as('jq-alice', 'POST', `/me/job-candidates/${changing.id}/revise`, changed)
+    expect(revised).toMatchObject({ status: 200, body: { data: { id: changing.id, definition: { grant: { limits: { minutes: 30 } } } } } })
+    expect(revised.body.data.fingerprint).not.toBe(changing.fingerprint)
+    expect(await as('jq-alice', 'POST', `/me/job-candidates/${changing.id}/revise`, changed)).toMatchObject({ status: 409, body: { code: 'JOB_VERSION_FINGERPRINT' } })
     const submittedR = await as('jq-alice', 'POST', `/me/job-candidates/${created.body.data.id}/submit`, { fingerprint: created.body.data.fingerprint })
     expect(submittedR.status).toBe(201)
     expect((await as('jq-alice', 'POST', `/me/job-candidates/${created.body.data.id}/submit`, { fingerprint: created.body.data.fingerprint })).status).toBe(200)

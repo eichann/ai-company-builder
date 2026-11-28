@@ -179,6 +179,11 @@ const NO_SUCH_CANDIDATE = `jc.${'0'.repeat(32)}`
 const NO_SUCH_PROPOSAL = `jp.${'0'.repeat(32)}`
 /** The other company's candidate and proposal, made by this company's owner (who is also there): the cross axis's worst case. */
 const OTHER_CANDIDATE = `jc.${'e'.repeat(32)}`
+/** A well-formed change from the card (revise): the cross-tenant rows must reach the candidate lookup, not the body check. */
+const REVISE_INPUT = {
+  skill: 'weekly', trigger: { every: 'day', at: '09:00', businessDaysOnly: false }, check: { kind: 'new_meetings' }, reads: [], deliverable: null,
+  readRecords: false, mailDrafts: false, minutes: 15, missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+}
 const OTHER_PROPOSAL = `jp.${'e'.repeat(32)}`
 const OTHER_PLAN = `bp_${'e'.repeat(32)}`
 const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
@@ -294,6 +299,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/job-candidates', w => ({ path: `${C(w)}/me/job-candidates`, body: {} }), [409, 409, 409, 409, 404, 401], 'no X-ACB-Job-Schemas naming 5'),
   r('GET /api/companies/:companyId/me/job-candidates/:candidateId', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/job-candidates/:candidateId/discard', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/discard` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/job-candidates/:candidateId/revise', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/revise`, body: {} }), [400, 400, 400, 400, 404, 401], 'no fingerprint'),
   r('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/submit`, body: {} }), [400, 400, 400, 400, 404, 401], 'no fingerprint'),
   r('GET /api/companies/:companyId/me/job-proposals', w => ({ path: `${C(w)}/me/job-proposals` }), MEMBERS),
   r('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', w => ({ path: `${C(w)}/me/job-proposals/${NO_SUCH_PROPOSAL}/withdraw` }), [404, 404, 404, 404, 404, 401]),
@@ -962,6 +968,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/me/jobs/:jobId/accept', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/accept`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/me/job-candidates/:candidateId', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}` }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
   x('POST /api/companies/:companyId/me/job-candidates/:candidateId/discard', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/discard` }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
+  x('POST /api/companies/:companyId/me/job-candidates/:candidateId/revise', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/revise`, body: { fingerprint: 'sha256:f', input: REVISE_INPUT } }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
   x('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/submit`, body: { fingerprint: 'sha256:f' } }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
   x('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', (w, id) => ({ path: `${C(w)}/me/job-proposals/${id}/withdraw` }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),
   x('POST /api/companies/:companyId/job-proposals/:proposalId/return', (w, id) => ({ path: `${C(w)}/job-proposals/${id}/return`, body: { reason: 'OTHER' } }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),

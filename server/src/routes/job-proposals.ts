@@ -13,6 +13,7 @@
  *   GET  /me/job-candidates/:candidateId             the caller's candidate
  *   POST /me/job-candidates/:candidateId/submit       { fingerprint } → 201 (200 when submitted already)
  *   POST /me/job-candidates/:candidateId/discard      「やめる」: the creator's own, not submitted yet
+ *   POST /me/job-candidates/:candidateId/revise       { fingerprint, input } the card changed in place → the candidate rebuilt and checked
  *   GET  /me/job-proposals                            the caller's proposals
  *   POST /me/job-proposals/:proposalId/withdraw       the proposer, only while it waits
  *   GET  /job-proposals?state=                        owner / admin
@@ -59,6 +60,9 @@ jobProposalsRoute.post('/me/job-candidates/:candidateId/submit', companyMember, 
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, result.value.created ? 201 : 200)
 })
+
+jobProposalsRoute.post('/me/job-candidates/:candidateId/revise', companyMember, serviceBody, async (c) =>
+  answer(c, await jobProposals.revise(c.var.member, c.req.param('candidateId'), c.var.body)))
 
 jobProposalsRoute.post('/me/job-candidates/:candidateId/discard', companyMember, (c) => answer(c, jobProposals.discard(c.var.member, c.req.param('candidateId'))))
 

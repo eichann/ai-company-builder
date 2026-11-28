@@ -1467,7 +1467,7 @@ export const scenes: Scene[] = [
     viewport: { width: 1000, height: 800 },
     crop: { target: 'role=region[name="受け箱"]', padding: 0 },
     annotations: [
-      { box: 'role=region[name="あなた待ち"] >> h3' }, { marker: { target: 'role=region[name="あなた待ち"] >> h3', label: '1', at: 'right' } },
+      { box: 'role=region[name="あなた待ち"] >> h3' }, { marker: { target: 'role=region[name="あなた待ち"] >> h3', label: '1', at: 'top-left' } },
       { box: 'role=button[name=/^確かめて送る/] >> nth=0' }, { marker: { target: 'role=button[name=/^確かめて送る/] >> nth=0', label: '2', at: 'left' } },
       { box: 'role=region[name="新着"] >> h3' }, { marker: { target: 'role=region[name="新着"] >> h3', label: '3', at: 'right' } },
       { box: 'role=button[name="確認した"] >> nth=0' }, { marker: { target: 'role=button[name="確認した"] >> nth=0', label: '4', at: 'left' } },
@@ -1483,8 +1483,22 @@ export const scenes: Scene[] = [
     steps: [{ click: 'role=button[name="すべて確認した"]' }, { waitFor: 'text=新着はありません。全部確認しました。' }, SETTLE],
     crop: { target: 'role=region[name="受け箱"]', padding: 0 },
     annotations: [
-      { box: 'role=button[name=/^新着 0/]' }, { marker: { target: 'role=button[name=/^新着 0/]', label: '1', at: 'below' } },
+      { box: 'role=region[name="新着"] >> h3' }, { marker: { target: 'role=region[name="新着"] >> h3', label: '1', at: 'right' } },
       { box: 'role=button[name=/^確認したもの/]' }, { marker: { target: 'role=button[name=/^確認したもの/]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'inbox-beside',
+    about: 'Working through the inbox: the kind chips, an approval\'s card beside the list with 「3 / 9」 and ［前の件］［次の件］.',
+    page: 'inbox',
+    query: { manual: '1', approvals: '6' },
+    viewport: { width: 1200, height: 800 },
+    steps: [{ click: '[data-inbox-row="record:approval-more0001"] >> role=button[name="承認する…"]' }, { waitFor: 'role=region[name="承認のお願い"] >> role=button[name="承認"]' }, SETTLE],
+    crop: { target: 'role=region[name="受け箱"]', padding: 0 },
+    annotations: [
+      { box: 'role=group[name="種類で絞る"]' }, { marker: { target: '[data-inbox-kind="notice"]', label: '1', at: 'right' } },
+      { marker: { target: 'role=region[name="承認のお願い"] >> role=group[name="承認のお願い"]', label: '2', at: 'left' } },
+      { box: 'role=group[name="一覧の何件目か"]' }, { marker: { target: 'role=button[name="次の件"]', label: '3', at: 'right' } },
     ],
   },
   {

@@ -171,6 +171,16 @@ describe('the candidate is the server’s, from the member’s choices only', ()
     expect(codeOf(proposals.candidate(bob, c.id))).toBe('JOB_CANDIDATE_NOT_FOUND')
   })
 
+  it('a set watch’s candidate is never changed by the card’s revise (it is made from 「見張りを足す」’s choices)', async () => {
+    const c = ok(await proposals.createSetWatchCandidate(alice, choice(), READS)) as Json
+    const time = {
+      skill: 'sales-proposal-auto', trigger: { every: 'day', at: '09:00', businessDaysOnly: false }, check: { kind: 'new_meetings' }, reads: [], deliverable: null,
+      readRecords: false, mailDrafts: false, minutes: 15, missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+    }
+    expect(codeOf(await proposals.revise(alice, c.id, { fingerprint: c.fingerprint, input: time }))).toBe('JOB_CANDIDATE_NOT_REVISABLE')
+    expect(ok(proposals.candidate(alice, c.id))).toMatchObject({ fingerprint: c.fingerprint, definition: { schema: 5 } })
+  })
+
   it('no other key is taken (a name, a responsible person, a place, limits) and the combination must be an opened one', async () => {
     for (const extra of [{ name: '勝手な名前' }, { actingUser: bob.userId }, { writes: { area: 'deliverable', place: SALES, folder: 'x' } }, { limits: { minutes: 120, runsPerDay: 24 } }]) {
       expect(await proposals.createSetWatchCandidate(alice, choice(extra), READS)).toMatchObject({ ok: false, body: { code: 'BAD_JOB_CANDIDATE', problems: ['UNKNOWN_KEY'] } })

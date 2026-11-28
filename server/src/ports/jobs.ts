@@ -385,6 +385,11 @@ export interface JobRepository {
   insertCandidate(row: JobCandidateRow): void
   /** 「やめる」: `createdBy`'s candidate is marked discarded (its fingerprint replaced: nothing can submit it). Whether a row changed. */
   discardCandidate(candidateId: string, createdBy: string): boolean
+  /**
+   * A revise (the member changed the card, UX 段3 #13): `createdBy`'s candidate takes the new canonical definition and its
+   * fingerprint, only while it still holds `fromFingerprint` (compare-and-set; never a discarded one). Whether a row changed.
+   */
+  reviseCandidate(candidateId: string, createdBy: string, fromFingerprint: string, definition: string, fingerprint: string): boolean
   /** The content of every candidate of the company past its time is deleted (the proposal records stay). How many. */
   dropExpiredCandidates(now: string): number
   proposal(proposalId: string): JobProposalRow | null

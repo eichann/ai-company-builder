@@ -1,6 +1,6 @@
 // ACB foundation: the parts of working through a list (shared/lib/workThrough.ts) — the bar over the item shown and the
 // list's line after an item was done with — drawn alike by the やること list (app/), a 案件's やること (features/records)
-// and next the inbox. Rules: tasks-ui.md "Working through a list".
+// and the inbox (features/inbox). Rules: tasks-ui.md "Working through a list".
 import { useSyncExternalStore } from 'react'
 import { ArrowDown, ArrowUp, X } from '@phosphor-icons/react'
 import { noticeOf, subscribeWork, type WorkPosition } from '../lib/workThrough'

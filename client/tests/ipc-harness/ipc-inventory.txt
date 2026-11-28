@@ -188,6 +188,10 @@ contract.invoke google:untrustDriveFolder
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke inbox:contact
+contract.invoke inbox:contactArchived
+contract.invoke inbox:finishContact
+contract.invoke inbox:undoContact
 contract.invoke jobProposals:candidate
 contract.invoke jobProposals:createSetWatch
 contract.invoke jobProposals:discard
@@ -482,6 +486,7 @@ contract.type ElectronAPI.exportManual = exportManual: Invoke<'manual:export'>
 contract.type ElectronAPI.findDocViewQuote = findDocViewQuote: Invoke<'docView:findQuote'>
 contract.type ElectronAPI.findRecords = findRecords: Invoke<'recordViews:find'>
 contract.type ElectronAPI.findRecordsHome = findRecordsHome: Invoke<'recordViews:findHome'>
+contract.type ElectronAPI.finishContact = finishContact: Invoke<'inbox:finishContact'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
 contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
@@ -513,6 +518,8 @@ contract.type ElectronAPI.getClaudeCodeStatus = getClaudeCodeStatus: Invoke<'con
 contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'>
 contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
 contract.type ElectronAPI.getConsultationTopics = getConsultationTopics: Invoke<'recordViews:topics'>
+contract.type ElectronAPI.getContact = getContact: Invoke<'inbox:contact'>
+contract.type ElectronAPI.getContactArchived = getContactArchived: Invoke<'inbox:contactArchived'>
 contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getDriveTrustedFolders = getDriveTrustedFolders: Invoke<'google:driveTrustedFolders'>
@@ -725,6 +732,7 @@ contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
 contract.type ElectronAPI.submitJobProposal = submitJobProposal: Invoke<'jobProposals:submit'>
 contract.type ElectronAPI.suggestTaskTags = suggestTaskTags: Invoke<'tasks:suggestTags'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
+contract.type ElectronAPI.undoContactFinish = undoContactFinish: Invoke<'inbox:undoContact'>
 contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
 contract.type ElectronAPI.undoTaskAction = undoTaskAction: Invoke<'tasks:undo'>
 contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
@@ -1038,6 +1046,10 @@ contract.type IpcInvokeChannels.'google:untrustDriveFolder' = 'google:untrustDri
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'inbox:contact' = 'inbox:contact': { args: [companyId: string, recordId: string]; result: ContactReadResult }
+contract.type IpcInvokeChannels.'inbox:contactArchived' = 'inbox:contactArchived': { args: [companyId: string, interactionId: string, afterVersion: number]; result: ContactArchivedResult }
+contract.type IpcInvokeChannels.'inbox:finishContact' = 'inbox:finishContact': { args: [companyId: string, interactionId: string, input: ContactFinishRequest]; result: ContactFinishAnswer }
+contract.type IpcInvokeChannels.'inbox:undoContact' = 'inbox:undoContact': { args: [companyId: string, interactionId: string, input: ContactUndoRequest]; result: ContactUndoAnswer }
 contract.type IpcInvokeChannels.'jobProposals:candidate' = 'jobProposals:candidate': { args: [companyId: string, candidateId: string]; result: JobCandidateResult }
 contract.type IpcInvokeChannels.'jobProposals:createSetWatch' = 'jobProposals:createSetWatch': { args: [companyId: string, choice: SetWatchChoice]; result: SetWatchCandidateResult }
 contract.type IpcInvokeChannels.'jobProposals:discard' = 'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
@@ -1419,6 +1431,10 @@ main.handle google:untrustDriveFolder @ features/google/ipc.ts (companyId: strin
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle inbox:contact @ features/inbox/contact-ipc.ts (companyId, id)
+main.handle inbox:contactArchived @ features/inbox/contact-ipc.ts (companyId, interactionId, afterVersion)
+main.handle inbox:finishContact @ features/inbox/contact-ipc.ts (companyId, interactionId, input)
+main.handle inbox:undoContact @ features/inbox/contact-ipc.ts (companyId, interactionId, input)
 main.handle jobProposals:candidate @ features/jobs/proposals.ts (companyId, candidateId)
 main.handle jobProposals:createSetWatch @ features/jobs/proposals.ts (companyId, choice)
 main.handle jobProposals:discard @ features/jobs/proposals.ts (companyId, candidateId)
@@ -1700,6 +1716,8 @@ preload findRecords -> invoke recordViews:find($0, $1, $2)
 preload findRecords : (companyId: string, text: string, today: string) => Promise<FindResult>
 preload findRecordsHome -> invoke recordViews:findHome($0, $1, $2, $3)
 preload findRecordsHome : (companyId: string, today: string, from: string, to: string) => Promise<FindHomeResult>
+preload finishContact -> invoke inbox:finishContact($0, $1, $2)
+preload finishContact : (companyId: string, interactionId: string, input: ContactFinishRequest) => Promise<ContactFinishAnswer>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
 preload flushChatSession : (companyId: string, session: ChatSession) => ChatSaveReceipt
 preload focusChatWindow -> invoke chatWindow:focus($0)
@@ -1762,6 +1780,10 @@ preload getCompanies -> invoke api:getCompanies()
 preload getCompanies : () => Promise<CompaniesResult>
 preload getConsultationTopics -> invoke recordViews:topics($0, $1)
 preload getConsultationTopics : (companyId: string, recordIds: string[]) => Promise<ConsultationTopicsResult>
+preload getContact -> invoke inbox:contact($0, $1)
+preload getContact : (companyId: string, recordId: string) => Promise<ContactReadResult>
+preload getContactArchived -> invoke inbox:contactArchived($0, $1, $2)
+preload getContactArchived : (companyId: string, interactionId: string, afterVersion: number) => Promise<ContactArchivedResult>
 preload getDefaultParentFolder -> invoke companySetup:defaultParentFolder()
 preload getDefaultParentFolder : () => Promise<{ success: boolean; folder?: string | undefined; }>
 preload getDepartments -> invoke api:getDepartments($0)
@@ -2186,6 +2208,8 @@ preload suggestTaskTags -> invoke tasks:suggestTags($0, $1, $2)
 preload suggestTaskTags : (companyId: string, title: string, tagsInUse: string[]) => Promise<TagSuggestions>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
 preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<FileOpResult>
+preload undoContactFinish -> invoke inbox:undoContact($0, $1, $2)
+preload undoContactFinish : (companyId: string, interactionId: string, input: ContactUndoRequest) => Promise<ContactUndoAnswer>
 preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)
 preload undoPluginOperation : (companyId: string, pluginId: string, operationId: string, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload undoTaskAction -> invoke tasks:undo($0, $1, $2, $3)
