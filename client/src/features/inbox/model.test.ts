@@ -112,7 +112,7 @@ test('a meeting the AI reads is shown but never counted; a finished one is 新�
   assert.deepEqual(v.news.map(i => [i.key, i.meetingNews]), [['record:meeting-d', true]])
   assert.deepEqual(v.seen.map(i => i.key), ['record:meeting-s'])
   assert.deepEqual(v.waiting.map(i => [i.key, i.badge.tone]), [['record:meeting-x', 'failed']])
-  assert.deepEqual(v.counts, { waiting: 1, news: 1, seen: 1 })
+  assert.deepEqual(v.counts, { waiting: 1, news: 1, seen: 1, elsewhere: 0 })
 })
 
 test('an arrived meeting whose notice was already read (or switched off) stays in sight, not counted, never hidden in 確認したもの', () => {
@@ -180,7 +180,7 @@ test('unread notices past the server\'s list are told, never counted as 新着 (
 
 test('records off with no notices of the company: nothing; with its own notices: those only', () => {
   const off: NoticesState = { available: false, myTurn: { total: 0, items: [] }, notices: { available: false, unread: 0, items: [] } }
-  assert.deepEqual(inboxView(off).counts, { waiting: 0, news: 0, seen: 0 })
+  assert.deepEqual(inboxView(off).counts, { waiting: 0, news: 0, seen: 0, elsewhere: 0 })
 })
 
 test('counts stop at 99+', () => {

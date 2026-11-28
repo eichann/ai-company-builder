@@ -71,6 +71,11 @@ export interface InboxItem {
   meetingNews?: true
   /** 「あと1日で読めなくなります」: a meeting still waiting to be read that the server drops tomorrow. */
   expiresSoon?: true
+  /**
+   * A 新着 row the member opened in this look (owner decision 2026-11-28, 11番-3): already read on the server, kept in its
+   * place until the chips change (`workModel.ts` `withLingering`) — no dot, not counted.
+   */
+  seenHere?: true
   /** ［元に戻す］ of a notice that offers it (UNDOABLE_NOTIFICATION_KINDS, `ai_changed`). */
   undo?: { noticeId: string; recordId: string; version: number; aiChange?: { pluginId: string; operationId: string } }
 }
@@ -286,9 +291,14 @@ export interface InboxView {
   seen: InboxItem[]
   /** Unread notices the server counts but did not list (past its newest 50, so older ones): told under 確認したもの. */
   unreadNotListed: number
-  /** The server's turn was past its first 200: an approval or a mail beyond it is in the left list. */
+  /** The server's turn was past its first 200: an approval or a mail beyond it may not be listed yet. */
   turnNotListed: boolean
-  counts: { waiting: number; news: number; seen: number }
+  /**
+   * 案2 (owner decision 2026-11-28, 11番): what else of this week's turn waits for the member but is not あなた待ち (a task due
+   * today, overdue, 引き受け待ち…) — told beside the red count as 「ほかに … N 件は『やること』で」, never a row or a red count.
+   * The complement of `waitingTurnRow` over the same turn, so the two can never disagree.
+   */
+  counts: { waiting: number; news: number; seen: number; elsewhere: number }
   /** What 「すべて確認した」 marks: every news row's unread notices, and the finished meetings among them (this PC). */
   newsNoticeIds: string[]
   newsMeetingIds: string[]
@@ -303,9 +313,11 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   contacts?: ContactsOfRows): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
+  const elsewhereIds: string[] = []
   for (const item of turn.items) {
     const row = waitingTurnRow(item)
     if (row) rows.set(row.key, row)
+    else elsewhereIds.push(item.id)
   }
   for (const m of meetings) if (!rows.has(`record:${m.id}`)) rows.set(`record:${m.id}`, meetingRow(m))
   const since = Date.parse(newsSince)
@@ -362,6 +374,9 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   const all = [...rows.values(), ...(browser ? browserRows(browser) : [])]
   const pick = (s: InboxSection) => all.filter(r => r.section === s)
   const waiting = pick('waiting').sort(byNeed)
+  // A task of the turn that a stop made a row of あなた待ち is that row (red), never also told beside it.
+  const waitingKeys = new Set(waiting.map(i => i.key))
+  const elsewhere = elsewhereIds.filter(id => !waitingKeys.has(`record:${id}`)).length
   const news = pick('new').sort(newestFirst)
   const seen = pick('seen').sort(newestFirst)
   const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0
@@ -369,7 +384,7 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
     waiting, news, moving: pick('moving'), seen,
     unreadNotListed: source.available ? Math.max(0, source.notices.unread - listedUnread) : 0,
     turnNotListed: turn.total > turn.items.length,
-    counts: { waiting: waiting.length, news: news.length, seen: seen.length },
+    counts: { waiting: waiting.length, news: news.length, seen: seen.length, elsewhere },
     newsNoticeIds: news.flatMap(i => i.unreadNoticeIds),
     newsMeetingIds: news.filter(i => i.meetingNews && i.meetingId).map(i => i.meetingId!),
   }

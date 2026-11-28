@@ -255,7 +255,8 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
 ## Working through a list (UX 点検 14, owner decision 2026-11-28, 案A)
 
 The list stays beside the item it shows, and the member goes through it one item after another. One set of
-promises for every such list — the やること list, a 案件・プロジェクト's みんなのやること, and next the inbox (点検 11) —
+promises for every such list — the やること list, a 案件・プロジェクト's みんなのやること, and the inbox (点検 11, list key `inbox`;
+`notifications.md` "Working through the inbox") —
 kept in `client/src/shared/` because two or more features use it: `lib/workThrough.ts` (pure: `positionIn`, `stepIn`,
 `nextAfterLeaving`; memory-only per list: the order on screen, the place, the notice), `hooks/useWorkThrough.ts` (the
 side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThroughNotice`). A list is named by a key
@@ -286,7 +287,10 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
   `undoOfEnded` (`workThrough.ts`; pressed in another era it does nothing). The やること list's reads too
   (`useTaskList`, `listAnswers.ts` `answerStillWanted`): a reload asked by the company left behind (an undo's follow-up)
   reads nothing, and an answer read for another company or in an earlier era is dropped — it used to blank the new
-  company's list until the next look. **The inbox (段2) uses the same era** for what it starts, never a check of its own.
+  company's list until the next look. **The inbox uses the same era** for what it starts (its ［取り消す］ is `undoOfEnded`,
+  a contact's press and undo `contactPress.ts`), never a check of its own. An undo may answer `{ done }`: words that
+  replace 「『…』を元に戻しました」 (the inbox's 「メールは Gmail でアーカイブされたままです」), or `{ again }`: not reached, its words
+  and 取り消す kept to press again (`WorkUndoAnswer`).
   Tests: `workThrough.test.ts` 「取り消す answered after another company…」 / 「取り消す kept on screen past a company
   change…」, `src/stores/appStore.test.ts` (which changes end the era), `listAnswers.test.ts` 「a read of the company
   left behind…」 — mutation-checked.

@@ -18,6 +18,7 @@ paths:
   - "client/src/features/inbox/**"
   - "client/tests/inbox-ui.*"
   - "client/tests/ui/inbox.spec.ts"
+  - "client/tests/ui/contact-card.spec.ts"
   - "shared/core/turn-timing.ts"
   - "shared/core/notification-settle.ts"
   - "server/tests/unit/notification-settle.test.ts"
@@ -426,8 +427,11 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
   確認したもの — it may run out, and a failed reading says so on its line), and approved
   browser plans waiting for their result.
 - **Tasks are never rows or counts here** (decision ②/E4): the task list's 「今日」「このあと」「期限切れ」 hold them
-  (`tasks-ui.md`); a task due today is not in the inbox. 「今日が期限のものを含め、あなたのやることは左の「やること」にあります。
-  受け箱では数えません。」 says so at the bottom.
+  (`tasks-ui.md`); a task due today is not in the inbox. **案2** (owner decision 2026-11-28, 11番-1): beside あなた待ち's
+  count, 「ほかに 今日が期限など N 件は『やること』で →」 (`data-inbox-elsewhere`, opens the task list) — N is
+  `InboxView.counts.elsewhere`, this week's turn items that `waitingTurnRow` does not make a row: the complement of the red
+  count over the same turn, in the same loop, so the red-count rule stays in one place and the two never disagree. Not
+  shown at 0. The line at the bottom (「…受け箱では数えません。」) is gone (the difference is said once, here).
 - **The first day** (decision Q4): `INBOX_NEWS_SINCE` (2026-11-26 00:00 Japan) — a notice (or a finished meeting) from before
   it starts in 「確認したもの」 (still unread on the server: opening it marks it read). **One fixed instant, nothing stored**:
   a 「first day of this PC」 marker would, on the member's second PC opened later, take notices that came after the first
@@ -452,7 +456,8 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
   answered after a company change shows nothing (the company era). **Nothing is stored** (`inboxView` rebuilds every
   answer; no new server table; the contact IPC of `inbox.md` is the only addition).
 - **Nothing irreversible from a row**: `InboxAction` has no approve or send — ［承認する…］ / ［開く…］ open the approval card
-  (`ApprovalCard`), ［確かめて送る…］ the mail draft card, a plan's ［承認する…］ / ［確かめる…］ its card (`InboxCardDialog`).
+  (`ApprovalCard`), ［確かめて送る…］ the mail draft card, a plan's ［承認する…］ / ［確かめる…］ its card, beside the list
+  ("Working through the inbox" below).
   The type test in `model.test.ts` and the hook's exhaustive switch fail to compile when an action kind that approves,
   sends, runs or confirms is added. The one blue button of a row is what あなた待ち asks for; news only opens.
 - **［元に戻す］** (`replied_done`, `mail_*`, `ai_changed`): on whatever row its notice lands, the newest such notice of a
@@ -464,11 +469,73 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
 ### The title bar's ［受け箱］ (owner decision 2026-11-26, look 「2」; the rest of the bar: `renderer-structure.md` "The title bar")
 - **One button** (`components/InboxButton.tsx`, the slot's `titleBarButton`): the tray icon, **a soft blue count = 新着**
   (`selected-bg` / `selected-text`, `data-inbox-news`) and **a soft red count = あなた待ち** (`danger-bg` / `danger-text`,
-  `data-inbox-waiting`), each exactly as the list counts it (`InboxView.counts`; 99+); no word 「受け箱」, no solid pill, no dot; a
+  `data-inbox-waiting`), each exactly as the list counts it (`InboxView.counts`; 99+; the only place the two counts show,
+  the chips carry none: "Working through the inbox"); no word 「受け箱」, no solid pill, no dot; a
   count of 0 is not shown. Its name (aria-label and tooltip alike, `inboxButtonName`): 「受け箱：新着 N 件・あなた待ち N 件 (⌘J)」.
   Pressing it opens or closes the bottom panel — the same state as ⌘J. No button when there is no inbox.
 - The morning summary's Mac notification and ⌘K 「受け箱」 open the inbox (`useOpenTasksRequest`, `AppDialogs`).
 - 「知らせの設定」 is in the inbox's heading (a late answer never reopens it once closed).
+
+### Working through the inbox (UX 点検 11, owner decisions 2026-11-28 「11番」, all as recommended)
+The list the member goes through one row after another — the same promises as the やること list (`tasks-ui.md` "Working
+through a list", list key `inbox`). Pure parts in `features/inbox/workModel.ts`; the slot (`useInboxSlot`) holds the look.
+Never a row's own approve or send (unchanged): only the card's buttons act.
+
+- **The chips switch, the title bar counts** (decision 7): ［あなた待ち］［新着］ carry no number (the title bar's ［受け箱］ has
+  both, the one place they show; 案4's left destination takes that place in stage 5); 「確認したもの N」 keeps its own. Each
+  section's heading keeps its count (under the kind chosen); あなた待ち's is red only under すべて (narrowed it is a part,
+  never a second red count).
+- **Kinds** (`INBOX_KINDS`, `kindOf`): すべて・止まった (a stop)・承認 (anything about an approval, a browser plan's included)・
+  連絡・メール (a 連絡, a 来た連絡 / 返事のお願い before its contact was read, a mail to send)・知らせ (the rest), each with its count
+  over the chip's sections, counted as the headings count (what moves on by itself and a 新着 kept in place are shown,
+  never counted). **On one line** (decision 6): under 440 px (`KINDS_FIT_PX`, measured with `useIsNarrowerThan`)
+  すべて and the first two stay and the rest are one 「その他」 select (`foldKinds`), which shows the kind chosen when it is
+  among them. Another chip or kind is a new look.
+- **15 rows first** (decision 4, `INBOX_PAGE`): the first 15 rows across the sections in order (`paged`); reaching the end
+  (`useWhenVisible`, an IntersectionObserver on a callback ref, no effect) or pressing 「続きを表示（あと N 件）」 draws 15 more.
+  **The rows are what main already read**: going down asks the server nothing (`/records/my-turn` holds the turn's first
+  200, `/me/notifications` the newest 50, as before; `inbox.spec.ts` counts the reads). 「左の『やること』で見てください」 is
+  gone; past the turn's 200 a quiet line says some approvals or mail may not be shown yet (`turnNotListed`, no redirect).
+- **新着 opened stays in place** (decision 3, `withLingering`): opening a row (a click, Enter, ↑ ↓) marks exactly its
+  notices read as before — the blue count goes down by one — and the row stays where it was in 新着, without its dot or
+  ［確認した］ and not counted (`InboxItem.seenHere`), until the chip or the kind changes or the panel opens again; then it is
+  in 確認したもの. ［確認した］ on a row still takes it away at once. A kept row that became あなた待ち is that row only. The
+  inbox keeps only the keys: a kept row is drawn from the server's row of now (`view.seen`), so one the server no longer
+  lists (gone, or no longer the member's to read) is not shown.
+- **Replies** (decision 2): a reply that came to a contact is 新着 (its `reply_arrived` notice), never あなた待ち; a contact that
+  only waits for a reply has no unread notice and is no 新着 row (where 返事待ち lives — the 「連絡」 destination — is stage 5).
+- **Beside the list** (`besideCardOf`): an approval, a mail draft, a browser plan or a 連絡 opens its card **beside the
+  list inside the panel** (`region` named 「承認のお願い」 / 「送るメールの下書き」 / 「承認のお願い（ブラウザ操作）」 / 「連絡」, one line
+  of why the card comes first), with `WorkThroughBar` (「3 / 9」, ［前の件］［次の件］, ［閉じる］); the list narrows to two
+  fifths. A record, the task list or 定期の仕事 open where they live, as before (the middle's preview tab, the settings).
+  `InboxCardDialog` is gone.
+- **Keys** (`useWorkThrough`, commands `list.*` with target `inbox`): ↓ / j and ↑ / k open the next / previous row (a card
+  beside, a record in the middle — and a 新着 row opened this way is read and kept in place), Enter moves into the card,
+  Esc back to its row; never from a field, a menu or a dialog.
+- **The next one after a press** (common decision): a card's own press that finished it there hands the inbox `onDone`
+  (`ApprovalCard`: approved, sent back, withdrawn, 「同じ」 — only when the request's state says so, `DONE_STATE`: an approve
+  answered `failed` or `stale` stays on its card; `MailDraftCard` / `PreparedMailCard`: sent with a known result,
+  thrown away; `BrowserPlanCard`: cancelled, or 済んでいた / されていなかった — **not** after ［任せる］, whose result is read on
+  the card first; `ContactCard` `onFinished`: a finish written). The next row takes its place (`work.ended`; the last
+  one → the card goes) and the list says 「『…』を片づけました。次の件です」; ［取り消す］ only where the press can be taken back (a
+  contact's finish, at the versions it answered); approvals and sends cannot. A send whose result nobody knows stays.
+  A press answered after the member opened another card changes nothing on screen (that card stays). When the list was
+  read again first and the finished row is already gone, the row now in its place comes next (`Beside.at`, the same line).
+  The contact's undo from the list: not reached → its words and ［取り消す］ again (`WorkUndoAnswer` `{ again }`); whether
+  Gmail keeps the mail not known → no Gmail line, never 「元に戻せませんでした」.
+- **Another company**: AppShell is keyed by company (the look starts again), every list's order, place and line are
+  forgotten (`forgetAllWork`) and the inbox's ［取り消す］ and a contact's press are bound to the company era — answered after
+  the switch they change nothing on screen.
+- **Not here (stage 5, 案4's skeleton)**: folding the consultation list when a card opens beside (decision 5: today the chat
+  pane is beside the middle, the bottom panel under it — folding the list would give the inbox no room), the 「連絡」
+  destination with ［返事待ち］, the counts on the left destination, 案B (the card large with 前へ・次へ) on a narrow window.
+- Tests: `src/features/inbox/workModel.test.ts` (案2's complement, replies 新着, kept in place and not counted, never twice,
+  kinds and counts, 15 and the next page, 「その他」, which rows open beside), `src/shared/lib/workThrough.test.ts` (an undo's own
+  words), `tests/ui/inbox.spec.ts` (countless chips, the card beside, the next one after 承認 without ［取り消す］, the keys, 15
+  rows and the rest with no read, kinds and 「その他」 at 360 px, 案2's line), `tests/ui/contact-card.spec.ts` (the next one
+  after ［返した］, the list's ［取り消す］ with the Gmail line, refused undo), `tests/ui/title-bar-notices.spec.ts` (kept in
+  place) — mutation-checked.
+
 
 - Tests: `src/features/inbox/model.test.ts` (the red count holds only stops, approvals and mail — never a task due today, a
   resting turn item or a notice that only tells; opening one 新着 row lowers the count by one and only a new notice raises it;

@@ -1,9 +1,12 @@
+// The inbox's slot: the chips, the list worked through and the card beside it, and 「知らせの設定」. Over ~300 lines on
+// purpose: what opening a row does (read, kept in place, beside or in the middle, the next after a card's press) is one
+// sequence that reads the same state, and splitting it would pass that state around.
 import { useMemo, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { NOTICES_OFFLINE_TEXT, type MeetingNewsRow, type NoticesState } from '../../../../shared/notifications-app'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../../notifications/api'
-import { InboxChips, InboxList, type InboxRowButton } from '../components/InboxList'
-import { InboxCardDialog } from '../components/InboxCardDialog'
+import { InboxChips, InboxList, KindChips, type InboxRowButton } from '../components/InboxList'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
 import { hasFullAccessIn, readContact, type ContactReads, type ContactWrites } from '../api'
@@ -13,6 +16,12 @@ import { ContactCard } from '../components/ContactCard'
 import { CONTACT_ROW_READS, createContactStore, shownView } from '../contactStore'
 import { contactsToRead, inboxView, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 import { CONTACT_NAME } from '../../../../shared/thing-words'
+import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, paged, sectionsOf, type BesideCard, type InboxKind } from '../workModel'
+import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
+import { WorkThroughBar, WorkThroughNotice } from '../../../shared/ui/WorkThrough'
+import { commandArea } from '../../../shared/commands/commands'
+import { endedWords, orderOf as listOrder, setWorkNotice, undoOfEnded, type WorkUndoAnswer } from '../../../shared/lib/workThrough'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 
 interface InboxSlotInput {
   companyId: string | undefined
@@ -33,14 +42,17 @@ interface InboxSlotInput {
   onOpenRecord: (recordId: string) => void
   onOpenTasks: () => void
   onOpenJobs: () => void
-  /** The app's own cards (features/chat), composed by AppShell: the inbox only shows them in its dialog. */
-  renderApprovalCard: (approvalId: string) => ReactNode
-  renderMailDraft: (messageId: string) => ReactNode
+  /**
+   * The app's own cards (features/chat), composed by AppShell: the inbox only shows them beside its list. `onDone`: a
+   * press on the card finished it there (approved, sent…), so the inbox goes on to the next row.
+   */
+  renderApprovalCard: (approvalId: string, onDone: () => void) => ReactNode
+  renderMailDraft: (messageId: string, onDone: () => void) => ReactNode
   /**
    * 「ブラウザ操作」's plans, composed by AppShell with a company open; main's list answers empty while the switch is
    * off on this PC (agent-browser.md "This PC's opt-in"). Absent = no plan row and nothing read. A row opens the plan's own card (`browser-plans`); only the card acts.
    */
-  browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string) => ReactNode; planStates: InboxPlanStates }
+  browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string, onDone: () => void) => ReactNode; planStates: InboxPlanStates }
   /** The first day (`INBOX_NEWS_SINCE`); only a preview on a fixed clock before it hands another. */
   newsSince?: string
   /** A member's name for 「連絡」1枚's 「田中さんが返します」 (the task list's names, through AppShell); absent = 「ほかの人」. */
@@ -49,19 +61,40 @@ interface InboxSlotInput {
   contactPorts?: { reads?: ContactReads; writes?: ContactWrites }
 }
 
-type OpenCard = { kind: 'approval'; id: string } | { kind: 'mail'; id: string } | { kind: 'browser'; id: string } | { kind: 'contact'; id: string; readKey: string } | null
+/**
+ * The card shown beside the list: the row it belongs to (null: a draft opened from a contact's card), its title, and
+ * where that row stood when opened (the next one's place if the row leaves the list before the card's press answers).
+ */
+type Beside = BesideCard & { rowKey: string | null; title: string; readKey: string; at: number }
+
+/** The list worked through (tasks-ui.md "Working through a list"): one per screen, like the やること list's. */
+export const INBOX_WORK_KEY = 'inbox'
+
+const BESIDE_WORDS: Record<BesideCard['kind'], { title: string; note: string }> = {
+  approval: { title: '承認のお願い', note: '一覧からは承認できません。中身・相手・いつ反映されるかを確かめてから押してください。' },
+  browser: { title: '承認のお願い（ブラウザ操作）', note: '一覧からは任せられません。サイトから読み取った中身と届く時を、カードで確かめてから押してください。' },
+  contact: { title: CONTACT_NAME, note: '来た連絡と、その返事・生まれたやることを一緒に見られます。' },
+  mail: { title: '送るメールの下書き', note: '一覧からは送れません。宛先と中身を確かめてから送ってください。' },
+}
 
 const NO_MEETINGS: readonly MeetingNewsRow[] = []
 
 /**
- * The inbox (受け箱) as the bottom panel's content — its name, the chips and the list, the card dialog a row opens,
- * 「知らせの設定」 — and the title bar's ［受け箱］. Nothing while the company's records are off and it has no notices (no
- * panel, no button, ⌘J declined: never an empty frame). The chosen chip lives here, so moving the panel keeps it.
+ * The inbox (受け箱) as the bottom panel's content — its name, the chips, the list worked through (↑ ↓ Enter Esc, 15 rows
+ * first) with the card a row opens beside it, 「知らせの設定」 — and the title bar's ［受け箱］. Nothing while the company's
+ * records are off and it has no notices (no panel, no button, ⌘J declined: never an empty frame). The chosen chip lives
+ * here, so moving the panel keeps it.
  */
 export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMeetingSeen, meetingNote, features = DEFAULT_FEATURES, open: shown, onToggle, onOpenRecord, onOpenTasks, onOpenJobs, renderApprovalCard, renderMailDraft, browserPlans, newsSince, memberName, contactPorts }: InboxSlotInput):
   { title: string; heading: ReactNode; body: ReactNode; dialog: ReactNode; titleBarButton: ReactNode } | undefined {
   const [filter, setFilter] = useState<InboxFilter>('new')
-  const [card, setCard] = useState<OpenCard>(null)
+  const [kind, setKind] = useState<InboxKind>('all')
+  const [limit, setLimit] = useState(INBOX_PAGE)
+  // 新着 opened in this look, kept in their place until the chips change or the panel opens again (decision 11番-3).
+  const [lingering, setLingering] = useState<ReadonlySet<string>>(new Set())
+  const [beside, setBeside] = useState<Beside | null>(null)
+  // The row opened last (beside or in the middle): where ↑ ↓ go on from.
+  const [shownKey, setShownKey] = useState<string | null>(null)
   const [undone, setUndone] = useState<ReadonlySet<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -79,39 +112,80 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     [notices, meetings, plans.inbox, newsSince, contactsShown])
   const available = !!companyId && notices.available
 
+  // What this look shows: the chip's sections with the opened 新着 kept, narrowed to the kind, the first `limit` rows drawn.
+  const sections = sectionsOf(view, filter, lingering)
+  const kindCount = kindCounts(sections)
+  const rows = narrowed(sections, kind)
+  const order = orderOf(rows)
+  const drawn = paged(rows, limit)
+  const totals = { waiting: rows.waiting.length, news: rows.news.filter(i => !i.seenHere).length, seen: rows.seen.length }
+  const rowOf = (key: string) => [...rows.waiting, ...rows.news, ...rows.moving, ...rows.seen].find(i => i.key === key)
+  const work = useWorkThrough({ listKey: INBOX_WORK_KEY, shownId: shownKey, open: key => { const item = rowOf(key); if (item) openItem(item) } })
+  const besideNow = useLatestRef(beside)
+
+  /** A new look (another chip or kind, the panel opened again): the opened 新着 go where they belong, 15 rows again. */
+  const newLook = () => { setLingering(new Set()); setLimit(INBOX_PAGE) }
   // The undo line is about what was just pressed: gone once the panel closes or opens again.
-  if (wasShown !== shown) { setWasShown(shown); setStatus(null); if (shown) setPlanReadKey(k => k + 1) }
+  if (wasShown !== shown) { setWasShown(shown); setStatus(null); newLook(); setBeside(null); if (shown) setPlanReadKey(k => k + 1) }
 
-  if (!companyId || !available) return undefined
-
+  /** Looked at: its notices read on the server (every PC agrees), a finished meeting's news on this PC. */
   const markRead = (ids: string[]) => {
-    if (ids.length === 0) return
+    if (ids.length === 0 || !companyId) return
     void markNoticesRead(companyId, ids).then(r => { if (!r?.success) setError(r?.error || NOTICES_OFFLINE_TEXT) }, () => setError(NOTICES_OFFLINE_TEXT))
   }
-  /** Looked at: its notices read on the server (every PC agrees), a finished meeting's news on this PC. */
   const seeRow = (item: InboxItem) => {
     markRead(item.unreadNoticeIds)
     if (item.meetingNews && item.meetingId) onMeetingSeen?.(item.meetingId)
   }
-  // Opening marks a 新着 row seen (as the bell did); a stop of あなた待ち stays until ［済んだ］ or the server settles it.
-  const openItem = (item: InboxItem) => {
+  // Opening marks a 新着 row seen (as the bell did) and keeps it where it is; a stop of あなた待ち stays until ［済んだ］ or
+  // the server settles it. A card opens beside the list; anything else where it lives (the middle, the settings).
+  function openItem(item: InboxItem) {
     setError(null)
     setStatus(null)
     if (!item.stop) seeRow(item)
+    if (item.section === 'new' && !item.seenHere) setLingering(m => new Set(m).add(item.key))
+    setShownKey(item.key)
+    // A row past the drawn ones (↓ from the last): drawn now, so the list can move the focus onto it at once.
+    const needed = limitShowing(order, item.key, limit)
+    if (needed > limit) flushSync(() => setLimit(needed))
+    const card = besideCardOf(item)
+    // Each opening reads a contact again (the card shows what is true now before anything is pressed).
+    setBeside(card ? { ...card, rowKey: item.key, title: item.title, readKey: `open${Date.now()}`, at: Math.max(0, order.indexOf(item.key)) } : null)
     const a = item.action
     switch (a.kind) {
       case 'openRecord': onOpenRecord(a.recordId); break
-      case 'openApprovalCard': setCard({ kind: 'approval', id: a.approvalId }); break
-      case 'openMailDraft': setCard({ kind: 'mail', id: a.messageId }); break
-      case 'openBrowserPlan': setCard({ kind: 'browser', id: a.planId }); break
-      // Each opening reads the contact again (the card shows what is true now before anything is pressed).
-      case 'openContact': setCard({ kind: 'contact', id: a.contactId, readKey: `open${Date.now()}` }); break
       case 'openTasks': onOpenTasks(); break
       case 'openJobs': onOpenJobs(); break
+      // Beside the list (`besideCardOf`): only the card's own buttons act.
+      case 'openApprovalCard': case 'openMailDraft': case 'openBrowserPlan': case 'openContact': break
       case 'none': break
       // Every kind is handled here; a new one (never an approve or a send: model.ts) must be added on purpose.
       default: { const unhandled: never = a; return unhandled }
     }
+  }
+
+  if (!companyId || !available) return undefined
+
+  /**
+   * The card beside the list was finished there (approved, sent, 済んだ…): the next row takes its place, and the list says
+   * so with ［取り消す］ when the press can be taken back (tasks-ui.md "Working through a list"). The last one: the card goes.
+   */
+  const besideDone = (done: Beside, undo?: () => Promise<WorkUndoAnswer>) => {
+    setPlanReadKey(k => k + 1)
+    // `ended` moves on only while that card's row is the one shown; a press answered after the member opened another
+    // card changes nothing on screen (that other card stays as it is).
+    const next = done.rowKey ? work.ended(done.rowKey, done.title, undo) : null
+    if (next === 'next') return
+    const current = besideNow.current
+    const stillShown = !!current && current.kind === done.kind && current.id === done.id
+    // The list read again before the press answered and the row is already gone: the row now in its place comes next.
+    const now = listOrder(INBOX_WORK_KEY)
+    if (next === null && stillShown && done.rowKey && !now.includes(done.rowKey) && now.length > 0) {
+      work.show(now[Math.min(done.at, now.length - 1)])
+      setWorkNotice(INBOX_WORK_KEY, { text: endedWords(done.title, false), undo: undo ? undoOfEnded(INBOX_WORK_KEY, done.rowKey, done.title, undo, work.show) : null })
+      return
+    }
+    if (stillShown) setBeside(null)
   }
   // A row's own button (［AI に読ませる］, ［読まない］…) is the member acting on it: its news is seen too.
   const pressButton = (item: InboxItem, button: InboxRowButton) => {
@@ -144,33 +218,59 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     // Closed meanwhile: the answer must not open it again.
     setSettings(s => s && (r?.success ? { kinds: r.kinds, error: null, fullAccess } : { kinds: null, error: r?.error ?? '知らせの設定を読めませんでした。' }))
   }
-  const switchKind = async (kind: string, on: boolean) => {
-    const put = (value: boolean, err: string | null) => setSettings(s => settingsAfterSwitch(s, kind, value, err))
+  const switchKind = async (noticeKind: string, on: boolean) => {
+    const put = (value: boolean, err: string | null) => setSettings(s => settingsAfterSwitch(s, noticeKind, value, err))
     put(on, null)
-    const r = await setNoticeSetting(companyId, kind, on)
+    const r = await setNoticeSetting(companyId, noticeKind, on)
     if (!r?.success) put(!on, r?.error ?? '変えられませんでした。')
   }
   const meetingButtons = (id: string) => meetings.find(m => m.id === id)?.actions ?? []
+  const chooseFilter = (f: InboxFilter) => { setFilter(f); newLook() }
+  const chooseKind = (k: InboxKind) => { setKind(k); newLook() }
+  const closeBeside = () => { setBeside(null); setPlanReadKey(k => k + 1) }
 
-  const closeCard = () => { setCard(null); setPlanReadKey(k => k + 1) }
-  const dialog = card ? (card.kind === 'approval'
-    ? <InboxCardDialog title="承認のお願い" note="一覧からは承認できません。中身・相手・いつ反映されるかを確かめてから押してください。" onClose={closeCard}>{renderApprovalCard(card.id)}</InboxCardDialog>
-    : card.kind === 'browser'
-    ? <InboxCardDialog title="承認のお願い（ブラウザ操作）" note="一覧からは任せられません。サイトから読み取った中身と届く時を、カードで確かめてから押してください。" onClose={closeCard}>{browserPlans?.renderCard(card.id)}</InboxCardDialog>
-    : card.kind === 'contact'
-    ? <InboxCardDialog title={CONTACT_NAME} note="来た連絡と、その返事・生まれたやることを一緒に見られます。" onClose={closeCard}>
-        <ContactCard key={card.id} companyId={companyId} contactId={card.id} store={contacts} readKey={card.readKey} writes={contactPorts?.writes} reads={contactPorts?.reads} nameOf={memberName}
-          onOpenTask={id => { setCard(null); onOpenRecord(id) }} onOpenRecord={id => { setCard(null); onOpenRecord(id) }}
-          onCheckDraft={id => setCard({ kind: 'mail', id })} />
-      </InboxCardDialog>
-    : <InboxCardDialog title="送るメールの下書き" note="一覧からは送れません。宛先と中身を確かめてから送ってください。" onClose={closeCard}>{renderMailDraft(card.id)}</InboxCardDialog>)
-    : settings && <NoticeSettingsDialog kinds={settings.kinds} error={settings.error} features={features} fullAccess={settings.fullAccess ?? null} onSwitch={(k, on) => { void switchKind(k, on) }} onClose={() => setSettings(null)} />
+  const besideCard = beside && (beside.kind === 'approval'
+    ? renderApprovalCard(beside.id, () => besideDone(beside))
+    : beside.kind === 'browser'
+    ? browserPlans?.renderCard(beside.id, () => besideDone(beside))
+    : beside.kind === 'contact'
+    ? <ContactCard key={beside.id} companyId={companyId} contactId={beside.id} store={contacts} readKey={beside.readKey} writes={contactPorts?.writes} reads={contactPorts?.reads} nameOf={memberName}
+        onOpenTask={id => { setBeside(null); onOpenRecord(id) }} onOpenRecord={id => { setBeside(null); onOpenRecord(id) }}
+        onCheckDraft={id => setBeside({ kind: 'mail', id, rowKey: null, title: beside.title, readKey: beside.readKey, at: beside.at })}
+        onFinished={u => besideDone(beside, u ?? undefined)} />
+    : renderMailDraft(beside.id, () => besideDone(beside)))
+  const words = beside ? BESIDE_WORDS[beside.kind] : null
+  // The card beside the list (owner decision 2026-11-28, 11番): 「3 / 11」, ［前の件］［次の件］ and ［閉じる］ over it.
+  const besidePane = beside && words && (
+    <section aria-label={words.title} data-work-card={INBOX_WORK_KEY} data-inbox-beside={beside.kind} tabIndex={-1} {...commandArea('list', INBOX_WORK_KEY)}
+      className="flex min-h-0 min-w-0 flex-1 flex-col outline-none">
+      <WorkThroughBar position={beside.rowKey ? work.position : null} onStep={work.step} onClose={closeBeside} />
+      <p className="flex-shrink-0 px-3 pt-2 text-small text-text-muted">{words.note}</p>
+      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">{besideCard}</div>
+    </section>
+  )
+
+  const dialog = settings && <NoticeSettingsDialog kinds={settings.kinds} error={settings.error} features={features} fullAccess={settings.fullAccess ?? null} onSwitch={(k, on) => { void switchKind(k, on) }} onClose={() => setSettings(null)} />
 
   return {
     title: '受け箱',
-    heading: <InboxChips view={view} filter={filter} onFilter={setFilter} onSettings={() => { void openSettings() }} />,
-    body: <InboxList view={view} filter={filter} meetingButtons={meetingButtons} onOpen={openItem} onSeen={item => { setError(null); seeRow(item) }} onButton={pressButton}
-      onUndo={item => { void undo(item) }} undone={undone} onAllSeen={allSeen} meetingNote={meetingNote} error={error} status={status} />,
+    heading: <InboxChips filter={filter} seenCount={view.counts.seen} onFilter={chooseFilter} onSettings={() => { void openSettings() }} />,
+    body: (
+      <div className="flex h-full min-h-0">
+        <div className={`flex min-h-0 min-w-0 flex-col ${besidePane ? 'w-2/5 flex-shrink-0 border-r border-[color:var(--color-border)]' : 'flex-1'}`}>
+          <div className="flex-shrink-0 border-b border-[color:var(--color-border)] bg-bg"><KindChips kind={kind} counts={kindCount} onKind={chooseKind} /></div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <InboxList sections={drawn.sections} totals={totals} redCount={kind === 'all'} filter={filter} elsewhere={view.counts.elsewhere} onOpenTasks={onOpenTasks}
+              turnNotListed={view.turnNotListed} unreadNotListed={view.unreadNotListed}
+              more={{ left: drawn.left, onMore: () => setLimit(l => l + INBOX_PAGE) }}
+              work={{ listKey: INBOX_WORK_KEY, order, currentKey: beside?.rowKey ?? null }} notice={<WorkThroughNotice listKey={INBOX_WORK_KEY} />}
+              meetingButtons={meetingButtons} onOpen={item => work.show(item.key)} onSeen={item => { setError(null); seeRow(item) }} onButton={pressButton}
+              onUndo={item => { void undo(item) }} undone={undone} onAllSeen={allSeen} meetingNote={meetingNote} error={error} status={status} />
+          </div>
+        </div>
+        {besidePane}
+      </div>
+    ),
     dialog,
     titleBarButton: <InboxButton news={view.counts.news} waiting={view.counts.waiting} open={shown} onToggle={onToggle} />,
   }

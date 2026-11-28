@@ -47,7 +47,14 @@ export interface BrowserPlanCardPorts { reads?: BrowserPlanReads; outbound?: Bro
  * every time it is shown; what it shows is the facts the app read from the site, never the chat's text.
  * ［任せる］ sends main only the plan id and the hash of the content shown; there is no resend button.
  */
-export const BrowserPlanCard = memo(function BrowserPlanCard({ companyId, planId, ports = {} }: { companyId: string; planId: string; ports?: BrowserPlanCardPorts }) {
+export const BrowserPlanCard = memo(function BrowserPlanCard({ companyId, planId, ports = {}, onDone }: {
+  companyId: string; planId: string; ports?: BrowserPlanCardPorts
+  /**
+   * The plan is over here (cancelled, or the member said whether it was done): where the card is worked through a list,
+   * the next one. Not after ［任せる］: what the run did is read on this card first.
+   */
+  onDone?: () => void
+}) {
   const { card, error, reload } = useBrowserPlan(companyId, planId, ports.reads)
   const [pressed, setPressed] = useState<'run' | 'cancel' | 'confirm' | null>(null)
   const [said, setSaid] = useState<string | null>(null)
@@ -61,7 +68,7 @@ export const BrowserPlanCard = memo(function BrowserPlanCard({ companyId, planId
       </section>
     )
   }
-  return <CardBody card={card} companyId={companyId} pressed={pressed} said={said} ports={ports}
+  return <CardBody card={card} companyId={companyId} pressed={pressed} said={said} ports={ports} onDone={onDone}
     act={async (what, work) => {
       setPressed(what)
       setSaid(null)
@@ -72,9 +79,10 @@ export const BrowserPlanCard = memo(function BrowserPlanCard({ companyId, planId
     }} />
 })
 
-function CardBody({ card, companyId, pressed, said, ports, act }: {
+function CardBody({ card, companyId, pressed, said, ports, act, onDone }: {
   card: BrowserPlanCardData; companyId: string; pressed: 'run' | 'cancel' | 'confirm' | null; said: string | null
   ports: BrowserPlanCardPorts; act: (what: 'run' | 'cancel' | 'confirm', work: () => Promise<string | null>) => Promise<void>
+  onDone?: () => void
 }) {
   const { plan, ready } = card
   const c = planContent(plan)
@@ -88,11 +96,13 @@ function CardBody({ card, companyId, pressed, said, ports, act }: {
   })
   const cancel = () => act('cancel', async () => {
     const r = ports.writes ? await cancelBrowserPlan(companyId, plan.id, ports.writes) : await cancelBrowserPlan(companyId, plan.id)
+    if (r.ok) onDone?.()
     return r.ok ? null : r.message
   })
   const confirm = (result: 'done' | 'not_done') => act('confirm', async () => {
     if (!plan.execution) return null
     const r = ports.writes ? await confirmBrowserExecution(companyId, plan.execution.id, result, ports.writes) : await confirmBrowserExecution(companyId, plan.execution.id, result)
+    if (r.ok) onDone?.()
     return r.ok ? null : r.message
   })
   return (

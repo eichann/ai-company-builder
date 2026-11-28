@@ -491,7 +491,10 @@ pressing each record's own action.
   an answer after a company change or a sign-out says nothing and reads nothing); `hooks/useContacts.ts` (the reads
   start from the subscription, no effect); `components/ContactCard.tsx` (props in: the store, the ports, `nameOf`,
   `onOpenTask` / `onCheckDraft` / `onOpenRecord` — it knows no frame, so the 連絡 destination of stage 5 can place it as
-  is; today `useInboxSlot` puts it in `InboxCardDialog`, title 「連絡」).
+  is; today `useInboxSlot` puts it beside the inbox's list, region 「連絡」, `notifications.md` "Working through the inbox").
+  With `onFinished` (the inbox) a finish that was written hands the list an undo of exactly that finish (the same
+  versions, `pressUndo`, era-bound) and the next row takes the card's place; the list's ［取り消す］ says the undo's words
+  (the Gmail line included) and shows the contact again. Without it the card says what happened and offers ［取り消す］ itself.
 - **Buttons follow `may` only** (owner decision 11/28): 返事が要る / AI が下書き中 ［返した］ (`replied_elsewhere`); a draft →
   ［下書きを確かめて送る］ (opens the mail draft's own card, which alone sends) with ［返した（下書きは送らない）］ in 「…」;
   返事待ち ［済んだ（もう待たない）］ and 確かめ中 ［済んだ］ (`close`); 「…」 ［返事は要らなくなった］ (`drop`, the reason asked in

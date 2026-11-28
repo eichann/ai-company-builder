@@ -7,8 +7,10 @@ import { CALM, NEXT_STEP } from '../../../../shared/thing-words'
 import { contactMailStaysArchived, finishContact, undoContactFinish, type ContactReads, type ContactWrites } from '../api'
 import { contactLook, finishRequestOf, type ContactButton, type ContactTone } from '../contactModel'
 import { pressFinish, pressUndo, type ContactResend, type ContactSaid } from '../contactPress'
+import type { ContactUndoRequest } from '../../../../shared/contact-card'
 import type { ContactStore, EraPort } from '../contactStore'
 import { useContacts } from '../hooks/useContacts'
+import type { WorkUndoAnswer } from '../../../shared/lib/workThrough'
 
 interface Props {
   companyId: string
@@ -29,6 +31,12 @@ interface Props {
   /** ［詳しく見る］: the 来た連絡's record card (who, where, 経緯). */
   onOpenRecord: (recordId: string) => void
   era?: EraPort
+  /**
+   * A finish here was written (both parts, or the one there was): where the card is worked through a list, the next one —
+   * with ［取り消す］ of exactly that finish (the versions it answered) when there is something to take back. Absent: the
+   * card says what happened and offers ［取り消す］ itself.
+   */
+  onFinished?: (undo: (() => Promise<WorkUndoAnswer>) | null) => void
 }
 
 const TONE: Record<ContactTone, StatusBadgeVariant> = { info: 'info', ai: 'ai', neutral: 'neutral', success: 'success' }
@@ -39,7 +47,7 @@ const TONE: Record<ContactTone, StatusBadgeVariant> = { info: 'info', ai: 'ai', 
  * the contact together (both or neither: the server's). Only the buttons the server says the member may press are shown.
  * Knows no frame: it is drawn wherever it is placed (the inbox's card window today, the 連絡 destination later).
  */
-export function ContactCard({ companyId, contactId, store, readKey, writes, reads, nameOf, onOpenTask, onCheckDraft, onOpenRecord, era }: Props) {
+export function ContactCard({ companyId, contactId, store, readKey, writes, reads, nameOf, onOpenTask, onCheckDraft, onOpenRecord, era, onFinished }: Props) {
   const entry = useContacts(store, companyId, [`${contactId}@${readKey}`]).get(contactId)
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<ContactSaid | null>(null)
@@ -60,9 +68,27 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, read
     setBusy(true)
     try { await work() } finally { pressing.current = false; setBusy(false) }
   }
+  const interactionId = view.interaction.id
+  /** ［取り消す］ of one finish, run from the list's line once the card has moved on: its words, or the refusal's. */
+  const undoFrom = (request: ContactUndoRequest) => async (): Promise<WorkUndoAnswer> => {
+    let after: ContactSaid | null = null
+    await pressUndo(req => undoContactFinish(companyId, interactionId, req, writes), request, {
+      era, say: s => { after = s }, reread: () => store.refresh(companyId, contactId),
+      // Whether Gmail keeps it only adds a line: not known is no line, never 「元に戻せませんでした」.
+      stillArchived: v => contactMailStaysArchived(companyId, interactionId, v, reads).catch(() => false),
+    })
+    const said = after as ContactSaid | null
+    if (said === null) return null
+    // Not reached: the same undo again (the server answers `already` for a part taken back meanwhile).
+    if (said.refused) return said.undo ? { again: said.text } : said.text
+    return { done: said.text }
+  }
   const send = (press: ContactResend) => run(async () => {
     setSaid(null)
-    await pressFinish(req => finishContact(companyId, view.interaction.id, req, writes), press, { era, say: setSaid, reread })
+    let answered: ContactSaid | null = null
+    await pressFinish(req => finishContact(companyId, interactionId, req, writes), press, { era, say: s => { answered = s; setSaid(s) }, reread })
+    const done = answered as ContactSaid | null
+    if (onFinished && done && !done.refused && !done.resend) onFinished(done.undo ? undoFrom(done.undo) : null)
   })
   const finish = (b: Extract<ContactButton, { kind: 'finish' }>, note?: string) => {
     const request = finishRequestOf(view, b, note)
