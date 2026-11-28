@@ -1,9 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { CircleNotch, PencilSimpleLine, Sparkle, TreeStructure } from '@phosphor-icons/react'
 import { bundleTileAction, type BundleAction, type BundleActions, type BundleDetailView, type BundleTileField } from '../../../../shared/record-details'
 import type { RecordCardView } from '../../../../shared/record-views'
 import { CALM } from '../../../../shared/thing-words'
-import { runCommand } from '../../../shared/commands/commands'
+import { commandArea, runCommand } from '../../../shared/commands/commands'
+import { workListRef } from '../../../shared/lib/workThrough'
+import { WorkThroughNotice } from '../../../shared/ui/WorkThrough'
 import { InlineDate } from '../../../shared/ui/InlineDate'
 import { InlineText } from '../../../shared/ui/InlineText'
 import { Button } from '../../../shared/ui/primitives'
@@ -71,12 +73,23 @@ export interface BundleTileEdit {
   onAct: (action: BundleAction, args: Record<string, string>) => Promise<string | null>
 }
 
+/** Working through みんなのやること beside the 案件 (tasks-ui.md "Working through a list"): the task shown and how a row shows one. */
+export interface BundleWork {
+  listKey: string
+  shown: string | null
+  onOpen: (taskId: string) => void
+}
+
 /**
  * A 案件・プロジェクト (新しい画面のデモ E): what for, who is responsible, the due and how far, its approval
  * requests as cards, and everyone's やること by whose turn (a row opens the task). なんのため・責任者・期限 are corrected
  * where they are shown (owner 2026-11-27) by whom the type lets (`bundleTileAction`); for anyone else they are text.
  */
-export function BundleBody({ b, renderApproval, edit }: { b: BundleDetailView; renderApproval?: (approvalId: string) => ReactNode; edit?: BundleTileEdit }) {
+export function BundleBody({ b, renderApproval, edit, work }: { b: BundleDetailView; renderApproval?: (approvalId: string) => ReactNode; edit?: BundleTileEdit; work?: BundleWork }) {
+  // ↑ ↓ go over what is still to do (終わったこと is left out); a card drawn again scrolls back to the row it showed.
+  const order = b.groups.flatMap(g => g.tasks.filter(t => t.turn !== null).map(t => t.id))
+  const shown = work?.shown ?? null
+  const intoView = useCallback((el: HTMLElement | null) => { if (el && shown) el.scrollIntoView({ block: 'nearest' }) }, [shown])
   const may = (field: BundleTileField) => (edit ? bundleTileAction(edit.actions, field) : null)
   const send = (a: BundleAction, value: string) => edit!.onAct(a, { [a.args[0].name]: value })
   const purposeAction = may('purpose')
@@ -127,13 +140,18 @@ export function BundleBody({ b, renderApproval, edit }: { b: BundleDetailView; r
         {b.groups.length === 0
           ? <p className="text-small text-gray-400">{CALM.emptyLinks}</p>
           : (
-            <div className="divide-y divide-gray-100 rounded-control border border-gray-200 dark:divide-zinc-800 dark:border-zinc-700">
+            <>
+            {work && <WorkThroughNotice listKey={work.listKey} />}
+            <div {...(work ? { ref: workListRef(work.listKey, order), 'data-work-list': work.listKey, ...commandArea('list', work.listKey) } : {})}
+              className="divide-y divide-gray-100 rounded-control border border-gray-200 dark:divide-zinc-800 dark:border-zinc-700">
               {b.groups.map(g => (
                 <section key={g.title} aria-label={g.title} className="px-3 py-2">
                   <h3 className="mb-1 text-caption font-semibold text-gray-500">{g.title}</h3>
                   {g.tasks.map(t => (
-                    <button key={t.id} type="button" onClick={() => runCommand('record.open', { recordId: t.id })}
-                      className="flex w-full items-center gap-2 rounded-small px-1.5 py-1 text-left text-small hover:bg-gray-50 dark:hover:bg-zinc-800">
+                    // Working through it, a row shows its やること beside the 案件; otherwise it opens in a tab.
+                    <button key={t.id} type="button" data-work-row={t.id} aria-current={shown === t.id ? 'true' : undefined} ref={shown === t.id ? intoView : undefined}
+                      onClick={() => (work ? work.onOpen(t.id) : runCommand('record.open', { recordId: t.id }))}
+                      className={`flex w-full items-center gap-2 rounded-small px-1.5 py-1 text-left text-small focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${shown === t.id ? 'bg-selected-bg' : 'hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
                       <ThingIcon kind="task" size={13} label="" />
                       <span className={`flex-1 truncate ${t.turn === null ? 'text-gray-400 line-through' : 'text-link'}`}>{t.title}</span>
                       <span className="shrink-0 text-caption font-normal text-gray-500">{[t.turn, shortDue(t.due)].filter(Boolean).join('・')}</span>
@@ -142,6 +160,7 @@ export function BundleBody({ b, renderApproval, edit }: { b: BundleDetailView; r
                 </section>
               ))}
             </div>
+            </>
           )}
       </section>
     </>

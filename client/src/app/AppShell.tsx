@@ -1,4 +1,4 @@
-import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
+import { Suspense, useState, useMemo, useCallback, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, CaretRight, ListChecks, HandPointing } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
@@ -58,7 +58,7 @@ import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { forgetNotices } from '../features/sync/lastingNotice'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
-import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { commandArea, runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { isMacControlKey } from '../../shared/commands/define'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
@@ -79,7 +79,9 @@ import { OCCURRENCE_TASK_ID_RE } from '../../shared/jobs'
 import { ContinueStepButton } from '../features/plugin-steps/components/ContinueStepButton'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { StepDeliverables } from '../features/plugin-steps/components/StepDeliverables'
-import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { TASK_LIST_WORK_KEY, TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { useWorkThrough } from '../shared/hooks/useWorkThrough'
+import { WorkThroughBar } from '../shared/ui/WorkThrough'
 import { CorePressPanel } from '../features/tasks/components/CorePressPanel'
 import { featuresFrom } from '../../../shared/core/features'
 import { renderRecordBundleField } from './recordBundleField'
@@ -433,12 +435,6 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
   const consultAbout = (task: { id: string; title: string }, fresh = false) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, ...(fresh ? { fresh } : {}) }).catch(() => {}) }
   // ［催促の下書きを作る］ on a task whose 返事の見込み passed: a new consultation that drafts the nudge (the member sends it).
-  // A record the member ended (the list's ☑, the card's 完了 / 済んだ / 終わりにする; owner FB #15, #28, #29):
-  // its tab in the middle and its automatic consultations close; 元に戻す / やり直す bring neither back.
-  const recordEnded = (recordId: string) => {
-    closeTabs([recordTabKey(recordId)])
-    void runCommand('chat.closeRecordConsultations', { recordId }).catch(() => {})
-  }
   const draftNudge = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'nudge' }).catch(() => {}) }
   // A record's 「つながっているもの」 lists the consultations about it (this PC's history).
   const recordConsultations = useLinkedConsultations(currentCompany?.id)
@@ -471,12 +467,31 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   // A linked folder left out on this computer is marked on the cards (download-choices.md).
   const notDownloadedFolderOf = sparseCheckout.enabled ? sparseCheckout.notDownloadedFolderOf : undefined
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
-  const recordCard = (recordId: string) => {
+  // A row of the task list (or ↑ ↓ over it) opens its item as the preview tab.
+  const openFromTaskList = (id: string) => {
+    const item = taskList.data?.items.find(i => i.id === id)
+    if (item) openListItem(item)
+    else openTab(recordTabKey(id))
+  }
+  const tasksWork = useWorkThrough({ listKey: TASK_LIST_WORK_KEY, shownId: activeRecordId, open: openFromTaskList })
+  // The list is on screen beside the middle: its tab chosen and the left column shown.
+  const taskListBeside = () => leftTab === 'tasks' && tasksShown && !hidden.has('fileTree')
+  // A record the member ended (the list's ☑, the card's 完了 / 済んだ / 終わりにする; owner FB #15, #28, #29):
+  // its tab in the middle and its automatic consultations close; 元に戻す / やり直す bring neither back.
+  // Working through the list (UX 点検 14, owner decision 2026-11-28; tasks-ui.md "Working through a list"): while the
+  // list is beside the middle, its item ended there is followed by the next one, with 取り消す; the ended tab still goes.
+  const recordEnded = (recordId: string, undo?: () => Promise<string | null>) => {
+    if (taskListBeside()) tasksWork.ended(recordId, recordLooks[recordId]?.title ?? taskList.data?.items.find(i => i.id === recordId)?.title ?? '', undo)
+    closeTabs([recordTabKey(recordId)])
+    void runCommand('chat.closeRecordConsultations', { recordId }).catch(() => {})
+  }
+  // `ended`: what finishing it here does (the middle's tab: `recordEnded`; beside a 案件: the next やること there).
+  const recordCard = (recordId: string, ended: (recordId: string, undo?: () => Promise<string | null>) => void = recordEnded): ReactNode => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
       // Keyed by id only: a new version (the AI linked a file, a press in the list) updates it in place.
       // 「続きをする」 sits above a やること an automatic step run handed over (plugin-steps.md).
-      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} onEnded={recordEnded} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
+      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} onEnded={ended} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
         // A やること a scheduled job made (its id is the occurrence's, jobs.md "The set watch (schema 5)" "The app (PR6)").
         {...(OCCURRENCE_TASK_ID_RE.test(recordId) ? {
           meetingBesideTitle: true,
@@ -490,7 +505,12 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
     }
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     // A まとまり chosen from the list or the title bar: a meeting's open card reads again (its key).
-    const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} onEnded={recordEnded} notDownloadedFolderOf={notDownloadedFolderOf}
+    const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} onEnded={ended} notDownloadedFolderOf={notDownloadedFolderOf}
+      // A 案件's やること worked through beside it: its own card, and finishing it there closes its automatic consultations too.
+      renderPeek={(taskId, peekEnded) => recordCard(taskId, (id, undo) => {
+        peekEnded(id, undo)
+        void runCommand('chat.closeRecordConsultations', { recordId: id }).catch(() => {})
+      })}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload, bundlePlaces)}
       // 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): its private folder, the people it names as participants, then the server's move.
       onMakePrivate={async b => {
@@ -504,6 +524,16 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
     }
     return readOnly
+  }
+  // A record's card in the middle; one of the task list's, while the list is beside it, under 「3 / 11」 and its keys.
+  const middleCard = (recordId: string) => {
+    const working = taskListBeside() && tasksWork.position !== null
+    return (
+      <div data-work-card={TASK_LIST_WORK_KEY} tabIndex={-1} {...(working ? commandArea('list', TASK_LIST_WORK_KEY) : {})} className="flex h-full min-h-0 flex-col outline-none">
+        {working && <WorkThroughBar position={tasksWork.position} onStep={tasksWork.step} />}
+        <div className="min-h-0 flex-1 overflow-auto">{recordCard(recordId)}</div>
+      </div>
+    )
   }
   // 探す ⌘K's 「最近開いたもの」: the tabs open in the middle, newest first.
   const recentTabs: PaletteRecent[] = [...openFiles].reverse().flatMap((key): PaletteRecent[] => {
@@ -628,7 +658,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
           list={taskList}
           aiTurns={aiTurnItems}
           activeRecordId={activeRecordId}
-          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
+          onOpen={openFromTaskList}
           onConsult={consultAbout}
           onCompleted={recordEnded}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
@@ -817,7 +847,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
                         onCloseFile={handleCloseFile}
                         onPinFile={handlePinFile}
                         navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
-                        renderRecord={recordCard}
+                        renderRecord={middleCard}
                         viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK, [MANUAL_VIEW]: MANUAL_TAB_LOOK }}
                         renderView={name => name === MANUAL_VIEW ? renderManual(manualTarget)
                           : name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}

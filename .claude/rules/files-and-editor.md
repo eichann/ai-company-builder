@@ -358,7 +358,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   path can have it), drawn with its kind's icon and title (`RecordTabLook`, told by the card once
   read: `onLoaded`), and its card is drawn by the screen (`renderRecord`); only file tabs load
   text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
-  preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
+  preview tab (↑ ↓ over the list replace it: `tasks-ui.md` "Working through a list"); ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
 - Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
   `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records, pinned }` (`records`: the open
   record tabs' titles, so they show at once after a restart; a record tab is not checked against

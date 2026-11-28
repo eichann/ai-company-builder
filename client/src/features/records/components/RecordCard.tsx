@@ -1,3 +1,4 @@
+// Over ~300 lines on purpose: the card's presses and a 案件's やること shown beside it share the card's read and reload.
 import { FEATURE_OFF_DETAIL, FEATURE_OFF_NOTE } from '../../../../../shared/core/features'
 import { useState, type ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -14,11 +15,15 @@ import { ProjectParticipants } from './ProjectParticipants'
 import { MakePrivateDialog } from './MakePrivateDialog'
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
-import { AiBand, BundleBody, type BundleTileEdit } from './BundleBody'
+import { AiBand, BundleBody, type BundleTileEdit, type BundleWork } from './BundleBody'
 import { BundleActions, type BundleActInput } from './BundleActions'
 import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
 import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton, ReplyRequestActions } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
+import { commandArea } from '../../../shared/commands/commands'
+import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
+import { orderOf, placeOf } from '../../../shared/lib/workThrough'
+import { WorkThroughBar } from '../../../shared/ui/WorkThrough'
 import { useDriveLinking } from '../../../shared/hooks/useDriveLinking'
 import { DriveLinkAction } from '../../../shared/ui/DriveLinkAction'
 import { driveFileRows } from '../../../shared/ui/driveFileRows'
@@ -55,12 +60,17 @@ interface Props {
    * #29), a 案件・プロジェクト's ［終える］ / ［やめる］ (owner FB #30): AppShell closes its tab in the middle and its
    * automatic consultations. Not ［取り込まない］, not ［もう一度始める］.
    */
-  onEnded?: (recordId: string) => void
+  onEnded?: (recordId: string, undo?: () => Promise<string | null>) => void
   /**
    * 「非公開にする」 on a public 案件・プロジェクト the server offered it for (`card.makePrivate`, records.md "Making a
    * 案件・プロジェクト private"): the screen makes its private folder and asks the server to move it. null = done.
    */
   onMakePrivate?: (bundle: { id: string; title: string; version: number; word: string }, offer: MakePrivateOffer) => Promise<string | null>
+  /**
+   * A 案件・プロジェクト's やること shown beside it, drawn by the screen (the task card); `ended` is what that card calls when
+   * the member finishes it there. Absent: a row opens the やること in a tab of its own.
+   */
+  renderPeek?: (taskId: string, ended: (taskId: string, undo?: () => Promise<string | null>) => void) => ReactNode
 }
 
 /** The card's parts the screen places around a meeting's own buttons and proposals. */
@@ -98,8 +108,16 @@ export interface BundleFieldContext {
  * 来た連絡's and a 案件・プロジェクト's own parts: what it is, its body, fields and 経緯 folded, the AI
  * working on it, and 「つながっているもの」.
  */
-export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting, onEnded, onMakePrivate }: Props) {
+export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting, onEnded, onMakePrivate, renderPeek }: Props) {
   const { result, reload } = useRecordCard(companyId, recordId, onLoaded)
+  // A 案件's やること worked through beside it (tasks-ui.md "Working through a list"): the card drawn again (its tab
+  // switched back to) shows the one it showed, while it is still listed.
+  const workKey = `bundle:${recordId}`
+  const [peek, setPeek] = useState<string | null>(() => {
+    const place = placeOf(workKey)
+    return place !== null && orderOf(workKey).includes(place) ? place : null
+  })
+  const work = useWorkThrough({ listKey: workKey, shownId: peek, open: setPeek })
   const [makingPrivate, setMakingPrivate] = useState(false)
   const [notice, setNotice] = useState<{ text: string; undo: { recordId: string; version: number } | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -127,6 +145,11 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     else setError(r.error)
   }
   const card = result.card
+  // The undo a list worked through offers once the card is gone (its next item shown): that one entry, its words if refused.
+  const takeBack = (id: string, version: number) => async () => {
+    const r = await undoRecordChange(companyId, id, version)
+    return r.success ? null : r.error
+  }
   // A 来た連絡's ［済んだ］ / ［取り込まない］, a 返事のお願い's ［終わりにする］ / ［もう返した］, at the version
   // shown (a run of the AI that wrote meanwhile makes it refused: the card reads again); 取り消す undoes that one entry.
   const DONE_WORDS = { settle: '済んだにしました', drop: 'やることにしなかった一覧に移しました', close: '終わりにしました', replied_elsewhere: '「もう返した」で終わりにしました' } as const
@@ -140,7 +163,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     if (!r.success) { setError(r.error); reload(); return }
     // 「もう返した」 also put its drafts away (the inbox's follow-up): taking the close back would not bring them back.
     changed(DONE_WORDS[action], action === 'replied_elsewhere' ? null : { recordId: card.record.id, version: card.version + 1 })
-    if (ENDING_ACTIONS.has(action)) onEnded?.(card.record.id)
+    if (ENDING_ACTIONS.has(action)) onEnded?.(card.record.id, action === 'replied_elsewhere' ? undefined : takeBack(card.record.id, card.version + 1))
   }
   // A 案件・プロジェクト's buttons (owner FB #30), at the version shown; one that ends it (into a final state of
   // its type: 終える, やめる) also ends it on the screen, like ENDING_ACTIONS. 取り消す undoes that one entry.
@@ -152,7 +175,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     // The refusal is said where it was pressed (its window, or beside the buttons); the card reads again.
     if (!r.success) { reload(); return r.error }
     changed(bundleDoneWords(a, card.record.type), { recordId: card.record.id, version: card.version + 1 })
-    if (a.ends) onEnded?.(card.record.id)
+    if (a.ends) onEnded?.(card.record.id, takeBack(card.record.id, card.version + 1))
     return null
   }
   const unsettle = async () => {
@@ -253,18 +276,43 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
         return failure
       }} />
     : null
-  return <>{makePrivateDialog}<CardBody bundleEdit={bundleEdit} participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  const detail = card.detail
+  const workable = detail?.kind === 'bundle' && renderPeek
+  const cardBody = <CardBody bundleEdit={bundleEdit} {...(renderPeek && detail?.kind === 'bundle' ? { bundleWork: { listKey: workKey, shown: peek, onOpen: work.show } } : {})} participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} driveRows={driveRows} driveExtra={driveExtra}
     drop={{ label: `ファイル・フォルダ・${driveExtra ? 'Drive のリンク・' : ''}やること・相談`,
       // A Drive link dragged from the browser is linked too, where the card offers Drive.
       accepts: e => linkDrop.accepts(e) || (!!driveExtra && !busy && mayCarryLink(e.dataTransfer)),
       onDrop: e => { if (linkDrop.accepts(e) || !driveExtra) linkDrop.drop(card.record.id, e); else linkDriveText(droppedText(e.dataTransfer)) },
       notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
-    consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} /></>
+    consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
+  if (!workable) return <>{makePrivateDialog}{cardBody}</>
+  // The やること finished beside it: the next one takes its place (or, the last, the side closes); the 案件 reads again.
+  const peekEnded = (taskId: string, undo?: () => Promise<string | null>) => {
+    const title = detail.groups.flatMap(g => g.tasks).find(t => t.id === taskId)?.title ?? 'やること'
+    if (work.ended(taskId, title, undo) === 'last') setPeek(null)
+    reload()
+  }
+  return (
+    <>
+      {makePrivateDialog}
+      {/* One shape with or without the side, so showing it never redraws the 案件 (the row keeps the focus). */}
+      <div className="flex h-full min-h-0">
+        <div className="min-w-0 flex-1 overflow-y-auto">{cardBody}</div>
+        {peek !== null && <section aria-label="選んだやること" data-work-card={workKey} tabIndex={-1} {...commandArea('list', workKey)}
+          className="flex min-w-0 flex-1 flex-col border-l border-border outline-none">
+          <WorkThroughBar position={work.position} onStep={work.step} onClose={() => setPeek(null)} />
+          <div className="min-h-0 flex-1 overflow-y-auto">{renderPeek(peek, peekEnded)}</div>
+        </section>}
+      </div>
+    </>
+  )
 }
 
-function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants, driveRows, driveExtra, bundleEdit }: {
+function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants, driveRows, driveExtra, bundleEdit, bundleWork }: {
   bundleEdit?: BundleTileEdit
+  /** A 案件's やること worked through beside it (absent: a row opens it in a tab). */
+  bundleWork?: BundleWork
   /** Linked Google Drive files' rows, and ［Google Drive のファイルをつなぐ］ where the card offers it. */
   driveRows: LinkedRow[]
   driveExtra: LinkedGroupExtra | null
@@ -303,7 +351,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
     actions = incoming
-    body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} {...(bundleEdit ? { edit: bundleEdit } : {})} /></>
+    body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} {...(bundleEdit ? { edit: bundleEdit } : {})} {...(bundleWork ? { work: bundleWork } : {})} /></>
   } else if (detail?.kind === 'reply') {
     actions = incoming
   }
@@ -333,7 +381,6 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
   )
 }
 
-/** 「この機能は今オフです」: the record stays to read; the company turned its feature off (owner decision 2026-11-07). */
 function FeatureOffBand() {
   return (
     <p data-testid="feature-off" role="note" className="mb-3 rounded-md bg-gray-100 px-3 py-2 text-small leading-relaxed text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">

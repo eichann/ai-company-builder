@@ -23,10 +23,11 @@ export const COMMAND_CLASSES: readonly CommandClass[] = ['view', 'local', 'outbo
 
 /**
  * A part of the screen that can hold the keyboard focus and receive its own
- * shortcuts. `app` is the whole window: every focus is inside it.
+ * shortcuts. `app` is the whole window: every focus is inside it. `list` is a list
+ * worked through one item after another and the item it shows (tasks-ui.md).
  */
-export type CommandArea = 'app' | 'chat' | 'editor'
-export const COMMAND_AREAS: readonly CommandArea[] = ['app', 'chat', 'editor']
+export type CommandArea = 'app' | 'chat' | 'editor' | 'list'
+export const COMMAND_AREAS: readonly CommandArea[] = ['app', 'chat', 'editor', 'list']
 
 export interface CommandKeybinding {
   /**
@@ -34,6 +35,8 @@ export interface CommandKeybinding {
    * A letter A–Z matches in either case (Windows reports Ctrl+Shift+C as `C`); other keys exactly.
    */
   readonly key: string
+  /** A second key for the same command (`j` beside ↓), with the same area and rules. */
+  readonly alsoKey?: string
   /** Only a focus inside this area receives the key (the innermost area wins). */
   readonly area: CommandArea
   /**
@@ -102,8 +105,9 @@ export function defineCommands<const Defs extends readonly CommandDefinition[]>(
       if (!(def.target.arg in def.args.shape)) throw new CommandDefinitionError(`Command "${id}": target argument "${def.target.arg}" is not one of its args`)
     }
     if (def.keybinding) {
-      const { key, area } = def.keybinding
-      if (!parseKey(key)) throw new CommandDefinitionError(`Command "${id}": cannot read shortcut "${key}"`)
+      const { key, area, alsoKey } = def.keybinding
+      for (const k of keysOf(def.keybinding)) if (!parseKey(k)) throw new CommandDefinitionError(`Command "${id}": cannot read shortcut "${k}"`)
+      if (alsoKey !== undefined && normalizeKey(alsoKey) === normalizeKey(key)) throw new CommandDefinitionError(`Command "${id}": its second key is its first`)
       if (!COMMAND_AREAS.includes(area)) throw new CommandDefinitionError(`Command "${id}": unknown shortcut area ${area}`)
       if (def.target && def.target.area !== area) throw new CommandDefinitionError(`Command "${id}": its shortcut must belong to its target area ${def.target.area}`)
       // A shortcut runs the command with no arguments (plus the focused target).
@@ -114,15 +118,22 @@ export function defineCommands<const Defs extends readonly CommandDefinition[]>(
   const shortcuts = new Map<string, string>()
   for (const def of Object.values(byId)) {
     if (!def.keybinding) continue
-    const slot = `${def.keybinding.area}:${normalizeKey(def.keybinding.key)}`
-    const other = shortcuts.get(slot)
-    if (other) throw new CommandDefinitionError(`Commands "${other}" and "${def.id}" share the shortcut ${def.keybinding.key} in ${def.keybinding.area}`)
-    shortcuts.set(slot, def.id)
+    for (const key of keysOf(def.keybinding)) {
+      const slot = `${def.keybinding.area}:${normalizeKey(key)}`
+      const other = shortcuts.get(slot)
+      if (other) throw new CommandDefinitionError(`Commands "${other}" and "${def.id}" share the shortcut ${key} in ${def.keybinding.area}`)
+      shortcuts.set(slot, def.id)
+    }
   }
   return byId as CommandCatalog<Defs>
 }
 
 // ---- Shortcut keys ----
+
+/** The keys of a shortcut: its key, then its second key when it has one. */
+export function keysOf(binding: CommandKeybinding): string[] {
+  return binding.alsoKey === undefined ? [binding.key] : [binding.key, binding.alsoKey]
+}
 
 export interface ParsedKey {
   readonly mod: boolean
@@ -196,7 +207,7 @@ export function shortcutOf(
   const defs = Object.values(catalog as Record<string, CommandDefinition>).filter(accept)
   for (const area of areas) {
     for (const def of defs) {
-      if (def.keybinding?.area === area && matchesKey(parseKey(def.keybinding.key)!, input)) return def.id
+      if (def.keybinding?.area === area && keysOf(def.keybinding).some(k => matchesKey(parseKey(k)!, input))) return def.id
     }
   }
   return null
