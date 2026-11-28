@@ -41,6 +41,7 @@ import type { PluginPackageRef } from '../shared/plugin-bridge'
 import type { WritingAudience, WritingStyle } from '../../shared/core/writing-style'
 // lane A ▲
 // lane B ▼
+import type { ContactFinishRequest, ContactUndoRequest } from '../shared/contact-card'
 // lane B ▲
 // lane C ▼
 import type { BrowserConfirmResult } from '../shared/browser-plans'
@@ -475,6 +476,9 @@ const api: ElectronAPI = {
   removeWritingStyle: (companyId: string, connectorId?: string | null, audience?: WritingAudience | null) => invoke('writingStyle:remove', companyId, connectorId, audience),
   // lane A ▲
   // lane B ▼
+  getContact: (companyId: string, recordId: string) => invoke('inbox:contact', companyId, recordId),
+  finishContact: (companyId: string, interactionId: string, input: ContactFinishRequest) => invoke('inbox:finishContact', companyId, interactionId, input),
+  undoContactFinish: (companyId: string, interactionId: string, input: ContactUndoRequest) => invoke('inbox:undoContact', companyId, interactionId, input),
   // lane B ▲
   // lane C ▼
   getBrowserSites: (companyId: string) => invoke('browser:sites', companyId),

@@ -581,6 +581,8 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
     // 「ブラウザ操作」's plans: main decides (the switch is per PC, agent-browser.md "This PC's opt-in"); switched off,
     // `browserPlans:list` answers empty and asks the server nothing, so there is no row.
     browserPlans: currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} />, planStates: PLAN_STATES } : undefined,
+    // 「連絡」1枚's 「田中さんが返します」: the names the task list already read (none yet → 「ほかの人」).
+    memberName: id => taskList.data?.members?.find(m => m.id === id)?.name ?? null,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined

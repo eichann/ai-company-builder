@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { MeetingNews, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import type { BrowserInboxPlans } from '../../../shared/browser-plans'
-import { countText, inboxView, INBOX_NEWS_SINCE, noticeKindsForRole, settingsAfterSwitch, type InboxAction } from './model'
+import type { ContactView } from '../../../shared/contact-card'
+import { contactsToRead, countText, inboxView, INBOX_NEWS_SINCE, noticeKindsForRole, settingsAfterSwitch, type InboxAction } from './model'
 
 // Type-level guard (`pnpm typecheck`): no row action may approve, send, run or confirm (a browser plan's ［任せる］ and
 // ［済んでいた］ are its card's); such a kind fails to compile here.
@@ -234,4 +235,54 @@ test('a plan listed both as open and as a run is one row, its run\'s', () => {
   const v = inboxView(state([], []), [], both)
   const rows = [...v.waiting, ...v.moving].filter(i => i.key === `browser:${bp(1)}`)
   assert.deepEqual(rows.map(i => i.actionLabel), ['確かめる…'])
+})
+
+// 「連絡」1枚 (inbox.md "One contact", decision 5): a 来た連絡 and its 返事のお願い are one row, never a row of the 返事のお願い alone.
+const contactView = (replyState: string, tasks: ContactView['tasks'] = []): ContactView => ({
+  interaction: { id: 'interaction-abc123', title: 'A社 見積のご相談', state: 'handled', version: 7, assignee: 'u-me', maySettle: false },
+  replyRequests: [{ id: 'reply_request-def456', title: '返事', state: replyState, version: 4, assignee: 'u-me', due: '2026-12-02', guidelineDue: null, waitUntil: null, drafts: [],
+    may: replyState === 'closed' ? { replied_elsewhere: false, close: false, drop: false } : { replied_elsewhere: true, close: true, drop: true } }],
+  tasks,
+})
+const contactsOf = (v: ContactView) => (id: string) => (id === v.interaction.id || v.replyRequests.some(r => r.id === id) ? v : undefined)
+
+test('a 来た連絡 and its 返事のお願い are one row 「連絡」 that opens the card; no row for the 返事のお願い alone', () => {
+  const s = state([], [
+    notice('reply_arrived', 'reply_request-def456', LATER),
+    notice('intake_unsure', 'interaction-abc123', AFTER),
+  ])
+  const v = inboxView(s, [], undefined, INBOX_NEWS_SINCE, contactsOf(contactView('checking')))
+  const all = [...v.waiting, ...v.news, ...v.moving, ...v.seen]
+  assert.deepEqual(all.map(r => r.key), ['contact:interaction-abc123'])
+  const row = all[0]
+  assert.deepEqual(row.action, { kind: 'openContact', contactId: 'interaction-abc123' })
+  assert.equal(row.source, '連絡')
+  assert.equal(row.title, 'A社 見積のご相談')
+  // The row says what the card says, and stands for both notices (opening it marks both read).
+  assert.equal(row.badge.word, '返事が来ました・確かめています')
+  assert.equal(row.unreadNoticeIds.length, 2)
+  assert.equal(v.counts.news, 1)
+  // Not read yet (offline, the first look): each notice keeps its own row, as before.
+  assert.equal(inboxView(s).news.length, 2)
+})
+
+test('a contact whose reply is over with a やること left goes to 「確認したもの」 (the やること stays in the task list)', () => {
+  const s = state([], [notice('reply_arrived', 'reply_request-def456', LATER)])
+  const left = contactView('closed', [{ id: 'task-ghi789', title: '経費を承認する', state: 'todo', version: 2, assignee: 'u-me' }])
+  const v = inboxView(s, [], undefined, INBOX_NEWS_SINCE, contactsOf(left))
+  assert.equal(v.news.length, 0)
+  assert.deepEqual(v.seen.map(r => r.key), ['contact:interaction-abc123'])
+  assert.equal(v.seen[0].badge.word, '返事は済みました・やることが 1 件残っています')
+  // Still to reply: 新着 as its notice puts it.
+  assert.equal(inboxView(s, [], undefined, INBOX_NEWS_SINCE, contactsOf(contactView('open'))).news.length, 1)
+})
+
+test('the contacts read for the rows are the ones the notices name, read again when a newer notice comes, and capped', () => {
+  const s = state([], [
+    notice('reply_arrived', 'reply_request-def456', LATER, false, { version: 5 }),
+    notice('intake_unsure', 'interaction-abc123', AFTER, false, { version: 2 }),
+    notice('asked', 'task-xyz999', AFTER),
+  ])
+  assert.deepEqual(contactsToRead(s, 30), ['reply_request-def456@5', 'interaction-abc123@2'])
+  assert.deepEqual(contactsToRead(s, 1), ['reply_request-def456@5'])
 })

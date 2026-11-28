@@ -1,6 +1,8 @@
-// The inbox's own read of the main process (src/shared/ipc/electron-api.ts): only what 「知らせの設定」 needs besides the
-// notices' port (features/notifications/api.ts) — the member's role in the company, read with their session in main.
+// The inbox's own calls to the main process (src/shared/ipc/electron-api.ts), each a small port: the member's role in the
+// company for 「知らせの設定」 (besides the notices' port, features/notifications/api.ts), and 「連絡」1枚's read and its two
+// writes (inbox.md "One contact"), all with the member's session in main.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
+import type { ContactFinishAnswer, ContactFinishRequest, ContactReadResult, ContactUndoAnswer, ContactUndoRequest } from '../../../shared/contact-card'
 
 /** The companies the member belongs to, with their role in each. */
 export type CompanyRoleReads = ElectronPort<'getCompanies'>
@@ -10,4 +12,26 @@ export async function hasFullAccessIn(companyId: string, reads: CompanyRoleReads
   const r = await reads.getCompanies().catch(() => null)
   const role = r?.success ? r.data?.find(c => c.id === companyId)?.role : undefined
   return role === undefined ? null : role === 'owner' || role === 'admin'
+}
+
+/** Reading one contact (an interaction, or a 返事のお願い of it). */
+export type ContactReads = ElectronPort<'getContact'>
+/** Ending a contact's 返事のお願い with its 「済んだ」, and taking that back: both records or neither (the server's). */
+export type ContactWrites = ElectronPort<'finishContact' | 'undoContactFinish'>
+
+const UNREACHED = { success: false as const, gone: false, offline: true, error: 'アプリの中でうまくつながりませんでした。少し待ってから、もう一度押してください' }
+
+export function readContact(companyId: string, recordId: string, reads: ContactReads = window.electronAPI): Promise<ContactReadResult> {
+  // No answer at all (an older main without the channel) reads as not reached, never as a contact.
+  return reads.getContact(companyId, recordId).then(r => r ?? UNREACHED, () => UNREACHED)
+}
+
+const NOT_SENT = { ...UNREACHED, code: null, part: null }
+
+export function finishContact(companyId: string, interactionId: string, input: ContactFinishRequest, writes: ContactWrites = window.electronAPI): Promise<ContactFinishAnswer> {
+  return writes.finishContact(companyId, interactionId, input).then(r => r ?? NOT_SENT, () => NOT_SENT)
+}
+
+export function undoContactFinish(companyId: string, interactionId: string, input: ContactUndoRequest, writes: ContactWrites = window.electronAPI): Promise<ContactUndoAnswer> {
+  return writes.undoContactFinish(companyId, interactionId, input).then(r => r ?? NOT_SENT, () => NOT_SENT)
 }

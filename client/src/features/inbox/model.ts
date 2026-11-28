@@ -8,8 +8,10 @@ import { UNDOABLE_NOTIFICATION_KINDS, type NotificationItem, type NotificationKi
 import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
 import type { MeetingNews, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
-import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
+import { CONTACT_NAME, thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
 import type { BrowserInboxPlans } from '../../../shared/browser-plans'
+import type { ContactView } from '../../../shared/contact-card'
+import { contactLook, contactPlace } from './contactModel'
 
 /** あなた待ち, 新着 (counted), 「動いているもの」 under 新着 (not counted), 確認したもの. */
 export type InboxSection = 'waiting' | 'new' | 'moving' | 'seen'
@@ -26,6 +28,8 @@ export type InboxAction =
   | { kind: 'openMailDraft'; messageId: string }
   /** A 「ブラウザ操作」 plan's card (agent-browser.md): ［任せる］ and ［済んでいた］… are the card's own buttons. */
   | { kind: 'openBrowserPlan'; planId: string }
+  /** 「連絡」1枚 (a 来た連絡 with its 返事のお願い, inbox.md "One contact"): ［返した］ / ［済んだ］ are the card's own buttons. */
+  | { kind: 'openContact'; contactId: string }
   | { kind: 'openTasks' }
   | { kind: 'openJobs' }
   /** A notice about nothing that can be opened: its text says it all. */
@@ -232,6 +236,38 @@ function noticeRow(n: NotificationItem, section: InboxSection, badge: InboxItem[
   }
 }
 
+/** The contact a record belongs to, as the inbox's store last read it (a 来た連絡 or a 返事のお願い of it), or undefined. */
+export type ContactsOfRows = (recordId: string) => ContactView | undefined
+
+/** The types 「連絡」1枚 stands for: their notices are one row per contact (inbox.md "One contact"). */
+export const CONTACT_RECORD_TYPES: ReadonlySet<string> = new Set(['interaction', 'reply_request'])
+
+function contactOf(n: NotificationItem, contacts: ContactsOfRows | undefined): ContactView | undefined {
+  return contacts && n.recordId && CONTACT_RECORD_TYPES.has(n.recordType) ? contacts(n.recordId) : undefined
+}
+
+/** A notice's row as its contact's one row: named by the contact, opening its card. */
+function asContact(row: InboxItem, contact: ContactView | undefined): InboxItem {
+  if (!contact) return row
+  const id = contact.interaction.id
+  return { ...row, key: `contact:${id}`, thing: 'incoming', title: contact.interaction.title || row.title, source: CONTACT_NAME, action: { kind: 'openContact', contactId: id }, actionLabel: '開く' }
+}
+
+/**
+ * The contacts the inbox reads for its rows (`id@stamp`, newest notices first, at most `limit`): every record a notice
+ * names that 「連絡」1枚 stands for, read again when a newer notice about it comes (its version is the stamp).
+ */
+export function contactsToRead(source: NoticesState, limit: number): string[] {
+  if (!source.available) return []
+  const stamps = new Map<string, number>()
+  for (const n of [...source.notices.items].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+    if (!n.recordId || !CONTACT_RECORD_TYPES.has(n.recordType)) continue
+    if (!stamps.has(n.recordId) && stamps.size >= limit) continue
+    stamps.set(n.recordId, Math.max(stamps.get(n.recordId) ?? 0, n.version))
+  }
+  return [...stamps].map(([id, v]) => `${id}@${v}`)
+}
+
 /** Within あなた待ち: by rank, then the nearest due (none last), then the newest. */
 function byNeed(a: InboxItem, b: InboxItem): number {
   if (a.rank !== b.rank) return a.rank - b.rank
@@ -263,7 +299,8 @@ export interface InboxView {
  * (`MeetingNews`) and the member's browser plans. One thing is one row: an unread notice about a record that has a row is
  * that row's news, never a second row. `newsSince`: the first day (`INBOX_NEWS_SINCE`).
  */
-export function inboxView(source: NoticesState, meetings: readonly MeetingNews[] = [], browser?: BrowserInboxPlans, newsSince: string = INBOX_NEWS_SINCE): InboxView {
+export function inboxView(source: NoticesState, meetings: readonly MeetingNews[] = [], browser?: BrowserInboxPlans, newsSince: string = INBOX_NEWS_SINCE,
+  contacts?: ContactsOfRows): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
   for (const item of turn.items) {
@@ -279,7 +316,8 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   // Unread first (newest first), so a row's line is its newest unread notice; read ones only find a row of their own.
   for (const n of [...notices.filter(x => !x.read), ...notices.filter(x => x.read)]) {
-    const key = n.recordId ? `record:${n.recordId}` : `notice:${n.id}`
+    const contact = contactOf(n, contacts)
+    const key = contact ? `contact:${contact.interaction.id}` : n.recordId ? `record:${n.recordId}` : `notice:${n.id}`
     const row = rows.get(key)
     const stop = isWaitingStop(n) ? STOP_NOTICES[n.kind]! : null
     if (row) {
@@ -294,9 +332,18 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
       else if (row.section === 'seen' && !row.meetingId && fresh(n.createdAt)) { row.section = 'new'; row.line = n.text; row.at = n.createdAt }
       continue
     }
-    if (stop) { rows.set(key, { ...noticeRow(n, 'waiting', { tone: stop, word: STOP_LOOK[stop].word }), stop: true }); continue }
+    if (stop) { rows.set(key, asContact({ ...noticeRow(n, 'waiting', { tone: stop, word: STOP_LOOK[stop].word }), stop: true }, contact)); continue }
     const badge = n.settled === true && !n.read ? SETTLED_WORDS : NEWS_WORDS[n.kind] ?? NEWS_DEFAULT
-    rows.set(key, noticeRow(n, !n.read && fresh(n.createdAt) ? 'new' : 'seen', badge))
+    rows.set(key, asContact(noticeRow(n, !n.read && fresh(n.createdAt) ? 'new' : 'seen', badge), contact))
+  }
+  // A contact's one row says where it stands (the card's words); its reply over with a やること left → 確認したもの.
+  for (const row of rows.values()) {
+    if (row.action.kind !== 'openContact' || row.stop) continue
+    const view = contacts?.(row.action.contactId)
+    if (!view) continue
+    const look = contactLook(view)
+    row.badge = { tone: look.status.tone, word: look.status.word }
+    if (contactPlace(view) === 'seen') row.section = 'seen'
   }
 
   // A meeting's place: its unread notice since the first day, or a finished reading not yet looked at here, is 新着; the AI

@@ -28,6 +28,7 @@ import type { BrowserPlanView } from '../../shared/types/browser-plans'
 import type { NoticesState } from '../shared/notifications-app'
 import type { NotificationItem } from '../../shared/types/notifications'
 import type { ApprovalView } from '../../shared/types/approvals'
+import type { ContactFinishAnswer, ContactFinishRequest, ContactUndoAnswer, ContactUndoRequest, ContactView } from '../shared/contact-card'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
@@ -121,6 +122,67 @@ const planView = (id: string): BrowserPlanView => ({
 
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
+// `?contact=own|draft|waiting|other|made|conflict`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
+// with a notice; a fake server keeps the two records like the real one (one finish ends both, its undo brings both back,
+// `conflict` refuses the finish as 「先に変えた」). What a press sent shows in `#acted`. Synthetic data only.
+const CONTACT = params.get('contact')
+const IID = 'interaction-prev01a'
+const RID = 'reply_request-prev01a'
+const ALLOWED = { replied_elsewhere: true, close: true, drop: true }
+function sceneContact(scene: string): ContactView {
+  const reply: ContactView['replyRequests'][number] = { id: RID, title: 'A社 見積のご相談への返事', state: 'open', version: 4, assignee: 'u-me', due: '2026-12-02', guidelineDue: null, waitUntil: null, drafts: [], may: ALLOWED }
+  const interaction: ContactView['interaction'] = { id: IID, title: 'A社 見積のご相談', state: 'unsure', version: 7, assignee: 'u-me', maySettle: true }
+  switch (scene) {
+    case 'draft': return { interaction, replyRequests: [{ ...reply, drafts: [{ id: 'outbound_message-prev01a', version: 2 }] }], tasks: [] }
+    case 'waiting': return { interaction: { ...interaction, state: 'handled', maySettle: false }, replyRequests: [{ ...reply, state: 'waiting_reply', waitUntil: '2026-12-05' }], tasks: [] }
+    case 'other': return { interaction: { ...interaction, state: 'handled', assignee: 'u-tanaka', maySettle: false }, replyRequests: [{ ...reply, assignee: 'u-tanaka', may: { replied_elsewhere: false, close: false, drop: false } }], tasks: [] }
+    case 'made': return {
+      interaction: { ...interaction, state: 'handled', maySettle: false },
+      replyRequests: [{ ...reply, state: 'closed', may: { replied_elsewhere: false, close: false, drop: false } }],
+      tasks: [{ id: 'task-prev01a', title: '経費の申請を承認する', state: 'todo', version: 2, assignee: 'u-me' }],
+    }
+  }
+  return { interaction, replyRequests: [reply], tasks: [] }
+}
+let contactNow: ContactView | null = CONTACT ? sceneContact(CONTACT) : null
+let contactBefore: ContactView | null = null
+if (contactNow) {
+  const items = [
+    note('n-reply', 'reply_arrived', RID, 'reply_request', 'A社 見積のご相談への返事', 'A社から返事が来ました', at(0, 10)),
+    note('n-unsure', 'intake_unsure', IID, 'interaction', 'A社 見積のご相談', '「A社 見積のご相談」を確かめてください', at(0, 9)),
+    ...state.notices.items,
+  ]
+  state = { ...state, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
+}
+/** The fake server's finish: the 返事のお願い's end and, from 確認待ち, the contact's 「済んだ」 — both or neither. */
+function finishOnServer(input: ContactFinishRequest): ContactFinishAnswer {
+  const now = contactNow!
+  const reply = now.replyRequests[0]
+  if (CONTACT === 'conflict' || input.interaction.expectedVersion !== now.interaction.version || input.replyRequest.expectedVersion !== reply.version) {
+    return { success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'replyRequest', error: 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください' }
+  }
+  const settles = now.interaction.state === 'unsure'
+  contactBefore = now
+  contactNow = {
+    ...now,
+    interaction: settles ? { ...now.interaction, state: 'handled', version: now.interaction.version + 1, maySettle: false } : now.interaction,
+    replyRequests: [{ ...reply, state: input.replyRequest.action === 'drop' ? 'dropped' : 'closed', version: reply.version + 1, drafts: [], may: { replied_elsewhere: false, close: false, drop: false } }],
+  }
+  return { success: true, result: {
+    interaction: settles ? { recordId: IID, outcome: 'done', state: 'handled', recordVersion: now.interaction.version + 1, version: now.interaction.version + 1 } : { recordId: IID, outcome: 'unchanged', state: now.interaction.state, recordVersion: now.interaction.version, version: null },
+    replyRequest: { recordId: RID, outcome: 'done', state: contactNow.replyRequests[0].state, recordVersion: reply.version + 1, version: reply.version + 1 },
+  } }
+}
+function undoOnServer(input: ContactUndoRequest): ContactUndoAnswer {
+  const before = contactBefore!
+  contactNow = { ...before, interaction: { ...before.interaction, version: before.interaction.version + (input.interaction ? 2 : 0) }, replyRequests: before.replyRequests.map(r => ({ ...r, version: r.version + 2 })) }
+  contactBefore = null
+  return { success: true, result: {
+    interaction: input.interaction ? { recordId: IID, outcome: 'done', state: contactNow.interaction.state, recordVersion: contactNow.interaction.version, version: contactNow.interaction.version } : null,
+    replyRequest: { recordId: RID, outcome: 'done', state: contactNow.replyRequests[0].state, recordVersion: contactNow.replyRequests[0].version, version: contactNow.replyRequests[0].version },
+  } }
+}
+
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
@@ -154,6 +216,9 @@ function Preview() {
     approveApproval: async () => { setActed('approve'); return { success: false, offline: true, error: '（見本）' } as never },
     getOutboundMail: async () => ({ success: false, offline: false, code: null, error: '（見本）下書きは、このページでは読み込みません。' }),
     sendOutboundMail: async () => { setActed('send'); return { success: false, offline: true, error: '（見本）' } as never },
+    getContact: async (_companyId, id) => (contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }),
+    finishContact: async (_companyId, _id, input) => { setActed(`finish ${JSON.stringify(input)}`); return finishOnServer(input) },
+    undoContactFinish: async (_companyId, _id, input) => { setActed(`undo ${JSON.stringify(input)}`); return undoOnServer(input) },
   })
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({
@@ -164,6 +229,7 @@ function Preview() {
     renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
     renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
     browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} />, planStates: PLAN_STATES } : undefined,
+    memberName: id => (id === 'u-tanaka' ? '田中' : null),
   })
   return (
     <main className="flex h-screen flex-col bg-bg text-text">
