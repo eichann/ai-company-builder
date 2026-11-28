@@ -67,6 +67,20 @@ test('「返事の形」: the plain reply adds nothing, a rich one adds the diag
   assert.doesNotMatch(apiKey.system + apiKey.standing, /mermaid/)
 })
 
+// The rich-reply line (```acb-html / ```acb-slide and the ready-made pieces) rides with リッチ only: ふつう still draws
+// such a block (the chat does not ask the setting) but the AI is not told to write one; nor through the API key.
+test('「返事の形：リッチ」 tells this turn about ```acb-html and the ready-made pieces; ふつう, another value and the API key do not', async () => {
+  const rich = await turnOf({ replyStyle: 'rich' })
+  assert.match(rich.system, /```acb-html code block/)
+  assert.match(rich.system, /```acb-slide/)
+  for (const piece of ['acb-key', 'acb-warn', 'acb-steps', 'acb-compare', 'acb-tabs', 'acb-tip', 'acb-bar']) assert.ok(rich.system.includes(piece), piece)
+  assert.doesNotMatch(rich.standing, /acb-/)
+  for (const body of [{}, { replyStyle: 'plain' }, { replyStyle: 'fancy' }, { replyStyle: 'rich', authMode: 'api-key' }]) {
+    const other = await turnOf(body)
+    assert.doesNotMatch(other.system + other.standing, /acb-/, JSON.stringify(body))
+  }
+})
+
 // A rich reply's page goes to the member's 今日のフォルダ only (reply-style.ts: never synced, the member's alone until
 // moved). A request cannot point the AI anywhere else: a today folder not of the app's shape gives no page line.
 test('「返事の形：リッチ」 names the member\'s 今日のフォルダ as where a page goes; no today folder, another shape or ふつう: no page line', async () => {

@@ -523,7 +523,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   which draws the same) and a rich reply's HTML (`replyHtmlCleaning.ts` `sanitizeReplyHtml`, below). A gap found in
   the walk is fixed there, for both.
 - **Rich replies: the cleaning of the AI's HTML** (owner decisions 2026-11-28, 「リッチな返信」; PR1 of 4: the
-  function and its tests; PR2 draws it in the reply's closed frame, below; the AI's line and the buttons follow).
+  function and its tests; PR2 draws it in the reply's closed frame, below; PR3 the AI's line; the buttons follow).
   `sanitizeReplyHtml(markup) → { html, css }`, the first of the two guards (the second is the closed frame, PR2): what
   it returns runs nothing, loads nothing, sends nothing, cannot leave the reply's box and does not move for ever,
   **even drawn in a frame that would allow it** (the spec checks exactly that). Kept: text, headings, lists, tables,
@@ -615,7 +615,13 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   - **The look is the chat's**: the app's tokens (`:root` / `.dark` custom properties) and its Markdown typography
     (the `prose` rules, `CHAT_MARKDOWN_CLASS` shared with `MarkdownMessage`) are read from the app's own style sheets
     into the frame, then a few resets and the ready-made boxes (`acb-key`, `acb-note`, `acb-warn`, `acb-ok`,
-    `acb-steps`, `acb-compare`, `acb-tabs`, `acb-tip`, `acb-bar`, `acb-muted`: tokens only). The reply's CSS sits in a
+    `acb-steps`, `acb-compare`, `acb-tabs`, `acb-tip`, `acb-bar`, `acb-muted`: tokens only). **The AI is told about
+    them** (PR3) only with 「返事の形：リッチ」 (`reply-style.ts` `RICH_HTML_INSTRUCTION`, its markup in `RICH_HTML_PIECES`,
+    `chat-and-agents.md` "What ACB tells the AI"); ふつう and the API key add nothing, and such a block is drawn
+    either way. Nothing was added to the cleaning for them: `class` is kept on any element, and only the frame's own
+    CSS gives these names a look. Test: `tests/ui/chat-rich-reply.spec.ts` 「the ready-made pieces the AI is told
+    about…」 (every piece kept by the cleaning, each class has a frame rule, the boxes have their own background, and
+    boxes and marks reach a contrast of 4.5 in light and dark), `tests/chat-standing-instructions.test.ts`. The reply's CSS sits in a
     `<style>` of its own after the frame's. **Light / dark** follows the app, not the computer: the frame's `<html>`
     gets `dark`, and the reply's own `prefers-color-scheme` queries are rewritten to always / never hold
     (`cssForTheme`); a switch loads the next frame the same way (no empty moment). A slide is scaled to the reply's
