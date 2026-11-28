@@ -51,6 +51,8 @@ export interface DrivePlayerHooks {
   onShortcut(playerId: number, key: KeyInput): void
   /** The player's view went (closed, crashed). */
   onGone(playerId: number): void
+  /** The player's page stayed refused by its session's hook, loaded again and again (`doc-view.ts`): it would stay blank. */
+  onPageRefused(playerId: number): void
 }
 
 export interface DrivePlayerPort {
@@ -118,6 +120,8 @@ interface Player {
   placedAt: number
   /** Where its video was when it was hidden while playing (seconds): ［続きから再生］ starts there. */
   resumeAt: number
+  /** Its page now is the 「もう一度」 shown because the page before stayed refused (`onPageRefused`): never shown again for itself. */
+  pageRefused: boolean
 }
 
 interface ViewPlayers {
@@ -154,8 +158,9 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   const load = (p: Player) => {
     if (!p.closed && p.handle) p.handle.load(drivePlayerPageUrl(p.token, ++p.version))
   }
-  const show = (p: Player, view: DrivePlayerView) => {
+  const show = (p: Player, view: DrivePlayerView, forRefusal = false) => {
     p.view = view
+    p.pageRefused = forRefusal
     load(p)
   }
 
@@ -237,6 +242,15 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
       const p = byPage.get(playerId)
       if (p) close(p)
     },
+    onPageRefused(playerId) {
+      const p = byPage.get(playerId)
+      // While it checks or picks, the next page comes anyway; its own 「もう一度」 refused too stays as it is (no loop).
+      if (!p || p.closed || p.pageRefused || p.view.kind === 'checking' || p.view.kind === 'picking') return
+      // Playing, its video is gone with the page: its streams end (where it was is kept for a paused one).
+      for (const stream of p.streams) stream.abort()
+      p.streams.clear()
+      show(p, { kind: 'error', message: DRIVE_PLAYER_WORDS.failed, retry: true, browser: true }, true)
+    },
   }
 
   const server: DrivePlayerServer = {
@@ -265,7 +279,7 @@ export function createDrivePlayers(deps: DrivePlayersDeps) {
   const make = (viewId: number, fileId: string, overlay: boolean): Player | null => {
     const v = views.get(viewId)
     if (!v) return null
-    const p: Player = { token: newToken(), viewId, fileId, overlay, handle: null, closed: false, view: { kind: 'poster' }, version: 0, placement: null, streams: new Set(), picking: null, placedAt: now(), resumeAt: 0 }
+    const p: Player = { token: newToken(), viewId, fileId, overlay, handle: null, closed: false, view: { kind: 'poster' }, version: 0, placement: null, streams: new Set(), picking: null, placedAt: now(), resumeAt: 0, pageRefused: false }
     byToken.set(p.token, p)
     void (shell ??= deps.shell(server)).create(v.windowId, hooks).then(handle => {
       if (!handle) { close(p); return }

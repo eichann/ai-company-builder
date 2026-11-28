@@ -524,6 +524,31 @@ test('hidden while playing (an overlay, scrolled out): paused, its streams abort
   assert.match(await w.page(id), /src="video#t=12\.5"/)
 })
 
+test('a player\'s page that stayed refused (its shell gave up loading it again) shows ［もう一度］, its stream ended; that page refused too stays as it is', async () => {
+  const w = world({ picked: new Set([A]), chunk: 100 })
+  const viewId = await w.open()
+  await w.show(viewId, [{ src: drive(A), box: box(0, 0) }])
+  const [[id, view]] = w.playersOf()
+  await w.press(id, 'play')
+  const answer = await w.server().serve({ url: `acb-drive-video://${w.tokenOf(id)}/video`, method: 'GET', range: 'bytes=0-' })
+  await answer.body!.getReader().read()
+  const live = w.streams.at(-1)!
+  view.hooks.onPageRefused(id)
+  await w.settle()
+  assert.equal(live.signal.aborted, true, 'its stream ended with the page')
+  assert.match(await w.page(id), /動画を読み込めませんでした/)
+  assert.match(await w.page(id), /href="play"/, '［もう一度］')
+  const loads = view.loads.length
+  view.hooks.onPageRefused(id)
+  await w.settle()
+  assert.equal(view.loads.length, loads, 'its own ［もう一度］ refused too: not loaded again (no loop)')
+  await w.press(id, 'play')
+  assert.match(await w.page(id), /<video/, '［もう一度］ plays')
+  view.hooks.onPageRefused(id)
+  await w.settle()
+  assert.match(await w.page(id), /動画を読み込めませんでした/, 'a later page refused is told again')
+})
+
 test('a server answer cut in the middle is asked again from the byte not yet passed on; a longer one is cut to its range', async () => {
   const cutOnce = new Set<string>()
   const w = world({ picked: new Set([A]), chunk: 1000, cutAnswer: range => (range === 'bytes=1000-2499' && !cutOnce.has(range) ? (cutOnce.add(range), 300) : null) })

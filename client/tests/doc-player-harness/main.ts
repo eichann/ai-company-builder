@@ -142,12 +142,24 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   let playingRefused = false
   let playerAId = -1
   const playerAllowedToPlay = () => fake.requests.some(r => r.path.endsWith(A) && r.status === 206 && r.range === 'bytes=0-0')
+  // Each page address the hook saw, counted.
+  const pagesAsked = new Map<string, number>()
+  // A page main did not ask for (B going to an older address of its own page by itself), refused once.
+  let refuseOnce: string | null = null
+  // Every page of a player made from now on is refused (the hook refusing it again and again): it is loaded
+  // again PLAYER_PAGE_RELOADS times, no more, and then shows 「もう一度」 (whose page is refused the same way).
+  let refuseNewPlayers: Set<number> | null = null
+  const refusedAlways = new Set<string>()
   const players = createDrivePlayers({
     // The server's answers, with one page answer redirected on demand (the redirect guard).
     shell: server => createDrivePlayerShell({
       ...server,
       owns: (pageId, url) => {
-        if (!playingRefused && /\/\?v=\d+$/.test(url) && server.owns(pageId, url) && pageId === playerAId && playerAllowedToPlay()) { playingRefused = true; return false }
+        const isPage = /\/\?v=\d+$/.test(url)
+        if (isPage) pagesAsked.set(url, (pagesAsked.get(url) ?? 0) + 1)
+        if (isPage && url === refuseOnce) { refuseOnce = null; return false }
+        if (isPage && refuseNewPlayers && !refuseNewPlayers.has(pageId)) { refusedAlways.add(url); return false }
+        if (!playingRefused && isPage && server.owns(pageId, url) && pageId === playerAId && playerAllowedToPlay()) { playingRefused = true; return false }
         return server.owns(pageId, url)
       },
       serve: async request => {
@@ -301,6 +313,12 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
     document: session.fromPartition('acb-doc').protocol.isProtocolHandled(DRIVE_PLAYER_SCHEME),
     app: session.defaultSession.protocol.isProtocolHandled(DRIVE_PLAYER_SCHEME),
   }
+  // A page main did not ask for, refused (B going to an older address of its own page): not loaded again.
+  const older = bUrl.replace(/\?v=\d+/, '?v=98')
+  refuseOnce = older
+  await pb.executeJavaScript(`location.href = ${JSON.stringify(older)}`, true).catch(() => {})
+  await wait(1500)
+  result.notAskedByMain = { refused: refuseOnce === null, asked: pagesAsked.get(older) ?? 0 }
   await pb.loadURL(bUrl.replace(/\?v=\d+/, '?v=99')).catch(() => {})
   await wait(800)
 
@@ -314,6 +332,15 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   await wait(600)
   await top.webContents!.executeJavaScript(`document.querySelector('a[href="close"]').click()`, true).catch(() => {})
   await wait(500)
+  // A player over the area whose every page the hook refuses: its poster loaded again 3 times, then its
+  // 「もう一度」 the same, then nothing more.
+  refuseNewPlayers = new Set(playerViews().map(v => v.webContents.id))
+  views.playDriveVideo(viewId, win.webContents.id, 0)
+  const refusedPages = () => [...refusedAlways].map(url => [url, pagesAsked.get(url) ?? 0] as const).map(([url, n]) => [Number(/\?v=(\d+)$/.exec(url)![1]), n]).sort((a, b) => a[0] - b[0])
+  for (let i = 0; i < 100 && JSON.stringify(refusedPages()) !== JSON.stringify([[1, 4], [2, 4]]); i++) await wait(50)
+  await wait(1500)
+  result.refusedAgainAndAgain = refusedPages()
+  refuseNewPlayers = null
   await doc.executeJavaScript('window.scrollTo(0, 0)', true).catch(() => 'threw')
   await settle(() => visibleBounds().length >= 2)
   await wait(600)

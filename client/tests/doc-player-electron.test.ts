@@ -38,6 +38,8 @@ interface Result {
   keyboardAfterLoads: { app: boolean; player: boolean; windowFocused: boolean }
   picks: string[]
   playingRefused: boolean
+  notAskedByMain: { refused: boolean; asked: number }
+  refusedAgainAndAgain: number[][]
   played: { ok: boolean; duration?: number; at?: number; page?: string }
   streamRequests: Array<{ range: string | null; status: number; cookie: string | null }>
   otherPlayerReach: string
@@ -148,6 +150,15 @@ test('［ここで再生］: not picked → the Picker, then the video plays and
 test('a player\'s page load the session\'s hook refused (Electron left out its page\'s id: a load replacing one under way) is loaded again: the video plays, the player never stays blank', { skip }, () => {
   assert.equal(result.playingRefused, true, 'control: the playing page\'s first load was refused')
   assert.equal(result.played.ok, true, JSON.stringify(result.played))
+})
+
+test('only the page main asked for last is loaded again: a refused page the player went to by itself (an older address of its own) is not', { skip }, () => {
+  assert.deepEqual(result.notAskedByMain, { refused: true, asked: 1 })
+})
+
+test('a page the hook keeps refusing is loaded again 3 times, no more; then ［もう一度］, refused the same way, and nothing more', { skip }, () => {
+  // [version, times the hook saw it]: the poster 1 + 3, its 「もう一度」 1 + 3, measured 1.5 s after the last.
+  assert.deepEqual(result.refusedAgainAndAgain, [[1, 4], [2, 4]])
 })
 
 test('another player\'s page cannot reach a player\'s video', { skip }, () => {
