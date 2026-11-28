@@ -33,7 +33,8 @@ export function appInstructionOf(message: { metadata?: unknown }): AppInstructio
 
 /**
  * A message the app sent in the member's place when it started a consultation (`chat.newConsultation`: a Skill's 実行,
- * reading minutes, 「会議のたたき台を作る」, 「AI に直してもらう」; and an automatic 「AI の番」's first message): shown as a
+ * reading minutes, 「会議のたたき台を作る」, 「AI に直してもらう」; and an automatic 「AI の番」's first message), or into the
+ * current one (`chat.askToFix`: a document's 「AI に直してもらう」, the passage as outside text): shown as a
  * bubble like the member's, but not words the member typed. Its text may carry outside text (minutes, a Skill someone
  * else wrote), so it never counts as the member's own request (records.md "The AI at the member's request",
  * `latestMemberText`). AI SDK `metadata.appSent`, stored with the message.

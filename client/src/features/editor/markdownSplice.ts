@@ -127,6 +127,72 @@ export class SplicedDocument {
     return false
   }
 
+  /**
+   * 「AI に直してもらう」's passage: the top-level blocks holding nodes `first`..`last` (inclusive) —
+   * their place in the file (offsets of `text`) and the nodes they made. Null when no block holds them.
+   */
+  passage(first: number, last: number): { start: number; end: number; nodeFrom: number; nodeTo: number } | null {
+    const r = this.blockRange(first, last + 1)
+    if (r.gFirst < 0) return null
+    return { start: this.front.length + r.start, end: this.front.length + r.end, nodeFrom: r.fromNode, nodeTo: r.toNode }
+  }
+
+  /** The first and last node of the blocks touching file offsets `start`..`end` (a comment's quote), or null. */
+  nodesAt(start: number, end: number): { first: number; last: number } | null {
+    const s = start - this.front.length
+    const e = end - this.front.length
+    const touching = this.blocks.map((_, i) => i).filter(i => this.nodeCount[i] > 0 && this.blocks[i].start < Math.max(e, s + 1) && this.blocks[i].end > s)
+    if (touching.length === 0) return null
+    const lastBlock = touching[touching.length - 1]
+    return { first: this.firstNode[touching[0]], last: this.firstNode[lastBlock] + this.nodeCount[lastBlock] - 1 }
+  }
+
+  /**
+   * Markdown (the AI's fix) read as the editor's nodes, with the file's link reference definitions; null
+   * when the editor would lose some of its text on reading (it is then not offered: nothing written).
+   */
+  read(md: string): PMNode[] | null {
+    try {
+      if (this.codec.blocks(md).some(b => !SUPPORTED.has(b.kind))) return null
+      const source = withDefinitions(md, definitionsOf(this.body, this.blocks))
+      const made = children(this.codec.parse(source))
+      if (squeeze(this.codec.visibleText(source)) !== squeeze(nodesText(made))) return null
+      return made
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The AI's fix written as it wrote it, in place of the blocks holding nodes `nodeFrom`..`nodeTo` (exclusive):
+   * only when `current` differs from the baseline in those nodes alone, the text reads back as exactly what
+   * the screen shows and the blocks around it keep their bytes. Null otherwise (`write` is then the way).
+   */
+  writeSource(current: PMNode, nodeFrom: number, nodeTo: number, md: string): SpliceWrite | null {
+    try {
+      const now = children(current)
+      const old = this.nodes
+      const tail = old.length - nodeTo
+      if (tail < 0 || now.length < nodeFrom + tail) return null
+      for (let i = 0; i < nodeFrom; i++) if (!old[i].eq(now[i])) return null
+      for (let i = 1; i <= tail; i++) if (!old[old.length - i].eq(now[now.length - i])) return null
+      const range = this.blockRange(nodeFrom, nodeTo)
+      if (range.gFirst < 0 || range.fromNode !== nodeFrom || range.toNode !== nodeTo) return null
+      const newTo = now.length - tail
+      const changed = writable(now.slice(nodeFrom, newTo))
+      const region = this.body.slice(range.start, range.end)
+      const eol = region.includes('\n') ? (lfRegion(region).converted ? '\r\n' : '\n') : this.eol
+      const candidate = md.replace(/\r\n/g, '\n').replace(/^\n+/, '').replace(/\s+$/, '').replace(/\n/g, eol)
+      const defs = definitionsOf(this.body, this.blocks)
+      if (candidate === '' || !this.readsBack(candidate, changed, defs)) return null
+      if (!this.neighboursKept(range.start, range.end, candidate, range.gFirst, range.gLast)) return null
+      const body = this.body.slice(0, range.start) + candidate + this.body.slice(range.end)
+      return { text: this.front + body, commit: () => this.commit(range, candidate, body, now, nodeFrom, newTo, defs) }
+    } catch {
+      return null
+    }
+  }
+
   write(current: PMNode): SpliceWrite | null {
     // The editor's writer meeting a shape it cannot write throws: that change is not writable.
     try { return this.writeAll(current) } catch { return null }

@@ -20,6 +20,7 @@ import { TextSelection } from '@milkdown/prose/state'
 import type { InPlaceEngine, InPlaceOptions, InPlaceRefusal } from './inPlaceEditing'
 import { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } from './milkdownFormat'
 import { droppedFiles, pastedImageFiles, placeImages } from './milkdownImages'
+import { fixBelowPlugin, fixedDocument, passageAt, previewFix, selectedPassage, showBelow } from './milkdownAiFix'
 import { blockMenuPlugin, blockMenuReport, closeBlockMenu, lineStartRules, REPLACED_LINE_START_RULES, editTable, tableReport, turnIntoBlock } from './milkdownBlocks'
 
 interface MdNode { type: string; value?: unknown; alt?: unknown; children?: MdNode[]; position?: { start: { offset?: number }; end: { offset?: number } } }
@@ -109,6 +110,8 @@ export const milkdownEngine: InPlaceEngine = {
     let destroyed = false
     // The selection as last shown: a box for a link's address takes the focus, the change still applies to it.
     let lastRange: { from: number; to: number } | null = null
+    // An adopted AI fix: the write chosen for exactly that document (the AI's own Markdown or the smallest edit).
+    let adopted: { doc: PMNode; write: NonNullable<ReturnType<SplicedDocument['write']>> } | null = null
     const reported = { selection: '', menu: '', table: '' }
     const report = <T>(kind: keyof typeof reported, value: T, tell: (v: T) => void) => {
       const key = JSON.stringify(value)
@@ -132,7 +135,9 @@ export const milkdownEngine: InPlaceEngine = {
           if (!spliced || !shownDoc || doc === shownDoc) return
           // A write that throws (the editor's writer meeting a shape it cannot write) is not writable either.
           let write: ReturnType<SplicedDocument['write']> = null
-          try { write = spliced.write(doc) } catch { write = null }
+          const chosen = adopted && adopted.doc === doc ? adopted.write : null
+          adopted = null
+          try { write = chosen ?? spliced.write(doc) } catch { write = null }
           if (write) {
             write.commit()
             shownDoc = doc
@@ -202,7 +207,7 @@ export const milkdownEngine: InPlaceEngine = {
             },
           },
         }))
-      }, [tracker])
+      }, [tracker, fixBelowPlugin])
     } catch {
       host.replaceChildren()
       return { ok: false, reason: 'unavailable' }
@@ -242,6 +247,22 @@ export const milkdownEngine: InPlaceEngine = {
         turnInto: block => { if (!view.isDestroyed) turnIntoBlock(view, block) },
         closeBlockMenu: () => { if (!view.isDestroyed) closeBlockMenu(view) },
         editTable: edit => { if (!view.isDestroyed) editTable(view, edit) },
+        // 「AI に直してもらう」 (milkdownAiFix.ts): only against what is written (a change still taken back has no passage).
+        selectedPassage: () => (spliced && !view.isDestroyed && view.state.doc === shownDoc ? selectedPassage(view, spliced, lastRange) : null),
+        passageAt: (start, end) => (spliced && !view.isDestroyed && view.state.doc === shownDoc ? passageAt(spliced, start, end) : null),
+        showBelow: (passage, element) => showBelow(view, passage, element),
+        previewFix: (passage, markdown) => (spliced && !view.isDestroyed ? previewFix(view, spliced, shownDoc, passage, markdown) : { ok: false, reason: 'changed' }),
+        adoptFix: (passage, markdown) => {
+          if (!spliced || view.isDestroyed) return { ok: false, reason: 'changed' }
+          const preview = previewFix(view, spliced, shownDoc, passage, markdown)
+          const fixed = fixedDocument(view, spliced, shownDoc, passage, markdown)
+          if (!preview.ok || !fixed.ok) return preview.ok ? { ok: false, reason: 'unwritable' } : preview
+          // Written by the tracker like typing, with the write chosen for exactly this document.
+          adopted = { doc: fixed.tr.doc, write: fixed.write }
+          view.dispatch(fixed.tr)
+          adopted = null
+          return view.state.doc === shownDoc ? preview : { ok: false, reason: 'unwritable' }
+        },
       },
     }
   },

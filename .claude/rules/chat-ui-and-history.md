@@ -102,7 +102,12 @@ one place an added agent brings its own controls; everything else asks the regis
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
   chat input. The one request a tab takes while not shown is `aiTurn`: the automatic 「AI の番」
-  in a fresh background tab (`ai-turns.md`).
+  in a fresh background tab (`ai-turns.md`). `chat.askToFix` (「AI に直してもらう」, `chat-and-agents.md` "In-place
+  fixes") is the request `inlineFix`: the shown tab sends it into **its current consultation** (not a new one) unless
+  anything of the tab runs or waits (`tabBusy`; then answered `busy`), waits for the turn that carried it to end
+  (`inlineFixRef`, settled in `onFinish` with `inlineFixTurnAnswer`) and answers the command with the reply; a send that
+  never went out (its save failed) is answered `failed`, and the member's draft in the composer is neither cleared nor
+  replaced by it (`besideComposer`). Any request that replaces one still waiting for the tab answers that one `busy`.
 - **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
   assumes one chat on screen:
   - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on
@@ -382,7 +387,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`tasks-ui.md` "Consulting about a task"). A message the app wrote for the AI keeps
   `appInstruction` (`client/shared/app-instruction.ts`): restored as `metadata.appInstruction`,
   never drawn as a bubble, previewed or searched (`tasks-ui.md`). A message the app sent in the member's place to start a
-  consultation (`chat.newConsultation`'s first message, an automatic 「AI の番」's) keeps `appSent` (`metadata.appSent`,
+  consultation (`chat.newConsultation`'s first message, an automatic 「AI の番」's) or into it (`chat.askToFix`'s request:
+  the in-place fix stays in the consultation's history, followed by the AI's reply) keeps `appSent` (`metadata.appSent`,
   `appSentOf`): drawn as a bubble as before, but never the member's own request (`records.md` "The AI at the member's
   request").
 - **`updatedAt` is when the conversation changed** (staging 2026-11-02: every conversation showed the

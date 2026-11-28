@@ -5,7 +5,8 @@
 // file as the AI would (and sends the watcher's event); __acbRequestClose() asks to close the window
 // as main does; __acbCloseAnswers lists the answers; __acbBackups every keep (the disk version
 // before an overwrite, or the edits given); __acbFailWrites: saves of these paths fail; __acbImages every
-// image kept beside a document (main names it; here a counter of a fixed second).
+// image kept beside a document (main names it; here a counter of a fixed second); __acbFixRequests /
+// __acbAnswerFix the AI fix's chat pane.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -94,11 +95,18 @@ useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ',
 const appKeys: string[] = []
 Object.assign(window, { __acbAppKeys: appKeys })
 
+// 「AI に直してもらう」: the chat pane's command, answered by the spec (__acbFixRequests: what was handed over;
+// __acbAnswerFix(reply): the pane's answer, `{ ok: true, reply }` or a refusal).
+const fixRequests: unknown[] = []
+let answerFix: ((reply: unknown) => void) | null = null
+Object.assign(window, { __acbFixRequests: fixRequests, __acbAnswerFix: (reply: unknown) => { answerFix?.(reply); answerFix = null } })
+
 export function Preview() {
   useKeybindings()
   // As AppShell has them: ⌘B is the left column's, ⌘K 探す — the document's bold and link only while it has the focus.
   useCommandHandler('layout.toggleLeft', () => { appKeys.push('layout.toggleLeft') })
   useCommandHandler('find.byName', () => { appKeys.push('find.byName') })
+  useCommandHandler('chat.askToFix', args => new Promise(resolve => { fixRequests.push(args); answerFix = resolve }), { target: 'chat' })
   // A part around the editor that also answers Esc (as a list worked through does): the 「/」 list takes Esc only while it shows.
   useCommandHandler('list.back', () => { appKeys.push('list.back') }, { target: 'around' })
   const [active, setActive] = useState(new URLSearchParams(location.search).get('file') === 'notes' ? NOTES : MEETING)

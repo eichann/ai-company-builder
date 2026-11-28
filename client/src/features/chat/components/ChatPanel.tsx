@@ -25,6 +25,7 @@ import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
 import { agentCan } from '../../../../shared/agents/registry'
+import { inlineFixMessage, type InlineFixReply } from '../../../../shared/inline-fix'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
 import { automaticConsultationsFor, consultationHoldOf, forgetAutomaticConsultations, rememberAutomaticConsultation } from '../automaticConsultationsStore'
 import { closesWhenRecordEnds, workConsultationStep } from '../aiTurns'
@@ -125,13 +126,26 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   useEffect(() => publishChatPane(paneId, tabs.flatMap(tab => tab.sessionId ? [tab.sessionId] : []), id => showHere.current(id)), [paneId, tabs, showHere])
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
-  const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
+  const [inputRequest, setWaitingRequest] = useState<ChatInputRequest | null>(null)
+  // A 「AI に直してもらう」 still waiting for the tab is answered when another request takes its place.
+  const inputRequestRef = useLatestRef(inputRequest)
+  const setInputRequest = useCallback((next: ChatInputRequest | null) => {
+    const waiting = inputRequestRef.current
+    if (next && waiting?.kind === 'inlineFix') waiting.answer({ ok: false, reason: 'busy' })
+    inputRequestRef.current = next
+    setWaitingRequest(next)
+  }, [inputRequestRef])
   // A person step's procedure is the app's instruction to the AI: sent, shown only as a chip (app-instruction.ts).
   useCommandHandler('chat.newConsultation', ({ message, title, minutesId, pluginStep }) => setInputRequest({
     kind: 'newConsultation', message, title, minutesId, pluginStep,
     ...(pluginStep && message ? { instruction: { kind: 'step', recordId: pluginStep.recordId, title: title ?? '' } } : {}),
   }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
+  // 「AI に直してもらう」 (files-and-editor.md "Asking the AI to fix a passage"): into the shown tab's consultation; the
+  // promise is the answer (the AI's reply when that turn ends). A request still waiting for the tab is answered busy first.
+  useCommandHandler('chat.askToFix', ({ ask, file, passage, before, after, comment }) => new Promise<InlineFixReply>(answer => {
+    setInputRequest({ kind: 'inlineFix', message: inlineFixMessage({ ask, file, passage, before, after, ...(comment ? { comment } : {}) }), answer })
+  }), { target: paneId })
   // 「この作業をする」 (jobs.md, owner memo 「4b-4 挟む部分」 E5): remembered like an automatic run's consultation (ending the
   // やること closes it too), and closed by itself once its work is done while not in front — the rules of `closesWhenRunEnds`
   // (a review, an approval, a failure, the member's words, another conversation in the tab or the tab in front keep it open).
@@ -168,7 +182,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     return true
   }, { target: paneId })
   useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })
-  const consumeInputRequest = useCallback(() => setInputRequest(null), [])
+  const consumeInputRequest = useCallback(() => setInputRequest(null), [setInputRequest])
   // The member ended a record: its automatic consultations close, unless they hold anything of the member's.
   useCommandHandler('chat.closeRecordConsultations', ({ recordId }) => {
     const automatic = automaticConsultationsFor(companyId, userId, recordId)

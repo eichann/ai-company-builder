@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { defineCommands } from './define'
 import { TAB_KIND_GROUPS } from '../thing-words'
 import { isManualPageId } from '../../../shared/core/manual'
+import { INLINE_FIX_LIMITS } from '../inline-fix'
 
 export const COMMANDS = defineCommands([
   {
@@ -78,6 +79,26 @@ export const COMMANDS = defineCommands([
     id: 'chat.insertText', title: '入力欄に文を入れる', class: 'local',
     args: z.object({
       text: z.string().min(1),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
+    // 「AI に直してもらう」 on a document edited in place (files-and-editor.md "Asking the AI to fix a passage"): the
+    // passage and a little text around it go to the pane's current consultation as a message the app sends
+    // (kept in its history); answers the AI's reply text when that turn ends (`InlineFixReply`, inline-fix.ts).
+    // Nothing is written: the member adopts the fix on the document. Sending to the AI, hence outbound.
+    id: 'chat.askToFix', title: '文書の一部の直しを AI に頼む', class: 'outbound',
+    args: z.object({
+      ask: z.string().min(1).max(INLINE_FIX_LIMITS.ask).describe('What the member asked (a suggestion or their own words)'),
+      file: z.string().min(1).max(INLINE_FIX_LIMITS.file).describe('The document\'s file name (no folder)'),
+      passage: z.string().min(1).max(INLINE_FIX_LIMITS.passage).describe('The Markdown to be replaced, as the file holds it'),
+      before: z.string().max(INLINE_FIX_LIMITS.around).describe('Text before the passage, for context only'),
+      after: z.string().max(INLINE_FIX_LIMITS.around).describe('Text after the passage, for context only'),
+      comment: z.object({
+        quote: z.string().max(INLINE_FIX_LIMITS.commentQuote),
+        body: z.string().min(1).max(INLINE_FIX_LIMITS.commentBody),
+      }).optional().describe('The review comment it reflects (「AI に反映してもらう」)'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },

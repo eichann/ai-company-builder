@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Code, Eye, PencilSimple, ChatCircleDots } from '@phosphor-icons/react'
 import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
 import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
@@ -8,7 +8,7 @@ import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
 import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
 import { MarkdownPreview } from './MarkdownPreview'
-import { InPlaceMarkdownEditor } from './InPlaceMarkdownEditor'
+import { InPlaceMarkdownEditor, type CommentFixStart } from './InPlaceMarkdownEditor'
 import { findTextInMarkdown } from '../../doc-review/model'
 import type { SelectionSlot } from '../selectionSlot'
 import { Callout } from '../../../shared/ui/primitives'
@@ -31,13 +31,33 @@ interface Props {
   inPlace?: { onChange: (text: string) => void } | null
   /** The review's comment box, handed in by the screen (selectionSlot.ts): ［コメント］ and a review's selection. */
   commentBox?: SelectionSlot['commentBox']
+  /** The consultation's AI (selectionSlot.ts): ［AI に直してもらう］, and ［AI に反映してもらう］ on a completed review's comment. */
+  aiFix?: SelectionSlot['aiFix']
 }
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox,
+  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox, aiFix,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
+  // ［AI に反映してもらう］: the review's reading view closes and the document opens here, where the fix is asked
+  // and shown under the comment's words. The comment is left as it is (never resolved for the member).
+  const [commentFix, setCommentFix] = useState<CommentFixStart | null>(null)
+  const reflectComment = inPlace && aiFix && review.isViewingCompleted && review.activeReview
+    ? (comment: { id: string; selectedText: string; body: string }) => {
+      const reviewId = review.activeReview!.id
+      setShowDiff(false)
+      review.closeViewingReview()
+      const at = findTextInMarkdown(content, comment.selectedText)
+      setCommentFix({
+        quote: comment.selectedText,
+        body: comment.body,
+        at: at ? { start: at.start, end: at.end } : null,
+        onStarted: () => setCommentFix(null),
+        onBackToReview: () => review.viewReview(reviewId),
+      })
+    }
+    : undefined
   // A review being made or read shows the document as it reads (its quotes are marked in the text).
   const editingHere = !!inPlace && !showDiff && !review.isReviewing && !review.isViewingCompleted
   const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
@@ -88,6 +108,8 @@ export function MarkdownPreviewPane({
               onShowSource={onShowEditor}
               previewRef={previewRef}
               initialScrollRatio={initialScrollRatio}
+              aiFix={aiFix}
+              startFix={commentFix ?? undefined}
               comment={commentBox ? {
                 box: commentBox,
                 // Into the member's own review (a new one when none is in progress); the quote is found in the tab's text.
@@ -188,6 +210,7 @@ export function MarkdownPreviewPane({
               }
             }}
             onAddReply={review.addReply}
+            onAskAi={reflectComment}
             readOnly={review.isViewingCompleted}
           />
         )}

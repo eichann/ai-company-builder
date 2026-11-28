@@ -34,6 +34,7 @@ const { TextSelection } = await import('@milkdown/prose/state')
 const { makeMilkdown } = await import('./milkdownSurface')
 const { blockMenuOf, closeBlockMenu, editTable, turnIntoBlock } = await import('./milkdownBlocks')
 const { insertImage, pastedImageFiles } = await import('./milkdownImages')
+const aiFix = await import('./milkdownAiFix')
 
 let md: Awaited<ReturnType<typeof makeMilkdown>>
 before(async () => {
@@ -753,4 +754,103 @@ test('a paste with words in it stays words: an image is taken from the clipboard
   assert.equal(pastedImageFiles(clip('売上の表', [png])).length, 0, 'Word / Excel put a picture beside the words')
   assert.equal(pastedImageFiles(clip('', [{ type: 'application/pdf' }])).length, 0)
   assert.equal(pastedImageFiles(null).length, 0)
+})
+
+// ---- 「AI に直してもらう」 (files-and-editor.md "Asking the AI to fix a passage") ----
+
+
+/** The editor's range of the first `words`. */
+function rangeOf(view: EditorView, words: string) {
+  const to = posAfter(view.state.doc, words)
+  return { from: to - words.length, to }
+}
+
+test('the AI is handed the blocks holding the selection byte for byte and at most 600 characters around them, never the frontmatter or the whole file', () => {
+  const { spliced, view } = open(MEETING)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '送る前に田中さん'))
+  assert.ok(passage)
+  // The whole list holding the nested item, as the file writes it (`*`, four spaces).
+  assert.equal(passage.markdown, MEETING.slice(MEETING.indexOf('* A社の新人研修'), MEETING.indexOf('〜') + 1))
+  assert.ok(passage.before.length <= 600 && passage.after.length <= 600)
+  assert.ok(!passage.before.includes('tags:'), 'the `---` block is not handed over')
+  assert.ok(passage.after.startsWith('\n\n1. 研修資料の下書きを作る'))
+  assert.ok(passage.markdown.length + passage.before.length + passage.after.length < MEETING.length)
+  // A selection ending where a list's first words start (inside the list, deeper than its start) does not take the list.
+  const heading = aiFix.selectedPassage(view, spliced, { from: rangeOf(view, '決まったこと').from, to: rangeOf(view, 'A社の新人研修').from })
+  assert.equal(heading?.markdown, '## 決まったこと')
+  // A selection over two blocks takes both, and nothing past them.
+  const two = aiFix.selectedPassage(view, spliced, { from: rangeOf(view, '進め方のメモ').from, to: rangeOf(view, '要望があり').to })
+  assert.ok(two?.markdown.startsWith('## 進め方のメモ'), two?.markdown)
+  assert.ok(two?.markdown.endsWith('問い合わせ窓口：<https://example.com/contact>'), two?.markdown)
+})
+
+test('adopting a fix changes only the lines it changed, in the file\'s own way (a `-` list from the AI keeps the file\'s `*`)', () => {
+  const { spliced, view } = open(MEETING)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '12月第2週'))!
+  const fix = passage.markdown.replace(/^\* /gm, '- ').replace(/^ {4}\* /gm, '  - ').replace('から始める', 'から始めます')
+  const preview = aiFix.previewFix(view, spliced, view.state.doc, passage, fix)
+  assert.deepEqual(preview, { ok: true, removed: ['* A社の新人研修は **12月第2週** から始める'], added: ['* A社の新人研修は **12月第2週** から始めます'] })
+  const fixed = aiFix.fixedDocument(view, spliced, view.state.doc, passage, fix)
+  assert.ok(fixed.ok)
+  fixed.write.commit()
+  view.dispatch(fixed.tr)
+  assert.equal(saved(spliced, view), MEETING.replace('から始める\n', 'から始めます\n'))
+})
+
+test('「表にして」: a paragraph becomes a table and only that paragraph\'s lines change', () => {
+  const text = '# メモ\n\n午前に分ける案と、午後にまとめる案がある。\n\n次の行はそのまま。\n'
+  const { spliced, view } = open(text)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '午後にまとめる'))!
+  assert.equal(passage.markdown, '午前に分ける案と、午後にまとめる案がある。')
+  // A selection ending at the very start of the next paragraph (a triple click) does not take that paragraph.
+  const toNext = aiFix.selectedPassage(view, spliced, { from: rangeOf(view, '午前に').from, to: rangeOf(view, '次の行').from })
+  assert.equal(toNext?.markdown, '午前に分ける案と、午後にまとめる案がある。')
+  const table = '| 案 | 時間 |\n|---|---|\n| 午前に分ける | 2 時間 × 3 回 |\n| 午後にまとめる | 1 日 |'
+  const fixed = aiFix.fixedDocument(view, spliced, view.state.doc, passage, table)
+  assert.ok(fixed.ok)
+  fixed.write.commit()
+  view.dispatch(fixed.tr)
+  assert.equal(saved(spliced, view), `# メモ\n\n${table}\n\n次の行はそのまま。\n`)
+})
+
+test('a fix is refused when the document changed while the AI was asked, and when it cannot be written faithfully', () => {
+  const { spliced, view } = open(MEETING)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '12月第2週'))!
+  // Words typed elsewhere meanwhile (written): the passage is stale.
+  insertAfter(view, '名刺の発注', '（50枚）')
+  saved(spliced, view)
+  assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, '* 直した'), { ok: false, reason: 'changed' })
+  // A footnote the editor would lose: never offered; nor an empty fix.
+  const fresh = aiFix.selectedPassage(view, spliced, rangeOf(view, '12月第2週'))!
+  assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '本文です[^1]。\n\n[^1]: 注'), { ok: false, reason: 'unwritable' })
+  assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '   '), { ok: false, reason: 'unwritable' })
+  // Raw HTML the passage did not have (the preview never shows it): never offered.
+  assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '* 直した<img src="https://example.com/t.png">'), { ok: false, reason: 'html' })
+  // Nothing of it was written.
+  assert.equal(saved(spliced, view), MEETING.replace('名刺の発注', '名刺の発注（50枚）'))
+})
+
+test('a comment\'s quote finds the block holding it; the fix shown under it is never written', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const withPlace = await makeMilkdown(host, undefined, [aiFix.fixBelowPlugin])
+  try {
+    const loaded = SplicedDocument.load(MEETING, withPlace.codec)
+    assert.ok(loaded.ok)
+    const view = withPlace.view()
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, loaded.doc.doc.content))
+    assert.ok(loaded.doc.rebase(view.state.doc))
+    const at = MEETING.indexOf('来週の木曜まで')
+    const passage = aiFix.passageAt(loaded.doc, at, at + '来週の木曜まで'.length)
+    assert.ok(passage?.markdown.startsWith('* A社の新人研修'))
+    const card = document.createElement('div')
+    card.textContent = 'AI の直し案'
+    aiFix.showBelow(view, passage!, card)
+    assert.ok(view.dom.contains(card), 'shown in the document\'s flow')
+    assert.equal(loaded.doc.write(view.state.doc)?.text, MEETING, 'the card is no part of the text')
+    aiFix.showBelow(view, passage!, null)
+    assert.ok(!view.dom.contains(card))
+  } finally {
+    await withPlace.destroy()
+  }
 })

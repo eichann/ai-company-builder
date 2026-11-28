@@ -501,7 +501,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'doc-selection-bubble',
-    about: 'Words selected in a paragraph of 提案書_A社向け.md: the one bubble — decorations, 文字の大きさ, リンク, ［コメント］.',
+    about: 'Words selected in a paragraph of 提案書_A社向け.md: the one bubble — decorations, 文字の大きさ, リンク, ［コメント］, ［AI に直してもらう］.',
     ...MAIN,
     // The bubble shows while the document has the focus; 文字の大きさ only in a paragraph or heading (not a list item).
     keepFocus: true,
@@ -512,6 +512,7 @@ export const scenes: Scene[] = [
       { marker: { target: 'role=button[name="太字"]', label: '1', at: 'below' } },
       { marker: { target: 'role=button[name=/本文/]', label: '2', at: 'below' } },
       { marker: { target: 'role=toolbar[name="選んだ文字の飾り"] >> role=button[name="コメント"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=toolbar[name="選んだ文字の飾り"] >> role=button[name="AI に直してもらう"]', label: '4', at: 'below' } },
     ],
   },
   {

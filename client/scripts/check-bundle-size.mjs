@@ -25,6 +25,9 @@
 // only when a reply has a mermaid diagram (src/features/chat/diagramRenderer.ts), never at start. It is measured here
 // against its own budget (ON_DEMAND_VENDOR), and any other file there fails, so dist/vendor/ is no way around the
 // budget above. Owner decision pending in the pull request that added it (the alternative: count it and raise the budget).
+// 2026-11-29: 3.2 → 3.3 MiB (owner's standing rule: take the recommendation; asked in the pull request). next/ux-stage-4
+// stood at 3,353,264 bytes (2 KB under); 「AI に直してもらう」 (UX check 9 PR5: the card, the request and its words to
+// the AI, +15.1 KB) passed it. Lazy chunks count here, so splitting would not lower it; the 50 KB growth guard stays.
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N] [--base baseDistDir] [--max-growth-kb N]
 import fs from 'node:fs'
@@ -37,7 +40,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) options.set(args[i], args[++i])
   else positional.push(args[i])
 }
-const budgetMiB = options.has('--budget-mib') ? Number(options.get('--budget-mib')) : 3.2
+const budgetMiB = options.has('--budget-mib') ? Number(options.get('--budget-mib')) : 3.3
 const maxGrowthKb = options.has('--max-growth-kb') ? Number(options.get('--max-growth-kb')) : 50
 const dist = positional[0] ?? 'dist'
 
