@@ -118,6 +118,11 @@ test('nothing the AI reaches submits: only the session IPC names the submit rout
   // 「やめる」 likewise: the session module alone names its route, only the card calls it.
   assert.deepEqual(electron.filter(f => /\/discard[`'"]/.test(readFileSync(f, 'utf8')) && readFileSync(f, 'utf8').includes('job-candidates')).map(f => path.relative(path.join(here, '..'), f)), ['electron/features/jobs/proposals.ts'])
   assert.deepEqual(filesUnder(path.join(here, '../src')).filter(f => /discardJobCandidate\(/.test(readFileSync(f, 'utf8'))).map(f => path.relative(path.join(here, '..'), f)).sort(), ['src/features/chat/api.ts', 'src/features/chat/components/JobProposalCard.tsx', 'src/features/jobs/api.ts'])
+  // 「その場で直す」 (UX 段3 #13): no AI path changes a candidate — the session module alone names the revise route and
+  // registers its IPC (never the chat server, the record tools or a job run), and only the card's press calls it.
+  assert.deepEqual(electron.filter(f => /\/revise[`'"]/.test(readFileSync(f, 'utf8')) && readFileSync(f, 'utf8').includes('job-candidates')).map(f => path.relative(path.join(here, '..'), f)), ['electron/features/jobs/proposals.ts'])
+  assert.deepEqual(electron.filter(f => readFileSync(f, 'utf8').includes("'jobProposals:revise'")).map(f => path.relative(path.join(here, '..'), f)), ['electron/features/jobs/proposals.ts', 'electron/preload.ts'])
+  assert.deepEqual(filesUnder(path.join(here, '../src')).filter(f => /reviseJobCandidate\(/.test(readFileSync(f, 'utf8'))).map(f => path.relative(path.join(here, '..'), f)).sort(), ['src/features/chat/api.ts', 'src/features/chat/components/JobProposalCard.tsx'])
 })
 
 async function chatTurn(body: Record<string, unknown>, extra: Record<string, unknown> = {}, guard = true) {

@@ -429,7 +429,7 @@ export async function aiAskedStateNow(companyId: string, recordId: string, port:
  * The job proposal card (jobs.md "Member proposals" "The app (PR C)"): reading the candidate and the member's own presses —
  * 「これで管理者に出す」 and 「取り下げる」 — with their session in main. The AI has no path to these.
  */
-export type JobProposalCardPort = ElectronPort<'getJobCandidate' | 'submitJobProposal' | 'withdrawJobProposal' | 'discardJobCandidate'>
+export type JobProposalCardPort = ElectronPort<'getJobCandidate' | 'submitJobProposal' | 'withdrawJobProposal' | 'discardJobCandidate' | 'reviseJobCandidate'>
 
 export function getJobCandidate(companyId: string, candidateId: string, port: JobProposalCardPort = window.electronAPI) {
   return port.getJobCandidate(companyId, candidateId)
@@ -445,4 +445,23 @@ export function withdrawJobProposal(companyId: string, proposalId: string, port:
 
 export function discardJobCandidate(companyId: string, candidateId: string, port: JobProposalCardPort = window.electronAPI) {
   return port.discardJobCandidate(companyId, candidateId)
+}
+
+/** 「その場で直す」 (UX 段3 #13): the member's change on the card, the whole input and the fingerprint shown. Nothing else sends it. */
+export function reviseJobCandidate(companyId: string, candidateId: string, fingerprint: string, input: Args<'reviseJobCandidate'>[3], port: JobProposalCardPort = window.electronAPI) {
+  return port.reviseJobCandidate(companyId, candidateId, fingerprint, input)
+}
+
+/**
+ * What the card offers to choose from (read on this computer only, never sent): the company folder's folders and its company
+ * Skills' folders. The server decides whether a choice can be used (`JOB_CANDIDATE_PLACE`, `JOB_SKILL_MISSING`).
+ */
+export type JobProposalChoiceReads = ElectronPort<'readDirectoryTree' | 'readDirectory'>
+
+export async function readCompanyFolders(rootPath: string, reads: JobProposalChoiceReads = window.electronAPI) {
+  return reads.readDirectoryTree(rootPath, 2).catch(() => [])
+}
+
+export async function readCompanySkillFolders(rootPath: string, reads: JobProposalChoiceReads = window.electronAPI) {
+  return reads.readDirectory(`${rootPath.replace(/\/+$/, '')}/.claude/skills`).catch(() => [])
 }

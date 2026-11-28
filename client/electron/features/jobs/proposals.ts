@@ -6,17 +6,19 @@
 //   jobProposals:mine       the member's proposals (`GET /me/job-proposals`)
 //   jobProposals:withdraw   「取り下げる」 while it waits
 //   jobProposals:discard    「やめる」: the candidate not submitted yet is discarded on the server (owner decision 2026-11-22)
+//   jobProposals:revise     「その場で直す」 (UX 段3 #13): the member's change on the card, the whole input with the fingerprint shown
+//                           (`POST /me/job-candidates/:id/revise`); the server rebuilds and checks it (the same id, a new content)
 //   jobProposals:setWatchSkills  「見張りを足す」 (4b-4 PR6b): the department Skills the member reads (`GET /me/job-set-watch-skills`)
 //   jobProposals:createSetWatch  its candidate from the member's choices (`POST /me/job-candidates`); the server builds the rest
 
 import {
-  JOB_PROPOSALS_OFFLINE_TEXT, isJobFingerprint, jobProposalRefusalText, readProposalView, readSetWatchChoice, readSetWatchSkills, readShownCandidate,
-  type JobCandidateDiscardResult, type JobCandidateResult, type JobProposalResult, type JobProposalsFailure, type MyJobProposalsResult,
+  JOB_PROPOSALS_OFFLINE_TEXT, isJobFingerprint, jobProposalRefusalText, jobReviseRefusalText, readProposalView, readSetWatchChoice, readSetWatchSkills, readShownCandidate,
+  type JobCandidateDiscardResult, type JobCandidateResult, type JobCandidateReviseResult, type JobProposalResult, type JobProposalsFailure, type MyJobProposalsResult,
   type SetWatchCandidateResult, type SetWatchSkillsResult,
 } from '../../../shared/job-proposals'
 import { APP_JOB_SCHEMAS } from '../../../shared/jobs'
 import { JOB_SCHEMAS_HEADER } from '../../../../shared/core/jobs'
-import { isJobCandidateId, isJobProposalId } from '../../../../shared/core/job-proposals'
+import { isJobCandidateId, isJobProposalId, parseJobCandidateInput } from '../../../../shared/core/job-proposals'
 import type { JobProposalView } from '../../../../shared/types/job-proposals'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -57,7 +59,7 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
   }
 
   /** A refusal in the app's fixed words (never the server's text, a place or a fingerprint). */
-  function failure(what: string, r: Answer | null): JobProposalsFailure {
+  function failure(what: string, r: Answer | null, words: (code: string | null) => string = jobProposalRefusalText): JobProposalsFailure {
     if (!r) {
       log.warn(`[job-proposals] ${what}: the server could not be reached`)
       return OFFLINE
@@ -65,7 +67,7 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
     const code = typeof r.json?.code === 'string' && /^[A-Z_]{1,60}$/.test(r.json.code) ? r.json.code : null
     log.warn(`[job-proposals] ${what}: answered ${r.status}${code ? ` ${code}` : ''}`)
     if (r.status >= 500) return { success: false, offline: true, code, error: `サーバーでエラーが起きました（HTTP ${r.status}）。` }
-    return { success: false, offline: false, code, error: jobProposalRefusalText(code) }
+    return { success: false, offline: false, code, error: words(code) }
   }
 
   const ok = (r: Answer | null): r is Answer => !!r && r.status >= 200 && r.status < 300 && !!r.json?.data && typeof r.json.data === 'object'
@@ -113,6 +115,17 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
       return failure('discard', r)
     },
     /**
+     * 「その場で直す」 (the member's press on the card): the whole input, checked here first by the one parser (nothing else is
+     * sent), with the fingerprint the card showed. The answer is the candidate only as the server rebuilt it and as shown.
+     */
+    async revise(companyId: unknown, candidateId: unknown, fingerprint: unknown, input: unknown): Promise<JobCandidateReviseResult> {
+      const parsed = parseJobCandidateInput(input)
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobCandidateId(candidateId) || !isJobFingerprint(fingerprint) || !parsed.ok) return BAD_INPUT
+      const r = await call(companyId, `/me/job-candidates/${candidateId}/revise`, 'POST', { fingerprint, input: parsed.input })
+      const candidate = ok(r) ? readShownCandidate(r.json!.data, candidateId) : null
+      return candidate ? { success: true, candidate } : failure('revise', r, jobReviseRefusalText)
+    },
+    /**
      * 「見張りを足す」's Skills. A server before it has none: `supported: false`, never an error — its unknown path answers 404
      * with `NOT_FOUND` (since 2026-11-02) or no code (earlier). The route itself never answers 404.
      */
@@ -148,6 +161,7 @@ export function registerJobProposalsIpc(ipc: IpcRegistrar, deps: JobProposalsDep
   ipc.handle('jobProposals:mine', (_event, companyId) => api.mine(companyId))
   ipc.handle('jobProposals:withdraw', (_event, companyId, proposalId) => api.withdraw(companyId, proposalId))
   ipc.handle('jobProposals:discard', (_event, companyId, candidateId) => api.discard(companyId, candidateId))
+  ipc.handle('jobProposals:revise', (_event, companyId, candidateId, fingerprint, input) => api.revise(companyId, candidateId, fingerprint, input))
   ipc.handle('jobProposals:setWatchSkills', (_event, companyId) => api.setWatchSkills(companyId))
   ipc.handle('jobProposals:createSetWatch', (_event, companyId, choice) => api.createSetWatch(companyId, choice))
 }

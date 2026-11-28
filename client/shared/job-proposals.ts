@@ -122,6 +122,11 @@ export function jobTimeZoneText(zone: string | null | undefined): string | null 
   if (!zone) return null
   return ZONE_WORDS[zone] ?? `時間帯 ${zone}`
 }
+/**
+ * `jobProposals:revise` (UX 段3 #13, 「その場で直す」): the candidate the server rebuilt from the member's change — the same id,
+ * a new content and fingerprint — read as any shown candidate. Only the member's press on the card sends it.
+ */
+export type JobCandidateReviseResult = { success: true; candidate: ShownJobCandidate } | JobProposalsFailure
 /** `jobProposals:submit` / `jobProposals:withdraw`. */
 export type JobProposalResult = { success: true; proposal: JobProposalView } | JobProposalsFailure
 /** `jobProposals:mine`. `supported: false`: a server before member proposals (none can exist there). */
@@ -236,8 +241,27 @@ export function jobProposalRefusalText(code: string | null): string {
   return (code && REFUSAL_TEXT[code]) || JOB_PROPOSAL_REFUSED_TEXT
 }
 
+/**
+ * A change on the card the server refused (#942's codes): the card goes back to what the server holds and says why — in
+ * fixed words naming no place (the server names none; the card never adds the one chosen, `private-folders-client.md`).
+ */
+const REVISE_REFUSAL_TEXT: Record<string, string> = {
+  JOB_CANDIDATE_PLACE: '選んだ場所は、いまのあなたは使えません（ないか、読めないか、書けない場所です）。元の内容に戻しました。',
+  JOB_SKILL_MISSING: '選んだ Skill は、いまは使えません。元の内容に戻しました。',
+  JOB_SKILL_NOT_HERE: 'この会社では、その Skill は選べません。元の内容に戻しました。',
+  JOB_VERSION_FINGERPRINT: 'ほかの画面で、この案が先に直されていました。いまの案を読み直しました。もう一度選んでください。',
+  JOB_CANDIDATE_NOT_REVISABLE: 'この案は、ここでは直せません。',
+  BAD_JOB_CANDIDATE: '選んだ内容が正しくありません。元の内容に戻しました。',
+}
+export function jobReviseRefusalText(code: string | null): string {
+  return (code && REVISE_REFUSAL_TEXT[code]) || jobProposalRefusalText(code)
+}
+
 /** A refusal that means the proposal or candidate moved on meanwhile: the card reads it again. */
 export const JOB_PROPOSAL_READ_AGAIN_CODES: readonly string[] = ['JOB_VERSION_FINGERPRINT', 'JOB_PROPOSAL_DECIDED', 'JOB_CANDIDATE_NOT_FOUND', 'JOB_CANDIDATE_PLACE', 'JOB_CANDIDATE_DISCARDED', 'JOB_CANDIDATE_SUBMITTED']
+
+/** Where the card shows a change was not made: every refusal goes back to the server's content, these also read it again. */
+export const JOB_REVISE_READ_AGAIN_CODES: readonly string[] = ['JOB_VERSION_FINGERPRINT', 'JOB_CANDIDATE_NOT_FOUND', 'JOB_CANDIDATE_DISCARDED', 'JOB_CANDIDATE_SUBMITTED', 'JOB_CANDIDATE_NOT_REVISABLE']
 
 
 /*

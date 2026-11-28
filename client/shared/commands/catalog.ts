@@ -112,6 +112,12 @@ export const COMMANDS = defineCommands([
     args: z.object({ recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/) }),
   },
   {
+    // Shows a 「定期の仕事の案」 (not a record: the candidate the chat's card reads) as a tab in the middle, read with the member's
+    // session like the card (jobs.md "Member proposals" "Opened large"). Only a view: every press there is the card's own.
+    id: 'jobProposal.open', title: '定期の仕事の案を大きく開く', class: 'view',
+    args: z.object({ companyId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/), candidateId: z.string().regex(/^jc\.[0-9a-f]{32}$/) }),
+  },
+  {
     // Runs an action of a record's type through the server's state engine
     // (records.md). It changes shared state and tells the person it names,
     // hence outbound. The member's own screens call it with their session; the
