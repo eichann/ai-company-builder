@@ -94,7 +94,7 @@ none fits. Nothing of a message is stored or logged (threads integration test gr
   when the turn starts to the member and sign-in it is for: a later sign-in gets nothing through it).
   Not yet: a new mail (`mail_recipients` without a thread). A thread through a connector with no summary yet (a tool
   allowed after the check was turned on) makes the missing ones in the background (`build(…, full = false)`: a
-  summary made within the month is not read or made again), at most every `REFRESH_RETRY_MS`; 「作り直す」 makes all. A summary the member removed with 「消す」 is remembered () and never made again by a thread read;
+  summary made within the month is not read or made again), at most every `REFRESH_RETRY_MS`; 「作り直す」 makes all. A summary the member removed with 「消す」 is remembered (`dismissed` in the file) and never made again by a thread read;
   「作り直す」 makes it again.
 - IPC (main, the session stays there): `writingStyle:status` / `setEnabled` (on = build in the background) / `rebuild` /
   `update` (the member's correction, checked like the AI's) / `remove` (one, or all and the check off).
