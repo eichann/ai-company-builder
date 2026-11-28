@@ -259,6 +259,17 @@ describe('correcting the words is not accepting (owner decision 2026-11-28)', ()
     expect(done.record).toMatchObject({ state: 'done', fields: { accepted_by: 'u-dan' } })
   })
 
+  it('the requester correcting the words after the company setting changed does not accept it by the setting either', async () => {
+    setAcceptance('a', { sameDepartment: false })
+    const t = ask('u-alice', 'u-bob')
+    expect(t.state).toBe('awaiting_acceptance')
+    setAcceptance('a', { sameDepartment: true })
+    const a = ok(await engine.act(m('u-alice'), HUMAN, t.id, 'retitle', { expectedVersion: 1, args: { title: '頼んだ人が直した' } }))
+    expect(a.record.state).toBe('awaiting_acceptance')
+    expect(a.record.fields.accepted_by ?? null).toBeNull()
+    expect(a.record.fields.next_actor).toBe('u-bob')
+  })
+
   it('a correction on a request already accepted changes nothing but the words', async () => {
     const t = ask('u-alice', 'u-dan')
     ok(await engine.act(m('u-dan'), HUMAN, t.id, 'accept', { expectedVersion: 1 }))
