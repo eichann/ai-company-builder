@@ -165,6 +165,11 @@ export interface FakeFaults {
    * the promise stays pending until `close()`. 「届いたか分からない」.
    */
   dropAnswerAfterWrite(count?: number): void
+  /**
+   * Every request from now on waits until the returned release is called (or `close()`), then goes on as
+   * usual: a test catches a run in the middle without relying on how long anything takes.
+   */
+  holdRequests(): () => void
   reset(): void
 }
 
@@ -331,11 +336,20 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
   let failWriteCount = 0
   let failWriteStatus = 500
   const held = new Set<() => void>()
+  let requestGate: Promise<void> | null = null
   const faults: FakeFaults = {
     delayMs: 0,
     failNext(count = 1, status = 500) { failCount = count; failStatus = status },
     failNextWrite(count = 1, status = 500) { failWriteCount = count; failWriteStatus = status },
     dropAnswerAfterWrite(count = 1) { dropCount = count },
+    holdRequests() {
+      let open!: () => void
+      const gate = new Promise<void>(resolve => { open = resolve })
+      const release = () => { held.delete(release); if (requestGate === gate) requestGate = null; open() }
+      requestGate = gate
+      held.add(release)
+      return release
+    },
     reset() { faults.delayMs = 0; failCount = 0; dropCount = 0; failWriteCount = 0 },
   }
 
@@ -451,6 +465,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
 
   const handle = async (c: Context) => {
     const route = normalizeCrmPath(c.req.path)
+    if (requestGate) await requestGate
     if (faults.delayMs > 0) await new Promise(r => setTimeout(r, faults.delayMs))
     try {
       // Authentication first, as HubSpot does (even for a path that does not exist).
