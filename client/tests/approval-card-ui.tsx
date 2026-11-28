@@ -70,6 +70,8 @@ const press = (): 'answered' | 'dropped' => {
     net.online = false
     if (params.get('recover') === 'auto') setTimeout(() => { net.online = true }, 1000)
     if (LANDED) { net.landed = true; net.presses += 1; showPresses() }
+    // `&late=1`: it reached the server, which is still working on it (an approval's outside write): done 3 s later.
+    if (params.get('late') === '1') setTimeout(() => { net.landed = true; net.presses += 1; showPresses() }, 3000)
     return 'dropped'
   }
   net.landed = true
@@ -103,7 +105,9 @@ function Preview() {
   const jobRef = { id: 'jp-card-1', companyId: 'co-preview', conversationId: 'conv-1', candidateId: JOB_CANDIDATE_ID, at: '2026-11-20T01:30:00.000Z' }
   const parts = (params.get('card') === 'job'
     ? [{ type: 'text', text: '定期の仕事の案を作りました。' }, { type: JOB_PROPOSAL_PART_TYPE, id: 'job-proposal-card-1', data: jobRef }]
-    : [{ type: 'text', text: '承認のお願いを出しました。' }, { type: APPROVAL_PART_TYPE, id: 'approval-card-1', data: ref }]) as UIMessage['parts']
+    : [{ type: 'text', text: '承認のお願いを出しました。' }, { type: APPROVAL_PART_TYPE, id: 'approval-card-1', data: ref },
+      // `&twice=1`: the same request shown by a second card (the AI showed it again).
+      ...(params.get('twice') === '1' ? [{ type: APPROVAL_PART_TYPE, id: 'approval-card-2', data: { ...ref, id: 'card-2' } }] : [])]) as UIMessage['parts']
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番の相談には接続しません。</p>

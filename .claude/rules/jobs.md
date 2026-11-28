@@ -2263,8 +2263,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     `submitted` (`jobProposals:withdraw`). A refusal that means the candidate or proposal moved on (`JOB_VERSION_FINGERPRINT`,
     `JOB_PROPOSAL_DECIDED`, `JOB_CANDIDATE_NOT_FOUND`, `JOB_CANDIDATE_PLACE`, `JOB_CANDIDATE_DISCARDED`,
     `JOB_CANDIDATE_SUBMITTED`) reads it again. **A press whose answer never came** (offline, a 5xx; owner 2026-11-28): never
-    「開き直すと分かります」 — the card reads the candidate again by itself (`readJobCandidateNow`, at once, then after 2 s and
-    5 s) and judges the press by it (a proposal there / no longer `submitted` / `discarded`): done → the state shows; not done
+    「開き直すと分かります」 — the card reads the candidate again by itself (`readJobCandidateNow`, at once, then after 2, 5 and
+    8 s; "not yet" is final only at the last read; kept per candidate, not per card) and judges the press by it (a proposal there / no longer `submitted` / `discarded`): done → the state shows; not done
     → 「確かめました。まだ管理者に出されていません。もう一度押してください。」; nothing readable → said beside the card with
     ［結果を確かめる］ (a read only). No press is offered meanwhile (the submit is idempotent on the server anyway). Same
     helpers and spec as the approval card (`approvals.md` "The app"; `approval-card-ui.html?card=job`). **Gone or withheld** (the one 404):

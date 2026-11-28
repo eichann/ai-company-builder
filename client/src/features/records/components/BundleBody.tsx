@@ -6,14 +6,17 @@ import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
 import { InlineDate } from '../../../shared/ui/InlineDate'
 import { InlineText } from '../../../shared/ui/InlineText'
+import { Button } from '../../../shared/ui/primitives'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 
 /**
- * 責任者, chosen where it is shown: pressed, the name turns into the list of members (the member first, 「自分」); choosing
- * one saves at once, Esc or leaving puts it back unchanged. A refusal stays under it.
+ * 責任者, chosen where it is shown: pressed, the name turns into the list of members (the member first, 「自分」) and
+ * ［替える］. Only ［替える］ (or Enter) saves — an arrow key or a typed letter on the list only moves the choice, since a
+ * new 責任者 is told (independent review); Esc or leaving puts it back unchanged. A refusal stays under it.
  */
 function InlinePerson({ value, label, people, busy, children, onSave }: { value: string | null; label: string; people: BundleActions['people']; busy: boolean; children: ReactNode; onSave: (id: string) => Promise<string | null> }) {
   const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const choose = async (id: string) => {
@@ -27,7 +30,7 @@ function InlinePerson({ value, label, people, busy, children, onSave }: { value:
   if (!open) {
     return (
       <span className="block">
-        <button type="button" disabled={busy} aria-label={label} title={label} onClick={() => { setError(null); setOpen(true) }}
+        <button type="button" disabled={busy} aria-label={label} title={label} onClick={() => { setError(null); setDraft(value ?? ''); setOpen(true) }}
           className="group -mx-1 inline-flex items-center gap-1 rounded-small px-1 text-left hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-disabled">
           {children}<PencilSimpleLine aria-hidden size={14} className="shrink-0 text-text-subtle opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
         </button>
@@ -36,13 +39,21 @@ function InlinePerson({ value, label, people, busy, children, onSave }: { value:
     )
   }
   return (
-    <span className="block space-y-1">
-      <select aria-label="責任者" autoFocus value={value ?? ''} disabled={saving} onChange={e => void choose(e.target.value)}
-        onBlur={() => { if (!saving) setOpen(false) }} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false) } }}
-        className="-mx-1 block w-full rounded-small border border-border-control bg-bg px-1 py-0.5 text-body font-normal text-text focus:border-focus-border focus:outline-none">
-        {!value && <option value="">選んでください</option>}
-        {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
+    <span className="block space-y-1"
+      // Leaving the list and its button (not moving between them) puts it back.
+      onBlur={e => { if (!saving && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false) }}
+      onKeyDown={e => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false) }
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void choose(draft) }
+      }}>
+      <span className="flex items-center gap-1.5">
+        <select aria-label="責任者" autoFocus value={draft} disabled={saving} onChange={e => setDraft(e.target.value)}
+          className="-mx-1 block min-w-0 flex-1 rounded-small border border-border-control bg-bg px-1 py-0.5 text-body font-normal text-text focus:border-focus-border focus:outline-none">
+          {!value && <option value="">選んでください</option>}
+          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <Button size="sm" variant="primary" disabled={saving || !draft || draft === value} onClick={() => void choose(draft)}>替える</Button>
+      </span>
       {error && <span role="alert" className="block text-small font-normal text-danger-text">{error}</span>}
     </span>
   )

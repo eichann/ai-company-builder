@@ -8,8 +8,33 @@ import { expectNoPageErrors, openPreview } from './helpers'
 // A press whose answer never came (owner 2026-11-28, outside UX review): the card reads the server again by itself, and while
 // it cannot it says so beside the card with ［結果を確かめる］ — never 「開き直すと分かります」. It offers no press meanwhile (never
 // sent twice), says nothing is done until a read shows it, and asks for the press again only when a read shows it did not land.
-const AUTO_READS_MS = 15_000
+const AUTO_READS_MS = 25_000
 test.describe('a press whose answer never came', () => {
+  // The automatic reads take about 15 seconds (`AUTO_WAITS`).
+  test.describe.configure({ timeout: 60_000 })
+  // Codex review: an approval still running on the server reads as pending at first; that is never taken as "not landed".
+  test('approval: still running on the server — an early "pending" read is not final, and it shows done when it settles', async ({ page }) => {
+    const state = await openPreview(page, 'approval-card', { offline: '1', recover: 'auto', late: '1' })
+    const card = page.getByRole('group', { name: '承認のお願い' })
+    await card.getByRole('button', { name: '承認', exact: true }).click()
+    await expect(card).toContainText('承認されました', { timeout: AUTO_READS_MS })
+    await expect(card).not.toContainText('もう一度押してください')
+    await expect(card.getByRole('button', { name: '承認', exact: true })).toHaveCount(0)
+    await expect(page.locator('#presses')).toHaveText('1')
+    expectNoPageErrors(state)
+  })
+
+  // Independent review: the unknown press is the request's, not one card's — a second card of it offers no press either.
+  test('approval: a second card of the same request offers no press while the first one\'s answer is unknown', async ({ page }) => {
+    const state = await openPreview(page, 'approval-card', { offline: '1', twice: '1' })
+    const cards = page.getByRole('group', { name: '承認のお願い' })
+    await expect(cards).toHaveCount(2)
+    await cards.nth(0).getByRole('button', { name: '承認', exact: true }).click()
+    for (const i of [0, 1]) await expect(cards.nth(i).getByRole('button', { name: '承認', exact: true })).toHaveCount(0)
+    await expect(cards.nth(1).getByRole('alert')).toContainText('分かりませんでした')
+    expectNoPageErrors(state)
+  })
+
   for (const which of ['approval', 'job'] as const) {
     const cardName = which === 'job' ? '定期の仕事の案' : '承認のお願い'
     const pressName = which === 'job' ? 'これで管理者に出す' : '承認'

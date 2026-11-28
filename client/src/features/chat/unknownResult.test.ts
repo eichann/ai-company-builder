@@ -28,10 +28,17 @@ test('reads again after each wait until one answers, then stops (it never reads 
   assert.deepEqual(waited, [10])
 })
 
-test('a read that says the press did not happen is an answer (the member presses again)', async () => {
-  const r = reads(['not-done'])
-  assert.equal(await askAfterUnknown(r.read, [0, 10], wait), 'not-done')
-  assert.equal(r.calls.length, 1)
+test('"not done yet" is never final before the last read: a press still running on the server shows as done when it settles', async () => {
+  // An approval waits for its outside write before its state moves: an early read still says pending (Codex review).
+  const settled = reads(['not-done', 'not-done', 'done'])
+  assert.equal(await askAfterUnknown(settled.read, [0, 10, 20, 30], wait), 'done')
+  assert.equal(settled.calls.length, 3)
+  // Still not done at the last read: the member is asked to press again.
+  const never = reads(['not-done', null, 'not-done'])
+  assert.equal(await askAfterUnknown(never.read, [0, 10, 20], wait), 'not-done')
+  assert.equal(never.calls.length, 3)
+  // One answer and then nothing readable: still that answer, not "unknown".
+  assert.equal(await askAfterUnknown(reads(['not-done', null]).read, [0, 10], wait), 'not-done')
 })
 
 test('nothing readable (offline, a thrown read) → unreadable after every wait', async () => {

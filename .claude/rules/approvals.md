@@ -204,14 +204,17 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
   になりました」 / 「差し戻されました：理由」 / 「HubSpot 側で変わっています。…」. No jargon (プラグイン /
   型 / オントロジー / ハッシュ).
 - **A press whose answer never came** (offline, a 5xx: it may or may not have reached the server; owner 2026-11-28):
-  the card never says 「開き直すと分かります」. It reads the request again by itself (`approvals:get`, at once, then after 2 s
-  and 5 s: `src/features/chat/unknownResult.ts`, `hooks/useUnknownResult.ts`) and judges the press by the state it moved
-  from: moved → the state line says what happened (nothing is called done before a read shows it); not moved → 「確かめ
-  ました。承認はまだ届いていません。もう一度押してください。」 and the buttons come back. While nothing can be read the
+  the card never says 「開き直すと分かります」. It reads the request again by itself (`approvals:get`, at once, then after 2,
+  5 and 8 s: `src/features/chat/unknownResult.ts`, `hooks/useUnknownResult.ts`) and judges the press by the state it moved
+  from: moved → the state line says what happened (nothing is called done before a read shows it); still pending is
+  **never final before the last read** (an approve awaits its outside write before its state moves — Codex review), so
+  only the last read's 「まだ」 gives 「確かめました。承認はまだ届いていません。もう一度押してください（…二重にはならず…）」 and
+  the buttons back. The unknown press is kept per request (`unsureOf`, memory only), not per card: a card shown again or a
+  second card of the same request offers no press either. While nothing can be read the
   message says so beside the card with ［結果を確かめる］ (one more read, never a send). Meanwhile no press is offered
   (approve, send back, withdraw, 「同じ」), so nothing is sent twice; a second approve that lands anyway is refused by the
   server (`NOT_PENDING`, used once). Tests: `src/features/chat/unknownResult.test.ts`, `tests/ui/approval-card.spec.ts`
-  「a press whose answer never came」 (`approval-card-ui.html?offline=1&landed=1|recover=auto`).
+  「a press whose answer never came」 (`approval-card-ui.html?offline=1&landed=1|recover=auto|late=1|twice=1`).
 - IPC (`client/electron/features/approvals/ipc.ts`, session only): `approvals:get`,
   `approvals:approve`, `approvals:sendBack`, `approvals:withdraw`.
 - AI tools (`client/electron/records/tools.ts`, read only, offered when the `approval` type

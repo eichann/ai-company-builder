@@ -42,8 +42,8 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
   const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
   const state = jobProposalCardState(result)
   // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
-  const unknown = useUnknownResult()
-  const [unknownPress, setUnknownPress] = useState<PressKind | null>(null)
+  // (Kept per candidate, not per card: a card shown again or a second card of it offers no press either.)
+  const unknown = useUnknownResult<PressKind>(key)
   const locked = busy || unknown.unsure !== null
 
   const readAgain = () => reloadJobCandidate(key)
@@ -56,10 +56,9 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
   }
   /** After an unknown answer: read again by itself; done → the card shows the state, not done → press again. */
   const settle = async (kind: PressKind, how: 'start' | 'checkNow') => {
-    setUnknownPress(kind)
-    setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'checking') })
-    const outcome = await unknown[how](readAfter(kind))
-    setMessage(outcome === 'done' ? null : { tone: 'info', text: unknownMessage(PRESS_WORDS[kind], outcome) })
+    setMessage(null)
+    const outcome = await unknown[how](kind, readAfter(kind))
+    if (outcome === 'not-done') setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'not-done') })
   }
 
   const submit = async (candidateId: string, fingerprint: string) => {
@@ -156,11 +155,12 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
         </>
       )}
       {proposal && <p role="status" className="mt-2 text-small text-text">{jobProposalStateLine(proposal)}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[message.tone]}`}>
-        {message.text}
+      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[message.tone]}`}>{message.text}</div>}
+      {unknown.unsure && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX.info}`}>
+        {unknownMessage(PRESS_WORDS[unknown.unsure.press], unknown.unsure.checking ? 'checking' : 'unreadable')}
         {/* Only a read: 「結果を確かめる」 never sends the press again. */}
-        {unknown.unsure && !unknown.unsure.checking && unknownPress && (
-          <Button size="sm" variant="secondary" className="ml-2 mt-1" onClick={() => void settle(unknownPress, 'checkNow')}>結果を確かめる</Button>
+        {!unknown.unsure.checking && (
+          <Button size="sm" variant="secondary" className="ml-2 mt-1" onClick={() => void settle(unknown.unsure!.press, 'checkNow')}>結果を確かめる</Button>
         )}
       </div>}
       {state.kind === 'candidate' && !declined && !unknown.unsure && (

@@ -62,26 +62,32 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
   const [distinct, setDistinct] = useState(false)
   const [linkMeeting, setLinkMeeting] = useState(true)
   // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
-  const unknown = useUnknownResult()
-  const [unknownPress, setUnknownPress] = useState<{ kind: PressKind; before: ApprovalView['state'] } | null>(null)
+  // (Kept per request, not per card: a card shown again or a second card of it offers no press either.)
+  const unknown = useUnknownResult<{ kind: PressKind; before: ApprovalView['state'] }>(key)
   const reason = edited ?? view?.proposedReason ?? ''
   const locked = busy || unknown.unsure !== null
 
   /** One read of the request: whether the press moved it from `before` (null: it could not be read). */
   const readAfter = (before: ApprovalView['state']) => async (): Promise<PressOutcome | null> => {
-    if (!view) return null
-    const r = await (outbound ? getApproval(card.companyId, view.id, outbound) : getApproval(card.companyId, view.id))
+    const r = await (outbound ? getApproval(card.companyId, card.approvalId, outbound) : getApproval(card.companyId, card.approvalId))
     if (!r.success || !r.approval) return null
     putApproval(key, r)
     return r.approval.state !== before ? 'done' : 'not-done'
   }
   /** After an unknown answer: read again by itself; done → the state line says what happened, not done → press again. */
   const settle = async (kind: PressKind, before: ApprovalView['state'], how: 'start' | 'checkNow') => {
-    setUnknownPress({ kind, before })
-    setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'checking') })
-    const outcome = await unknown[how](readAfter(before))
-    setMessage(outcome === 'done' ? null : { tone: 'info', text: unknownMessage(PRESS_WORDS[kind], outcome) })
+    setMessage(null)
+    const outcome = await unknown[how]({ kind, before }, readAfter(before))
+    if (outcome === 'not-done') setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'not-done') })
   }
+  const unsureBox = unknown.unsure && (
+    <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${TONE_CLASS.info}`}>
+      {unknownMessage(PRESS_WORDS[unknown.unsure.press.kind], unknown.unsure.checking ? 'checking' : 'unreadable')}
+      {/* Only a read: 「結果を確かめる」 never sends the press again. */}
+      {!unknown.unsure.checking && <button type="button" onClick={() => void settle(unknown.unsure!.press.kind, unknown.unsure!.press.before, 'checkNow')}
+        className={`${PLAIN_BUTTON} ml-2 mt-1`}>結果を確かめる</button>}
+    </div>
+  )
 
   /** 「これと同じ…です（作らない）」: nothing is made; the request ends (and the meeting may belong to that record). */
   const sameAs = async (recordId: string) => {
@@ -210,12 +216,8 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
       <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>
       {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>
-        {message.text}
-        {/* Only a read: 「結果を確かめる」 never sends the press again. */}
-        {unknown.unsure && !unknown.unsure.checking && unknownPress && <button type="button" onClick={() => void settle(unknownPress.kind, unknownPress.before, 'checkNow')}
-          className={`${PLAIN_BUTTON} ml-2 mt-1`}>結果を確かめる</button>}
-      </div>}
+      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
+      {unsureBox}
       {canAnswer && !unknown.unsure && <div className="mt-2">
         <label className="block text-xs text-gray-600 dark:text-zinc-300">
           理由（必ず書いてください。AI の下書きを直せます）

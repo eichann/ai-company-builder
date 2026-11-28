@@ -425,7 +425,8 @@ server's type; `BundleActions.tsx`): the core プロジェクト shows **［終�
 a done or cancelled one only **［もう一度始める］**. **なんのため・責任者・期限 are corrected in their tiles** (owner
 2026-11-27, 「その場で直す」; `BundleBody.tsx`, the 期限 tile from the record's `due`, `BundleDetailView.due`, not repeated
 under ほかの項目): なんのため as words in place (`InlineText`), 責任者 by choosing among the members in place (自分 first;
-a choice saves at once, Esc or leaving puts it back), 期限 with the date chooser (`InlineDate`, no quick choices here) —
+only ［替える］ or Enter saves — moving the choice with a key sends nothing, a new 責任者 is told; Esc or leaving puts it
+back), 期限 with the date chooser (`InlineDate`, no quick choices here) —
 each only where an action of the type the member may run sets exactly that one field and asks nothing else
 (`bundleTileAction`, `client/shared/record-details.ts`: no reason required, ending nothing); such an action is not in
 「…」 (`bundleMenuActions`), one that requires a reason stays there with its window. Anyone else sees text. Generic over the type: any type implementing `bundle` (a business plugin's 案件 too) gets its

@@ -320,6 +320,9 @@ test('a プロジェクト: 期限・なんのため・責任者 corrected in th
 
   await card.getByRole('button', { name: '責任者を替える' }).click()
   await card.getByLabel('責任者').selectOption({ label: '阿部さん' })
+  // Moving the choice sends nothing (a new 責任者 is told): only ［替える］ does.
+  await expect(opened).not.toContainText('set_owner')
+  await card.getByRole('button', { name: '替える', exact: true }).click()
   await expect(opened).toContainText('act project-0000p1 set_owner@5 {"owner":"u-abe"}')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(opened).not.toContainText('ended')
@@ -408,6 +411,7 @@ test('a プロジェクト without a 責任者: only 責任者を替える, and 
   for (const name of ['期限を変える', '期限を決める', 'なんのためを直す', 'なんのためを書く']) await expect(card.getByRole('button', { name })).toHaveCount(0)
   await card.getByRole('button', { name: '責任者を替える' }).click()
   await card.getByLabel('責任者').selectOption({ label: '自分（佐藤）' })
+  await card.getByRole('button', { name: '替える', exact: true }).click()
   await expect(opened).toContainText('act project-0000p1 set_owner@3 {"owner":"u-sato"}')
   await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
   expectNoPageErrors(state)
