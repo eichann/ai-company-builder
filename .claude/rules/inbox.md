@@ -19,6 +19,10 @@ paths:
   - "server/tests/integration/google-inbox-archive.test.ts"
   - "admin/src/components/advanced/intake-settings.tsx"
   - "client/electron/features/inbox/**"
+  - "client/shared/contact-card.ts"
+  - "client/src/features/inbox/contact*"
+  - "client/src/features/inbox/components/ContactCard.tsx"
+  - "client/tests/ui/contact-card.spec.ts"
   - "client/shared/ai-turn-steps/inbox-triage.ts"
   - "client/shared/ai-turn-steps/follow-up.ts"
   - "client/shared/ai-turn-steps/reply-check.ts"
@@ -463,12 +467,80 @@ pressing each record's own action.
   notes and "every entry since" mutation-checked; the actor / no-change / same-state conditions are a backup — only the
   inbox writes those actions, and no test can write them otherwise).
 - **The 受け箱** (the app, stage 2): a contact whose reply is over but with a やること still open goes to 「確認したもの」;
-  the やること stays in the list. The app computes it from this view; nothing is stored.
+  the やること stays in the list. The app computes it from this view; nothing is stored ("One contact in the app" below).
 - Tests: `server/tests/unit/contact-threads.test.ts` (the view per reader — owner-only, members-only, owner / admin /
   another company as missing, another's やること and draft absent —; finish on a judged and on a 確認待ち contact; refused
   while checking and while writing — a concurrent 「済んだ」, the AI's cap — with nothing written; twice; at the same
   time; stale; a change taken back since is not `already`; her AI's same change is not `already`; one part done before; `truncated`; 「使う機能」 off; undo both, twice, changed
   since, only a finish's entries — mutation-checked), permission matrix rows + `CROSS`.
+
+## One contact in the app (「連絡」1枚, UX stage 2 「5番」)
+
+- **Main** (`client/electron/features/inbox/contact-ipc.ts`, registered in `main.ts` lane B; shapes and checks
+  `client/shared/contact-card.ts`): IPC `inbox:contact` (the view; a 404 is `gone`), `inbox:finishContact`,
+  `inbox:undoContact` — additive channels, the member's session. Only the fields the routes read leave the PC (an
+  action other than `replied_elsewhere` / `close` / `drop`, a malformed id or version never reaches the server); the
+  server's refusal keeps its `code` and `part`; a `may` is a button only when the server said exactly `true`; a view of
+  the wrong shape is not shown. Nothing of a contact is logged. Test: `client/tests/contact-ipc.test.ts`.
+- **Renderer** (`client/src/features/inbox/`, the feature imports no other feature): ports `ContactReads` /
+  `ContactWrites` (`api.ts`); `contactModel.ts` (pure: the status in one line, which buttons — `contactLook` —, the
+  request a press sends, what ［取り消す］ sends, the words after a press or a refusal, `contactPlace`); `contactStore.ts`
+  (the contacts as last read, one store per inbox shared by the rows and the card; reads bound to the company era,
+  `shared/lib/companyEra.ts`; each id shows the read that started last, also through another id of the same contact — an
+  older read of its 返事のお願い never puts back what the card's read after a press replaced; **one contact's ids are one
+  group** — the interaction and each 返事のお願い one shown read answered for: when any of them answers the missing 404 (taken
+  off 「この人たちだけ」, someone's owner-only one, removed) every id of the group becomes `gone` at once and no read
+  already on its way may put it back, so the contact's title is shown by no id, row or card — Codex review of UX stage 2:
+  the 返事のお願い kept showing it; `contactStore.test.ts`); `contactPress.ts` (a press and its undo, era-bound:
+  an answer after a company change or a sign-out says nothing and reads nothing); `hooks/useContacts.ts` (the reads
+  start from the subscription, no effect); `components/ContactCard.tsx` (props in: the store, the ports, `nameOf`,
+  `onOpenTask` / `onCheckDraft` / `onOpenRecord` — it knows no frame, so the 連絡 destination of stage 5 can place it as
+  is; today `useInboxSlot` puts it beside the inbox's list, region 「連絡」, `notifications.md` "Working through the inbox").
+  With `onFinished` (the inbox) a finish that was written hands the list an undo of exactly that finish (the same
+  versions, `pressUndo`, era-bound) and the next row takes the card's place; the list's ［取り消す］ says the undo's words
+  (the Gmail line included) and shows the contact again. Without it the card says what happened and offers ［取り消す］ itself.
+- **Buttons follow `may` only** (owner decision 11/28): 返事が要る / AI が下書き中 ［返した］ (`replied_elsewhere`); a draft →
+  ［下書きを確かめて送る］ (opens the mail draft's own card, which alone sends; in the inbox it keeps the contact's row — 「4 / 8」,
+  ［前の件］［次の件］ — and once sent or thrown away the next row comes, `contact-card.spec.ts` 「the draft opened from a contact…」) with ［返した（下書きは送らない）］ in 「…」;
+  返事待ち ［済んだ（もう待たない）］ and 確かめ中 ［済んだ］ (`close`); 「…」 ［返事は要らなくなった］ (`drop`, the reason asked in
+  a dialog). A button whose action the server did not allow is not drawn; someone else's open 返事のお願い is one read-only
+  line (「田中さんが返します（期限 12/2）」, the name from the task list's members through AppShell, else 「ほかの人」). The card
+  acts on the first open 返事のお願い the member may finish. ［取り消す］ after a press sends both entries
+  (`undoRequestOf`: the contact's only when its part was written) at **the versions the finish answered**, never ones read
+  later: the engine's undo takes back the entry's own fields only when nothing moved the record since (`expectedVersion`
+  = its latest version; `CHANGED_SINCE` compares only the entry's own fields, so a change that came back to the same
+  value, or one of another field, would pass it) — a change by another person or the AI in between refuses the undo
+  (`contact-card.spec.ts` 「［取り消す］ after someone else changed…」). A quiet note written after the answer (the inbox's
+  「Gmail でもアーカイブしました」) also moves the version: the server's contact undo passes over such notes alone
+  (main-bound server PR, "One contact" above); every refusal says 「どちらも変えていません」 / 「どちらもそのままです」
+  (both or neither); a press that did not reach the server (or whose answer was lost) says to check what is shown and
+  offers ［もう一度送る］ — the same request; the server answers `already` for a part it wrote, with the entry to undo — and
+  an undo not reached keeps ［取り消す］; two clicks before the next draw are one press; every press reads the contact again,
+  answered or not. **After ［取り消す］ of a contact ACB archived in Gmail** (owner decision 2026-11-29: Gmail is not put
+  back) the words add 「メールは Gmail でアーカイブされたままです」 — decided from the server's ledger only: IPC
+  `inbox:contactArchived(companyId, interactionId, afterVersion)` reads `GET /records/item/:id/history` with the session and
+  `archiveStays` (`client/shared/contact-card.ts`) looks for an `archived_there` by `INBOX_ACTOR` after the finish's own entry
+  and not taken back; asked only when the contact's part was in the undo; not known → no line. Tests:
+  `contact-ipc.test.ts`, `contactPress.test.ts`, `contact-card.spec.ts` (`?contact=archived`). ［詳しく見る］ opens the 来た連絡's record card. A contact with no
+  返事のお願い has no button here (its ［済んだ］ / ［取り込まない］ stay on the record card).
+- **One row** (`model.ts`): a notice about an `interaction` or a `reply_request` whose contact the store has read becomes
+  the row `contact:<interaction id>` (`asContact`: source 「連絡」, the contact's title, `openContact`); its badge is the
+  card's status; a contact whose reply is over with a やること open is put in 「確認したもの」. The contacts read are the
+  ones the newest notices name (`contactsToRead`, ≤ `CONTACT_ROW_READS` 30, read again when a newer notice about the
+  record comes — its version is the stamp —, and each time the card opens); until a contact is read its notices keep
+  their own rows as before (offline included). **A read that failed is not counted as read** (Codex review of UX stage 2:
+  its stamp stayed asked, so the rows never became the contact until a new notice): its stamp is forgotten and the same
+  names are asked again when the PC is back online (the window's `online` event) or the panel opens again
+  (`useContacts`' `again`, from `useInboxSlot`) — only the failed ones are read, never on a timer, never per draw
+  (`contactPress.test.ts` 「a first read that failed…」, `contact-card.spec.ts` 「…back online…」). No new count, kind or
+  server call per list beyond these reads.
+- Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
+  one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
+  and a read answered after a company change show nothing; the newest read wins), `contactStore.test.ts` (one id's 404 takes the whole contact's
+  views with it, also against a read on its way), `model.test.ts` (one row, 確認したもの,
+  what is read), `tests/ui/contact-card.spec.ts` on `tests/inbox-ui.html?contact=own|draft|waiting|other|made|conflict`
+  (one row, only the allowed buttons, the draft, one press ends both and ［取り消す］ brings both back, the refusal,
+  確認したもの) — mutation-checked.
 
 ## Core types (`shared/core/core-types.ts`, reserved versions)
 

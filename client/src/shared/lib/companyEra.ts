@@ -1,6 +1,6 @@
 // ACB foundation: the company and session on screen as one counter (an "era"), so work started for one company never
 // lands on the next. Ended by appStore (another company, or none: a sign-out); read by the lists worked through
-// (workThrough.ts: the やること list, a 案件's やること, next the inbox). Rules: tasks-ui.md "Working through a list".
+// (workThrough.ts: the やること list, a 案件's やること, the inbox). Rules: tasks-ui.md "Working through a list".
 // Memory only: nothing here is saved or sent.
 
 /** The era something was started in; compare it with `inEra` when its answer comes back. */

@@ -79,6 +79,7 @@ import type { WritingStyleResult } from './writing-style'
 import type { WritingAudience, WritingStyle } from '../../shared/core/writing-style'
 // lane A ▲
 // lane B ▼
+import type { ContactArchivedResult, ContactFinishAnswer, ContactFinishRequest, ContactReadResult, ContactUndoAnswer, ContactUndoRequest } from './contact-card'
 // lane B ▲
 // lane C ▼
 import type { BrowserActionResult, BrowserSitesResult } from './browser-operation'
@@ -947,6 +948,12 @@ export interface IpcInvokeChannels {
   'writingStyle:remove': { args: [companyId: string, connectorId?: string | null, audience?: WritingAudience | null]; result: WritingStyleResult }
   // lane A ▲
   // lane B ▼
+  // 「連絡」1枚 (inbox.md "One contact"): the contact as the member reads it, its ［返した］/［済んだ］ and their ［取り消す］ — both records or neither.
+  'inbox:contact': { args: [companyId: string, recordId: string]; result: ContactReadResult }
+  'inbox:finishContact': { args: [companyId: string, interactionId: string, input: ContactFinishRequest]; result: ContactFinishAnswer }
+  'inbox:undoContact': { args: [companyId: string, interactionId: string, input: ContactUndoRequest]; result: ContactUndoAnswer }
+  // After that ［取り消す］: whether the mail stays archived in Gmail (ACB's archive note after the finish's entry `afterVersion`).
+  'inbox:contactArchived': { args: [companyId: string, interactionId: string, afterVersion: number]; result: ContactArchivedResult }
   // lane B ▲
   // lane C ▼
   /** 「ブラウザ操作」: the member's sites now (empty when off, unknown or unreadable; main window only). */
@@ -1453,6 +1460,10 @@ export interface ElectronAPI {
   removeWritingStyle: Invoke<'writingStyle:remove'>
   // lane A ▲
   // lane B ▼
+  getContact: Invoke<'inbox:contact'>
+  finishContact: Invoke<'inbox:finishContact'>
+  undoContactFinish: Invoke<'inbox:undoContact'>
+  getContactArchived: Invoke<'inbox:contactArchived'>
   // lane B ▲
   // lane C ▼
   getBrowserSites: Invoke<'browser:sites'>
