@@ -15,7 +15,7 @@ import type { JobDeliveryPlace } from '../../shared/core/jobs'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../../shared/core/google-drive'
 import { sqlitePickTicketDirectory } from '../adapters/sqlite/google-drive'
-import { sha256TokenDigest } from '../adapters/system'
+import { sha256TokenDigest, systemMonotonicWait } from '../adapters/system'
 import { driveDocTiming, driveViewLimits, type PracticeUpstream } from '../lib/config'
 import { logError } from '../lib/error-log'
 import type { AgentEventRepository } from '../ports/agent-events'
@@ -163,6 +163,7 @@ export function wireGoogle(deps: GoogleWiringDeps) {
     memberOf: (companyId, userId) => access.memberOf(companyId, userId),
     pickTickets: sqlitePickTicketDirectory(conn),
     docTiming: () => driveDocTiming(),
+    wait: systemMonotonicWait,
     // The execution run's fence right before a put leaves (google-drive.md; built later in composition.ts, called only after construction).
     runFence: deps.runFence,
     // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
