@@ -209,6 +209,11 @@ describe('Slack\'s reader of the member\'s own messages', () => {
     expect(await alone.r.recentSent('co', 'u', 20)).toEqual({ ok: true, samples: [] })
     const withColleague = slackReader(() => ({ messages: [mine, { ts: ts(2), user: 'U0TWO', team: 'T0DIV', text: 'x' }] }), ['slack:D0A:' + ts(1)])
     expect((await withColleague.r.recentSent('co', 'u', 20))).toMatchObject({ ok: true, samples: [{ text: 'りょうかいです', audience: 'inside' }] })
+    // Someone whose workspace Slack does not give: never guessed as 身内.
+    const unknown = slackReader(() => ({ messages: [mine, { ts: ts(2), user: 'U0TWO', team: 'T0DIV', text: 'x' }, { ts: ts(3), user: 'U0X', text: 'y' }] }), ['slack:D0A:' + ts(1)])
+    expect(await unknown.r.recentSent('co', 'u', 20)).toEqual({ ok: true, samples: [] })
+    const guest = slackReader(() => ({ messages: [mine, { ts: ts(3), user: 'U0X', text: 'y' }, { ts: ts(4), user: 'U0G', user_team: 'T0GUEST', text: 'z' }] }), ['slack:D0A:' + ts(1)])
+    expect(await guest.r.recentSent('co', 'u', 20)).toMatchObject({ ok: true, samples: [{ audience: 'outside' }] })
   })
 
   it('reads each DM once and stops at its limit; a refused permission ends the making', async () => {

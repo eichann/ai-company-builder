@@ -51,7 +51,8 @@ on the member's PC**, never on the server, never handed to anyone else's AI or t
   100), any other place by that message's thread (`conversations.replies`); each place once, at most
   `SLACK_SAMPLES_READS_MAX` (12) calls per making. Kept: the member's own plain messages (no bot, no join / edit subtype),
   mentions as 「@Slack の人」 (no name looked up). 身内 / よそ = everyone else's workspace (`user_team` / `team`) is the
-  company's Slack workspace or not (a Slack Connect guest is よそ); a place where no one else's workspace shows is left out.
+  company's Slack workspace or not (a Slack Connect guest is よそ; an Enterprise Grid colleague of another workspace too);
+  a place where no one else's workspace shows, or someone's is not given, is left out (never guessed as 身内).
   A thread's other side: `slack-chat.ts` marks each message `external` from its team (`ChatMessage.external`, not on the
   wire), `audienceOf` says よそ when anyone is external, 身内 only when everyone is known to be of the workspace. A member
   who just connected has no pointers yet: Slack's summaries come once Slack's DMs and mentions have arrived.
@@ -93,7 +94,8 @@ none fits. Nothing of a message is stored or logged (threads integration test gr
   when the turn starts to the member and sign-in it is for: a later sign-in gets nothing through it).
   Not yet: a new mail (`mail_recipients` without a thread). A thread through a connector with no summary yet (a tool
   allowed after the check was turned on) makes the missing ones in the background (`build(…, full = false)`: a
-  summary made within the month is not read or made again), at most every `REFRESH_RETRY_MS`; 「作り直す」 makes all.
+  summary made within the month is not read or made again), at most every `REFRESH_RETRY_MS`; 「作り直す」 makes all. A summary the member removed with 「消す」 is remembered () and never made again by a thread read;
+  「作り直す」 makes it again.
 - IPC (main, the session stays there): `writingStyle:status` / `setEnabled` (on = build in the background) / `rebuild` /
   `update` (the member's correction, checked like the AI's) / `remove` (one, or all and the check off).
 

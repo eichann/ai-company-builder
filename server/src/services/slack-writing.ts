@@ -51,11 +51,14 @@ export function parseSlackRef(ref: string): { channel: string; ts: string } | nu
   return m && SLACK_CHANNEL_RE.test(m[1]) && SLACK_TS_RE.test(m[2]) ? { channel: m[1], ts: m[2] } : null
 }
 
-/** 身内 when everyone else's workspace is the company's, よそ when anyone's is another; null when no one else shows. */
+/**
+ * よそ when anyone else's workspace is another; 身内 only when everyone else is known to be of the company's; null when
+ * no one else shows or someone's workspace is not given (left out: never a guess).
+ */
 export function slackAudienceOf(teams: readonly (string | null)[], teamId: string): WritingAudience | null {
-  const known = teams.filter((t): t is string => t !== null)
-  if (known.length === 0) return null
-  return known.every(t => t === teamId) ? 'inside' : 'outside'
+  if (teams.length === 0) return null
+  if (teams.some(t => t !== null && t !== teamId)) return 'outside'
+  return teams.every(t => t === teamId) ? 'inside' : null
 }
 
 type Failure = Extract<SentSamplesRead, { ok: false }>['reason']

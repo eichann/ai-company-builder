@@ -298,3 +298,23 @@ test('a tool allowed after the check: the next thread through it makes only its 
   await w.styles.whenIdle()
   assert.deepEqual(w.asked.slice(2), ['co-a/mailco', 'co-a/chatco'])
 })
+
+test('a summary the member removed is not made again by a thread read, only by 「作り直す」', async () => {
+  const w = world({ chat: { readable: true } })
+  await w.styles.setEnabled('co-a', true)
+  await w.styles.whenIdle()
+  await w.styles.remove('co-a', 'chatco', 'inside')
+  await w.styles.remove('co-a', 'chatco', 'outside')
+  const asked = w.asked.length
+  w.setNow(Date.parse('2026-11-29T00:00:00Z'))
+  assert.equal(w.styles.forTurn('co-a')?.({ connectorId: 'chatco', audience: 'inside' }) ?? null, null)
+  await w.styles.whenIdle()
+  w.setNow(Date.parse('2026-12-29T00:00:00Z'))
+  w.styles.forTurn('co-a')?.({ connectorId: 'mailco', audience: 'inside' })
+  await w.styles.whenIdle()
+  assert.deepEqual((await w.styles.status('co-a'))!.styles.map(s => s.connectorId), ['mailco', 'mailco'])
+  assert.ok(!w.asked.slice(asked).includes('co-a/chatco'), 'never read again for what was removed')
+  await w.styles.rebuild('co-a')
+  await w.styles.whenIdle()
+  assert.deepEqual((await w.styles.status('co-a'))!.styles.map(s => s.connectorId).sort(), ['chatco', 'chatco', 'mailco', 'mailco'])
+})
