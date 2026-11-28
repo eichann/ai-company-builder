@@ -304,10 +304,14 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   Enter does not confirm; `LeaveConfirmDialog`). **［保存せずに進む］ keeps those edits first** (owner
   2026-11-28): each editor's keeper (`registerUnsavedEditsKeeper`, same file) writes them through
   `editor:backupEdits` with reason `editor_left_unsaved` (`.backups/<ts>_editor_left_unsaved/`, or the
-  private backups); only a keep with a `backupPath` counts. What could not be kept is named again —
+  private backups); only a keep with a `backupPath` counts, and only while the tab's text is still what
+  was kept (the dialog has closed, so typing can go on): after the first round every editor saves
+  again and keeps what is unsaved then (a text already kept is not kept twice), and only that round's
+  answer counts. What could not be kept is named again —
   「バックアップにも残せなかった編集があります」 … 「それでも進む」 / 「キャンセル」 (Enter does not confirm;
   `leaving.ts` `notKeptQuestion`). Tests: `editor-panel.spec.ts` 「a tab that cannot be saved…」 /
-  「保存せずに進む when the edits cannot be kept either…」, `src/shared/lib/unsavedEdits.test.ts`,
+  「保存せずに進む when the edits cannot be kept either…」 / 「…typed while the edits are being kept…」 /
+  「…typing still going on during the last keep…」 / 「…a keep that was skipped…」, `src/shared/lib/unsavedEdits.test.ts`,
   `ipc-fs.test.ts` 「editor:backupEdits…」 (the reason; an unknown one keeps nothing). Sign-out (`AppShell` → `authStore.signOut`, the
   one sign-out: it also closes the company, so the login screen shows), switching company from
   the title bar (`download-choices.md`) and closing the main window go through it. Closing / quitting: main holds the window's close and asks the renderer

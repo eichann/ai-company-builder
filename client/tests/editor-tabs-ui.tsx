@@ -128,10 +128,13 @@ Object.assign(window, {
     backupEdits: async (_root: string, p: string, content: string, reason = 'editor_edits') => {
       if (failBackups.on) return { success: false, error: 'EACCES' }
       if (failBackups.skip) return { success: true, skipped: 'internal' }
+      // A slow keep (a spec sets it): the member may type meanwhile.
+      const delay = (window as unknown as { __acbBackupDelay?: number }).__acbBackupDelay
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay))
       backups.push({ reason, path: p, content })
       // What happens on "disk" while the edits are being kept (a spec sets it).
       ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
-      return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_edits` }
+      return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_${reason}` }
     },
     // The review's sidecars live next to the document (?view=html: its review, doc-frame.md "Review in the document view").
     readDirectory: async (dir: string) => Object.keys(files)

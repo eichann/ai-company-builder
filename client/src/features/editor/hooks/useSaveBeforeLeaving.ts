@@ -23,7 +23,11 @@ export function useSaveBeforeLeaving({ guardWindowClose = false }: { guardWindow
         const left = await saveUnsavedEdits()
         if (left.length === 0) return true
         if (!await ask(leaveQuestion(left))) return false
-        const notKept = await keepUnsavedEdits(left)
+        await keepUnsavedEdits(left)
+        // The dialog has closed, so typing can go on while the edits are kept (in this
+        // tab or another): once more, save everything and keep what is unsaved now — an
+        // edit already kept unchanged is not kept twice. Only this round's answer counts.
+        const notKept = await keepUnsavedEdits(await saveUnsavedEdits())
         if (notKept.length === 0) return true
         return await ask(notKeptQuestion(notKept))
       } finally {

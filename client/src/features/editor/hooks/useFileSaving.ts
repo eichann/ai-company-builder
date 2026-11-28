@@ -257,6 +257,9 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     return true
   }
 
+  // The text each tab's edits were last kept with on leaving (path → text).
+  const leftKept = useRef(new Map<string, string>())
+
   // Leaving (sign-out, closing the window): write every tab with edits, not
   // only the shown one, without asking; what cannot be saved that way (changed
   // on disk meanwhile, the write failed) is answered so the caller can ask. On
@@ -273,14 +276,20 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       return left
     })
     const unregisterKeeper = registerUnsavedEditsKeeper(async paths => {
-      const kept: string[] = []
-      if (!rootPath) return kept
+      if (!rootPath) return []
+      const keptNow = new Map<string, string>()
       for (const [path, file] of fileContentsRef.current) {
         if (file.isLoading || !isDirty(file) || !paths.includes(path)) continue
+        // Already kept with exactly this text (an earlier round): not kept twice.
+        if (leftKept.current.get(path) === file.content) { keptNow.set(path, file.content); continue }
         const backup = await backupEdits(rootPath, path, file.content, EDITOR_LEFT_UNSAVED_REASON).catch(() => null)
-        if (backup?.success && backup.backupPath) kept.push(path)
+        if (backup?.success && backup.backupPath) {
+          leftKept.current.set(path, file.content)
+          keptNow.set(path, file.content)
+        }
       }
-      return kept
+      // Typing went on while keeping: a tab whose text changed since is not kept.
+      return [...keptNow].filter(([path, text]) => fileContentsRef.current.get(path)?.content === text).map(([path]) => path)
     })
     return () => { unregisterSaver(); unregisterKeeper() }
   }, [saveFile, rootPath, fileContentsRef])
