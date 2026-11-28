@@ -483,10 +483,12 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
 
 - **The chips switch, the title bar counts** (decision 7): ［あなた待ち］［新着］ carry no number (the title bar's ［受け箱］ has
   both, the one place they show; 案4's left destination takes that place in stage 5); 「確認したもの N」 keeps its own. Each
-  section's heading keeps its count (under the kind chosen).
+  section's heading keeps its count (under the kind chosen); あなた待ち's is red only under すべて (narrowed it is a part,
+  never a second red count).
 - **Kinds** (`INBOX_KINDS`, `kindOf`): すべて・止まった (a stop)・承認 (anything about an approval, a browser plan's included)・
   連絡・メール (a 連絡, a 来た連絡 / 返事のお願い before its contact was read, a mail to send)・知らせ (the rest), each with its count
-  over the chip's sections. **On one line** (decision 6): under 440 px (`KINDS_FIT_PX`, measured with `useIsNarrowerThan`)
+  over the chip's sections, counted as the headings count (what moves on by itself and a 新着 kept in place are shown,
+  never counted). **On one line** (decision 6): under 440 px (`KINDS_FIT_PX`, measured with `useIsNarrowerThan`)
   すべて and the first two stay and the rest are one 「その他」 select (`foldKinds`), which shows the kind chosen when it is
   among them. Another chip or kind is a new look.
 - **15 rows first** (decision 4, `INBOX_PAGE`): the first 15 rows across the sections in order (`paged`); reaching the end
@@ -497,7 +499,9 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
 - **新着 opened stays in place** (decision 3, `withLingering`): opening a row (a click, Enter, ↑ ↓) marks exactly its
   notices read as before — the blue count goes down by one — and the row stays where it was in 新着, without its dot or
   ［確認した］ and not counted (`InboxItem.seenHere`), until the chip or the kind changes or the panel opens again; then it is
-  in 確認したもの. ［確認した］ on a row still takes it away at once. A kept row that became あなた待ち is that row only.
+  in 確認したもの. ［確認した］ on a row still takes it away at once. A kept row that became あなた待ち is that row only. The
+  inbox keeps only the keys: a kept row is drawn from the server's row of now (`view.seen`), so one the server no longer
+  lists (gone, or no longer the member's to read) is not shown.
 - **Replies** (decision 2): a reply that came to a contact is 新着 (its `reply_arrived` notice), never あなた待ち; a contact that
   only waits for a reply has no unread notice and is no 新着 row (where 返事待ち lives — the 「連絡」 destination — is stage 5).
 - **Beside the list** (`besideCardOf`): an approval, a mail draft, a browser plan or a 連絡 opens its card **beside the
@@ -509,11 +513,16 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
   beside, a record in the middle — and a 新着 row opened this way is read and kept in place), Enter moves into the card,
   Esc back to its row; never from a field, a menu or a dialog.
 - **The next one after a press** (common decision): a card's own press that finished it there hands the inbox `onDone`
-  (`ApprovalCard`: approved, sent back, withdrawn, 「同じ」; `MailDraftCard` / `PreparedMailCard`: sent with a known result,
+  (`ApprovalCard`: approved, sent back, withdrawn, 「同じ」 — only when the request's state says so, `DONE_STATE`: an approve
+  answered `failed` or `stale` stays on its card; `MailDraftCard` / `PreparedMailCard`: sent with a known result,
   thrown away; `BrowserPlanCard`: cancelled, or 済んでいた / されていなかった — **not** after ［任せる］, whose result is read on
   the card first; `ContactCard` `onFinished`: a finish written). The next row takes its place (`work.ended`; the last
   one → the card goes) and the list says 「『…』を片づけました。次の件です」; ［取り消す］ only where the press can be taken back (a
   contact's finish, at the versions it answered); approvals and sends cannot. A send whose result nobody knows stays.
+  A press answered after the member opened another card changes nothing on screen (that card stays). When the list was
+  read again first and the finished row is already gone, the row now in its place comes next (`Beside.at`, the same line).
+  The contact's undo from the list: not reached → its words and ［取り消す］ again (`WorkUndoAnswer` `{ again }`); whether
+  Gmail keeps the mail not known → no Gmail line, never 「元に戻せませんでした」.
 - **Another company**: AppShell is keyed by company (the look starts again), every list's order, place and line are
   forgotten (`forgetAllWork`) and the inbox's ［取り消す］ and a contact's press are bound to the company era — answered after
   the switch they change nothing on screen.

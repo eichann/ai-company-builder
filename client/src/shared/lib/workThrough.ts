@@ -93,29 +93,38 @@ export function noticeOf(listKey: string): WorkNotice | null {
 }
 
 /**
- * 取り消す of the item `id` done with in `listKey`: says it is being put back, runs `undo` (a refusal's words, null, or
- * `{ done }` — the words of a put-back that has more to say, such as the inbox's 「メールは Gmail でアーカイブされたままです」),
- * then shows the item again (`show`) and says so, or says the refusal. Bound to the company era it is made in: pressed,
- * or answered, after another company or a sign-out, it changes nothing on the screen (the 件名 never reaches the next
+ * What an undo answers: a refusal's words, null (put back), `{ done }` — the words a put-back says instead of the usual
+ * line (the inbox's 「メールは Gmail でアーカイブされたままです」) — or `{ again }`: it did not reach anyone, say so and keep
+ * 取り消す to press again.
+ */
+export type WorkUndoAnswer = string | null | { done: string } | { again: string }
+
+/** The list's line after an item was done with (`useWorkThrough.ended`, and the inbox when its row left the list first). */
+export const endedWords = (title: string, last: boolean) =>
+  last ? `「${title}」を片づけました。この一覧の件は、これで最後です` : `「${title}」を片づけました。次の件です`
+
+/**
+ * 取り消す of the item `id` done with in `listKey`: says it is being put back, runs `undo`, then shows the item again
+ * (`show`) and says so, or says the refusal (`WorkUndoAnswer`). Bound to the company era it is made in: pressed, or
+ * answered, after another company or a sign-out, it changes nothing on the screen (the 件名 never reaches the next
  * company's list).
  */
-/** What an undo answers: a refusal's words, null (put back), or the words a put-back says instead of the usual line. */
-export type WorkUndoAnswer = string | null | { done: string }
-
 export function undoOfEnded(listKey: string, id: string, title: string, undo: () => Promise<WorkUndoAnswer>, show: (id: string) => void): () => void {
   const era = currentCompanyEra()
-  return () => {
+  const takeBack = () => {
     if (!inEra(era)) return
     setWorkNotice(listKey, { text: `「${title}」を元に戻しています…`, undo: null })
-    void undo().then(failure => {
+    void undo().then(answer => {
       if (!inEra(era)) return
-      if (typeof failure === 'string') { setWorkNotice(listKey, { text: failure, undo: null }); return }
+      if (typeof answer === 'string') { setWorkNotice(listKey, { text: answer, undo: null }); return }
+      if (answer && 'again' in answer) { setWorkNotice(listKey, { text: answer.again, undo: takeBack }); return }
       show(id)
-      setWorkNotice(listKey, { text: failure?.done ?? `「${title}」を元に戻しました`, undo: null })
+      setWorkNotice(listKey, { text: answer?.done ?? `「${title}」を元に戻しました`, undo: null })
     }, () => {
       if (inEra(era)) setWorkNotice(listKey, { text: '元に戻せませんでした。', undo: null })
     })
   }
+  return takeBack
 }
 
 /**

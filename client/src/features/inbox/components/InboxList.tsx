@@ -144,6 +144,8 @@ interface ListProps {
   sections: InboxSections
   /** Each section's rows under the chip and kind, all of them (paging hides none from the count; a row opened here is not news). */
   totals: { waiting: number; news: number; seen: number }
+  /** あなた待ち's count in red only for the whole of it (「すべて」): narrowed to a kind it is a part, never a second red count. */
+  redCount?: boolean
   filter: InboxFilter
   /** 案2: this week's turn that is not あなた待ち, said once beside its count (`InboxView.counts.elsewhere`). */
   elsewhere?: number
@@ -195,7 +197,7 @@ function MoreRows({ left, onMore }: { left: number; onMore: () => void }) {
 }
 
 /** The inbox's rows: あなた待ち and 新着 (the 「新着」 chip), or one of them, or 確認したもの. */
-export function InboxList({ sections, totals, filter, elsewhere = 0, onOpenTasks, turnNotListed, unreadNotListed = 0, more, work, notice, meetingButtons, onOpen, onSeen, onButton, onUndo, undone, onAllSeen, meetingNote, error, status }: ListProps) {
+export function InboxList({ sections, totals, redCount = true, filter, elsewhere = 0, onOpenTasks, turnNotListed, unreadNotListed = 0, more, work, notice, meetingButtons, onOpen, onSeen, onButton, onUndo, undone, onAllSeen, meetingNote, error, status }: ListProps) {
   const row = (item: InboxItem) => <InboxRow key={item.key} item={item} buttons={item.meetingId ? meetingButtons?.(item.meetingId) : undefined} current={work?.currentKey === item.key}
     onOpen={onOpen} onSeen={onSeen} onButton={onButton} onUndo={onUndo} undone={!!item.undo && undone.has(item.undo.noticeId)} />
   const hasMeetings = [...sections.news, ...sections.moving].some(i => i.meetingId)
@@ -208,7 +210,7 @@ export function InboxList({ sections, totals, filter, elsewhere = 0, onOpenTasks
       <div {...listAttrs}>
         {(filter === 'new' || filter === 'waiting') && (
           <section aria-label="あなた待ち">
-            <Heading label="あなた待ち（止まった仕事・承認・送る前の確認）" count={totals.waiting} danger={totals.waiting > 0}>
+            <Heading label="あなた待ち（止まった仕事・承認・送る前の確認）" count={totals.waiting} danger={redCount && totals.waiting > 0}>
               {/* 案2 (owner decision 2026-11-28): the red count stays what is stopped; the rest of the turn is said here once. */}
               {elsewhere > 0 && onOpenTasks && (
                 <button type="button" data-inbox-elsewhere onClick={onOpenTasks} className="inline-flex items-center gap-1 text-small text-link hover:text-link-hover">

@@ -289,7 +289,8 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
   reads nothing, and an answer read for another company or in an earlier era is dropped — it used to blank the new
   company's list until the next look. **The inbox uses the same era** for what it starts (its ［取り消す］ is `undoOfEnded`,
   a contact's press and undo `contactPress.ts`), never a check of its own. An undo may answer `{ done }`: words that
-  replace 「『…』を元に戻しました」 (the inbox's 「メールは Gmail でアーカイブされたままです」).
+  replace 「『…』を元に戻しました」 (the inbox's 「メールは Gmail でアーカイブされたままです」), or `{ again }`: not reached, its words
+  and 取り消す kept to press again (`WorkUndoAnswer`).
   Tests: `workThrough.test.ts` 「取り消す answered after another company…」 / 「取り消す kept on screen past a company
   change…」, `src/stores/appStore.test.ts` (which changes end the era), `listAnswers.test.ts` 「a read of the company
   left behind…」 — mutation-checked.

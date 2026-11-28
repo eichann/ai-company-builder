@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
 import type { ContactView } from '../../../shared/contact-card'
-import { inboxView, type InboxItem } from './model'
+import { inboxView } from './model'
 import { besideCardOf, foldKinds, INBOX_PAGE, kindCounts, kindOf, limitShowing, narrowed, orderOf, paged, sectionsOf, withLingering } from './workModel'
 
 const AT = (minute: number) => new Date(Date.UTC(2026, 10, 27, 1, minute)).toISOString() // 2026-11-27 10:mm in Japan
@@ -20,7 +20,7 @@ const state = (items: TurnItem[], notices: NotificationItem[]): NoticesState => 
 })
 const readAll = (s: NoticesState, ids: readonly string[]): NoticesState =>
   state(s.myTurn.items, s.notices.items.map(x => (ids.includes(x.id) ? { ...x, read: true } : x)))
-const NONE = new Map<string, InboxItem>()
+const NONE = new Set<string>()
 
 test('案2: the red count stays what is stopped; the rest of this week\'s turn is told beside it, never a row or a red count', () => {
   const s = state([
@@ -61,7 +61,7 @@ test('a 新着 row opened stays where it was, without its dot and uncounted, unt
   const s = state([], [a, b, c])
   const opened = inboxView(s).news.find(i => i.key === 'record:task-b')!
   const after = inboxView(readAll(s, opened.unreadNoticeIds))
-  const kept = new Map([[opened.key, opened]])
+  const kept = new Set([opened.key])
   const news = withLingering(after, kept)
   assert.deepEqual(news.map(i => i.key), ['record:task-a', 'record:task-b', 'record:task-c'])
   assert.equal(news[1].seenHere, true)
@@ -78,8 +78,36 @@ test('a kept row that became あなた待ち (a stop came about it) is that row 
   const s = state([], [asked])
   const opened = inboxView(s).news[0]
   const stopped = inboxView(state([], [{ ...asked, read: true }, notice('ai_turn_stuck', 'task-x', 6)]))
-  const all = [...stopped.waiting, ...withLingering(stopped, new Map([[opened.key, opened]]))]
+  const all = [...stopped.waiting, ...withLingering(stopped, new Set([opened.key]))]
   assert.equal(all.filter(i => i.key === 'record:task-x').length, 1)
+})
+
+test('a kept row is the server\'s row of now: one the server no longer lists (gone, or no longer the member\'s to read) is not kept', () => {
+  const done = notice('request_done', 'task-gone', 3)
+  const opened = inboxView(state([], [done])).news[0]
+  const gone = inboxView(state([], []))
+  assert.deepEqual(withLingering(gone, new Set([opened.key])), [])
+  // Renamed meanwhile: the kept row shows what the server says now.
+  const renamed = inboxView(state([], [{ ...done, read: true, recordTitle: '新しい件名' }]))
+  assert.equal(withLingering(renamed, new Set([opened.key]))[0].title, '新しい件名')
+})
+
+test('案2 never tells beside the red count a task a stop already made a row of あなた待ち', () => {
+  const v = inboxView(state([turn('task-x', 'task', 'todo', '2026-11-27'), turn('task-y', 'task', 'todo')], [notice('ai_turn_stuck', 'task-x', 2)]))
+  assert.deepEqual(v.waiting.map(i => i.key), ['record:task-x'])
+  assert.equal(v.counts.elsewhere, 1)
+})
+
+test('the kind counts count as the headings do: a 新着 opened here and what moves on by itself are shown, never counted', () => {
+  const a = notice('request_done', 'task-a', 9)
+  const b = notice('request_done', 'task-b', 8)
+  const s = state([], [a, b])
+  const opened = inboxView(s).news[0]
+  const after = inboxView(readAll(s, opened.unreadNoticeIds))
+  const sections = sectionsOf(after, 'new', new Set([opened.key]))
+  assert.equal(sections.news.length, 2)
+  assert.deepEqual(kindCounts(sections), { all: 1, stop: 0, approval: 0, contact: 0, notice: 1 })
+  assert.equal(after.counts.news, 1)
 })
 
 test('the kinds: each row is one kind, the counts add up, and narrowing keeps only that kind in every section', () => {

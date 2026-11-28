@@ -2,7 +2,7 @@
 // records feature for a 案件's やること (its card beside the list), the inbox (its card beside its list). Rules: tasks-ui.md "Working through a list".
 import { useSyncExternalStore } from 'react'
 import { useCommandHandler } from '../commands/commands'
-import { nextAfterLeaving, orderOf, placeOf, positionIn, rememberPlace, setWorkNotice, stepIn, subscribeWork, undoOfEnded, type WorkPosition, type WorkUndoAnswer } from '../lib/workThrough'
+import { endedWords, nextAfterLeaving, orderOf, placeOf, positionIn, rememberPlace, setWorkNotice, stepIn, subscribeWork, undoOfEnded, type WorkPosition, type WorkUndoAnswer } from '../lib/workThrough'
 import { useLatestRef } from './useLatestRef'
 
 /** A field, a menu or a dialog keeps its own keys (↑ ↓ Enter Esc mean something there). */
@@ -86,7 +86,7 @@ export function useWorkThrough({ listKey, shownId, open }: { listKey: string; sh
     if (id !== at) return null
     const next = nextAfterLeaving(now, id)
     const takeBack = undo ? undoOfEnded(listKey, id, title, undo, show) : null
-    setWorkNotice(listKey, { text: next ? `「${title}」を片づけました。次の件です` : `「${title}」を片づけました。この一覧の件は、これで最後です`, undo: takeBack })
+    setWorkNotice(listKey, { text: endedWords(title, !next), undo: takeBack })
     if (next) {
       rememberPlace(listKey, next)
       latest.current.open(next)

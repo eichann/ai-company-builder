@@ -2,6 +2,7 @@
 // purpose: what opening a row does (read, kept in place, beside or in the middle, the next after a card's press) is one
 // sequence that reads the same state, and splitting it would pass that state around.
 import { useMemo, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { NOTICES_OFFLINE_TEXT, type MeetingNewsRow, type NoticesState } from '../../../../shared/notifications-app'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../../notifications/api'
@@ -19,7 +20,8 @@ import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, 
 import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
 import { WorkThroughBar, WorkThroughNotice } from '../../../shared/ui/WorkThrough'
 import { commandArea } from '../../../shared/commands/commands'
-import type { WorkUndoAnswer } from '../../../shared/lib/workThrough'
+import { endedWords, orderOf as listOrder, setWorkNotice, undoOfEnded, type WorkUndoAnswer } from '../../../shared/lib/workThrough'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 
 interface InboxSlotInput {
   companyId: string | undefined
@@ -59,8 +61,11 @@ interface InboxSlotInput {
   contactPorts?: { reads?: ContactReads; writes?: ContactWrites }
 }
 
-/** The card shown beside the list: the row it belongs to (null: a draft opened from a contact's card), its title. */
-type Beside = BesideCard & { rowKey: string | null; title: string; readKey: string }
+/**
+ * The card shown beside the list: the row it belongs to (null: a draft opened from a contact's card), its title, and
+ * where that row stood when opened (the next one's place if the row leaves the list before the card's press answers).
+ */
+type Beside = BesideCard & { rowKey: string | null; title: string; readKey: string; at: number }
 
 /** The list worked through (tasks-ui.md "Working through a list"): one per screen, like the やること list's. */
 export const INBOX_WORK_KEY = 'inbox'
@@ -86,7 +91,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const [kind, setKind] = useState<InboxKind>('all')
   const [limit, setLimit] = useState(INBOX_PAGE)
   // 新着 opened in this look, kept in their place until the chips change or the panel opens again (decision 11番-3).
-  const [lingering, setLingering] = useState<ReadonlyMap<string, InboxItem>>(new Map())
+  const [lingering, setLingering] = useState<ReadonlySet<string>>(new Set())
   const [beside, setBeside] = useState<Beside | null>(null)
   // The row opened last (beside or in the middle): where ↑ ↓ go on from.
   const [shownKey, setShownKey] = useState<string | null>(null)
@@ -116,9 +121,10 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const totals = { waiting: rows.waiting.length, news: rows.news.filter(i => !i.seenHere).length, seen: rows.seen.length }
   const rowOf = (key: string) => [...rows.waiting, ...rows.news, ...rows.moving, ...rows.seen].find(i => i.key === key)
   const work = useWorkThrough({ listKey: INBOX_WORK_KEY, shownId: shownKey, open: key => { const item = rowOf(key); if (item) openItem(item) } })
+  const besideNow = useLatestRef(beside)
 
   /** A new look (another chip or kind, the panel opened again): the opened 新着 go where they belong, 15 rows again. */
-  const newLook = () => { setLingering(new Map()); setLimit(INBOX_PAGE) }
+  const newLook = () => { setLingering(new Set()); setLimit(INBOX_PAGE) }
   // The undo line is about what was just pressed: gone once the panel closes or opens again.
   if (wasShown !== shown) { setWasShown(shown); setStatus(null); newLook(); setBeside(null); if (shown) setPlanReadKey(k => k + 1) }
 
@@ -137,12 +143,14 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     setError(null)
     setStatus(null)
     if (!item.stop) seeRow(item)
-    if (item.section === 'new' && !item.seenHere) setLingering(m => new Map(m).set(item.key, item))
+    if (item.section === 'new' && !item.seenHere) setLingering(m => new Set(m).add(item.key))
     setShownKey(item.key)
-    setLimit(l => limitShowing(order, item.key, l))
+    // A row past the drawn ones (↓ from the last): drawn now, so the list can move the focus onto it at once.
+    const needed = limitShowing(order, item.key, limit)
+    if (needed > limit) flushSync(() => setLimit(needed))
     const card = besideCardOf(item)
     // Each opening reads a contact again (the card shows what is true now before anything is pressed).
-    setBeside(card ? { ...card, rowKey: item.key, title: item.title, readKey: `open${Date.now()}` } : null)
+    setBeside(card ? { ...card, rowKey: item.key, title: item.title, readKey: `open${Date.now()}`, at: Math.max(0, order.indexOf(item.key)) } : null)
     const a = item.action
     switch (a.kind) {
       case 'openRecord': onOpenRecord(a.recordId); break
@@ -162,11 +170,22 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
    * The card beside the list was finished there (approved, sent, 済んだ…): the next row takes its place, and the list says
    * so with ［取り消す］ when the press can be taken back (tasks-ui.md "Working through a list"). The last one: the card goes.
    */
-  const besideDone = (undo?: () => Promise<WorkUndoAnswer>) => {
+  const besideDone = (done: Beside, undo?: () => Promise<WorkUndoAnswer>) => {
     setPlanReadKey(k => k + 1)
-    const key = beside?.rowKey
-    const next = key ? work.ended(key, beside.title, undo) : null
-    if (next !== 'next') setBeside(null)
+    // `ended` moves on only while that card's row is the one shown; a press answered after the member opened another
+    // card changes nothing on screen (that other card stays as it is).
+    const next = done.rowKey ? work.ended(done.rowKey, done.title, undo) : null
+    if (next === 'next') return
+    const current = besideNow.current
+    const stillShown = !!current && current.kind === done.kind && current.id === done.id
+    // The list read again before the press answered and the row is already gone: the row now in its place comes next.
+    const now = listOrder(INBOX_WORK_KEY)
+    if (next === null && stillShown && done.rowKey && !now.includes(done.rowKey) && now.length > 0) {
+      work.show(now[Math.min(done.at, now.length - 1)])
+      setWorkNotice(INBOX_WORK_KEY, { text: endedWords(done.title, false), undo: undo ? undoOfEnded(INBOX_WORK_KEY, done.rowKey, done.title, undo, work.show) : null })
+      return
+    }
+    if (stillShown) setBeside(null)
   }
   // A row's own button (［AI に読ませる］, ［読まない］…) is the member acting on it: its news is seen too.
   const pressButton = (item: InboxItem, button: InboxRowButton) => {
@@ -211,15 +230,15 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const closeBeside = () => { setBeside(null); setPlanReadKey(k => k + 1) }
 
   const besideCard = beside && (beside.kind === 'approval'
-    ? renderApprovalCard(beside.id, () => besideDone())
+    ? renderApprovalCard(beside.id, () => besideDone(beside))
     : beside.kind === 'browser'
-    ? browserPlans?.renderCard(beside.id, () => besideDone())
+    ? browserPlans?.renderCard(beside.id, () => besideDone(beside))
     : beside.kind === 'contact'
     ? <ContactCard key={beside.id} companyId={companyId} contactId={beside.id} store={contacts} readKey={beside.readKey} writes={contactPorts?.writes} reads={contactPorts?.reads} nameOf={memberName}
         onOpenTask={id => { setBeside(null); onOpenRecord(id) }} onOpenRecord={id => { setBeside(null); onOpenRecord(id) }}
-        onCheckDraft={id => setBeside({ kind: 'mail', id, rowKey: null, title: beside.title, readKey: beside.readKey })}
-        onFinished={u => besideDone(u ?? undefined)} />
-    : renderMailDraft(beside.id, () => besideDone()))
+        onCheckDraft={id => setBeside({ kind: 'mail', id, rowKey: null, title: beside.title, readKey: beside.readKey, at: beside.at })}
+        onFinished={u => besideDone(beside, u ?? undefined)} />
+    : renderMailDraft(beside.id, () => besideDone(beside)))
   const words = beside ? BESIDE_WORDS[beside.kind] : null
   // The card beside the list (owner decision 2026-11-28, 11番): 「3 / 11」, ［前の件］［次の件］ and ［閉じる］ over it.
   const besidePane = beside && words && (
@@ -241,7 +260,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
         <div className={`flex min-h-0 min-w-0 flex-col ${besidePane ? 'w-2/5 flex-shrink-0 border-r border-[color:var(--color-border)]' : 'flex-1'}`}>
           <div className="flex-shrink-0 border-b border-[color:var(--color-border)] bg-bg"><KindChips kind={kind} counts={kindCount} onKind={chooseKind} /></div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <InboxList sections={drawn.sections} totals={totals} filter={filter} elsewhere={view.counts.elsewhere} onOpenTasks={onOpenTasks}
+            <InboxList sections={drawn.sections} totals={totals} redCount={kind === 'all'} filter={filter} elsewhere={view.counts.elsewhere} onOpenTasks={onOpenTasks}
               turnNotListed={view.turnNotListed} unreadNotListed={view.unreadNotListed}
               more={{ left: drawn.left, onMore: () => setLimit(l => l + INBOX_PAGE) }}
               work={{ listKey: INBOX_WORK_KEY, order, currentKey: beside?.rowKey ?? null }} notice={<WorkThroughNotice listKey={INBOX_WORK_KEY} />}

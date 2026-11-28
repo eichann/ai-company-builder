@@ -61,6 +61,23 @@ test('取り消す whose put-back has more to say (the inbox\'s 「メールは 
   forgetAllWork()
 })
 
+test('取り消す that did not reach anyone says so and keeps 取り消す to press again; the second press puts the item back', async () => {
+  const shown: string[] = []
+  let calls = 0
+  const undo = async () => (++calls === 1 ? { again: 'サーバーにつながりませんでした。もう一度押してください' } : null)
+  undoOfEnded('inbox', 'contact:y', '請求のご相談', undo, id => shown.push(id))()
+  await settle()
+  assert.deepEqual(shown, [])
+  const notice = noticeOf('inbox')
+  assert.equal(notice?.text, 'サーバーにつながりませんでした。もう一度押してください')
+  assert.ok(notice?.undo)
+  notice!.undo!()
+  await settle()
+  assert.deepEqual(shown, ['contact:y'])
+  assert.equal(noticeOf('inbox')?.text, '「請求のご相談」を元に戻しました')
+  forgetAllWork()
+})
+
 const ORDER = ['a', 'b', 'c', 'd']
 
 test('「3 / 11」: counted from 1 over the items listed; an item not listed has no place', () => {

@@ -74,10 +74,14 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, read
     let after: ContactSaid | null = null
     await pressUndo(req => undoContactFinish(companyId, interactionId, req, writes), request, {
       era, say: s => { after = s }, reread: () => store.refresh(companyId, contactId),
-      stillArchived: v => contactMailStaysArchived(companyId, interactionId, v, reads),
+      // Whether Gmail keeps it only adds a line: not known is no line, never 「元に戻せませんでした」.
+      stillArchived: v => contactMailStaysArchived(companyId, interactionId, v, reads).catch(() => false),
     })
     const said = after as ContactSaid | null
-    return said === null ? null : said.refused ? said.text : { done: said.text }
+    if (said === null) return null
+    // Not reached: the same undo again (the server answers `already` for a part taken back meanwhile).
+    if (said.refused) return said.undo ? { again: said.text } : said.text
+    return { done: said.text }
   }
   const send = (press: ContactResend) => run(async () => {
     setSaid(null)

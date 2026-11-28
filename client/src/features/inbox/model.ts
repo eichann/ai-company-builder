@@ -313,11 +313,11 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   contacts?: ContactsOfRows): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
-  let elsewhere = 0
+  const elsewhereIds: string[] = []
   for (const item of turn.items) {
     const row = waitingTurnRow(item)
     if (row) rows.set(row.key, row)
-    else elsewhere++
+    else elsewhereIds.push(item.id)
   }
   for (const m of meetings) if (!rows.has(`record:${m.id}`)) rows.set(`record:${m.id}`, meetingRow(m))
   const since = Date.parse(newsSince)
@@ -374,6 +374,9 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   const all = [...rows.values(), ...(browser ? browserRows(browser) : [])]
   const pick = (s: InboxSection) => all.filter(r => r.section === s)
   const waiting = pick('waiting').sort(byNeed)
+  // A task of the turn that a stop made a row of あなた待ち is that row (red), never also told beside it.
+  const waitingKeys = new Set(waiting.map(i => i.key))
+  const elsewhere = elsewhereIds.filter(id => !waitingKeys.has(`record:${id}`)).length
   const news = pick('new').sort(newestFirst)
   const seen = pick('seen').sort(newestFirst)
   const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0

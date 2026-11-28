@@ -44,28 +44,35 @@ const newestFirst = (a: InboxItem, b: InboxItem) => (b.at ?? '').localeCompare(a
 
 /**
  * 新着 with the rows opened in this look kept where they were (decision 11番-3): a row the member opened is read on the
- * server and leaves `view.news`; until the chips change it stays in 新着's order, without its dot and uncounted. A kept
- * row that is now あなた待ち (a stop came about it) is that row only, never twice.
+ * server and leaves `view.news` for `view.seen`; until the chips change it stays in 新着's order, without its dot and
+ * uncounted — drawn from the server's row of now (`view.seen`), never from memory: a row the server no longer lists (gone,
+ * or no longer theirs to read) is not kept. A kept row that is now あなた待ち (a stop came about it) is that row only.
  */
-export function withLingering(view: InboxView, lingering: ReadonlyMap<string, InboxItem>): InboxItem[] {
+export function withLingering(view: InboxView, lingering: ReadonlySet<string>): InboxItem[] {
   if (lingering.size === 0) return view.news
-  const live = new Set([...view.waiting, ...view.news].map(i => i.key))
-  const kept = [...lingering.values()].filter(i => !live.has(i.key)).map(i => ({ ...i, section: 'new' as const, unreadNoticeIds: [], seenHere: true as const }))
+  const kept = view.seen.filter(i => lingering.has(i.key)).map(i => ({ ...i, section: 'new' as const, seenHere: true as const }))
   return [...view.news, ...kept].sort(newestFirst)
 }
 
 /** The sections of a chip, before the kind narrows them: 「新着」 shows あなた待ち, 新着 and what moves on by itself. */
-export function sectionsOf(view: InboxView, filter: InboxFilter, lingering: ReadonlyMap<string, InboxItem>): InboxSections {
+export function sectionsOf(view: InboxView, filter: InboxFilter, lingering: ReadonlySet<string>): InboxSections {
   const none: InboxItem[] = []
   if (filter === 'seen') return { waiting: none, news: none, moving: none, seen: view.seen }
   if (filter === 'waiting') return { waiting: view.waiting, news: none, moving: none, seen: none }
   return { waiting: view.waiting, news: withLingering(view, lingering), moving: view.moving, seen: none }
 }
 
-/** Each kind's count over the sections a chip shows (「すべて」 = all of them). */
+/**
+ * Each kind's count over the sections a chip shows (「すべて」 = all of them), counted as the headings count: never what moves
+ * on by itself nor a 新着 opened in this look (they are shown, never counted).
+ */
 export function kindCounts(sections: InboxSections): Record<InboxKind, number> {
   const counts: Record<InboxKind, number> = { all: 0, stop: 0, approval: 0, contact: 0, notice: 0 }
-  for (const item of allRows(sections)) { counts.all++; counts[kindOf(item)]++ }
+  for (const item of [...sections.waiting, ...sections.news, ...sections.seen]) {
+    if (item.seenHere) continue
+    counts.all++
+    counts[kindOf(item)]++
+  }
   return counts
 }
 

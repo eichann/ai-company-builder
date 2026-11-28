@@ -301,3 +301,48 @@ test('the keys: ↓ / j and ↑ / k go row by row (a card beside, a record in th
   await page.keyboard.press('Escape')
   await expect(row('record:outbound_message-preview01')).toBeFocused()
 })
+
+test('↓ from the last row drawn draws the next rows and moves the focus onto the next one (Codex review)', async ({ page }) => {
+  // Without the end coming into view (no IntersectionObserver), ↓ alone must draw the next rows.
+  await page.addInitScript(() => { delete (window as { IntersectionObserver?: unknown }).IntersectionObserver })
+  await openPreview(page, 'inbox', { many: '30' })
+  const rows = page.locator('[data-work-row]')
+  await expect(rows).toHaveCount(15)
+  // The last row drawn, opened (its record in the middle): ↓ goes on from it.
+  await rows.nth(14).click()
+  await page.keyboard.press('ArrowDown')
+  await expect(rows.nth(15)).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(rows.nth(16)).toBeFocused()
+})
+
+test('a press answered after the member opened another card changes nothing on screen: that card stays, no line (Codex review)', async ({ page }) => {
+  await openPreview(page, 'inbox', { approvals: '2', slow: '1' })
+  await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
+  const card = beside(page, '承認のお願い')
+  await card.getByRole('button', { name: '承認', exact: true }).click()
+  await page.locator('[data-inbox-row="record:outbound_message-preview01"]').getByRole('button', { name: '確かめて送る…' }).click()
+  await expect(page.locator('[data-inbox-row="record:approval-more0001"]')).toHaveCount(0)
+  await expect(beside(page, '送るメールの下書き')).toBeVisible()
+  await expect(page.locator('[data-work-notice]')).toHaveCount(0)
+})
+
+test('an approval whose outside write failed stays on its card (never 「片づけました」): the member reads what happened', async ({ page }) => {
+  await openPreview(page, 'inbox', { approvals: '2', failed: '1' })
+  await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
+  const card = beside(page, '承認のお願い')
+  await card.getByRole('button', { name: '承認', exact: true }).click()
+  await expect(page.locator('#acted')).toHaveText('approve approval-more0001')
+  await expect(card.getByRole('group', { name: '承認のお願い' })).toHaveAttribute('data-state', 'failed')
+  await expect(page.locator('[data-inbox-row="record:approval-more0001"]')).toHaveAttribute('data-inbox-current', '')
+  await expect(page.locator('[data-work-notice]')).toHaveCount(0)
+})
+
+test('narrowed to a kind, あなた待ち\'s count is a part: never a second red count', async ({ page }) => {
+  await openPreview(page, 'inbox')
+  const heading = page.getByRole('region', { name: 'あなた待ち' }).locator('h3')
+  await expect(heading).toHaveClass(/text-danger-text/)
+  await kinds(page).locator('[data-inbox-kind="approval"]').click()
+  await expect(count(page, 'あなた待ち')).toHaveText('1')
+  await expect(heading).not.toHaveClass(/text-danger-text/)
+})

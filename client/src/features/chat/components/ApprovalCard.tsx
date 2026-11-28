@@ -10,6 +10,8 @@ import { useUnknownResult } from '../hooks/useUnknownResult'
 import { unknownMessage, type PressOutcome, type UnknownWords } from '../unknownResult'
 
 type PressKind = 'approve' | 'send-back' | 'withdraw' | 'same-as'
+/** The state a press leaves the request in when it did what it meant (an approve can answer `failed` or `stale`). */
+const DONE_STATE: Record<PressKind, ApprovalView['state']> = { approve: 'approved', 'send-back': 'sent_back', withdraw: 'withdrawn', 'same-as': 'withdrawn' }
 /** What the card says when a press's answer did not come (it never says 「開き直すと分かります」). */
 const PRESS_WORDS: Record<PressKind, UnknownWords> = {
   approve: { whether: '承認できたかどうか', notDone: '承認はまだ届いていません' },
@@ -55,7 +57,10 @@ const MEETING_TEXT = { linked: '会議もこの記録につなぎました。', 
 export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone }: {
   card: ApprovalCardRef
   outbound?: ApprovalOutbound
-  /** A press here answered success (approved, sent back, withdrawn, 「同じ」): where the card is worked through a list, the next one. */
+  /**
+   * A press here did what it meant (approved, sent back, withdrawn, 「同じ」 — the request's state says so; a write that
+   * failed or went stale stays on the card): where the card is worked through a list, the next one.
+   */
   onDone?: () => void
 }) {
   const { key, view, names, error: loadError } = useApproval(card.companyId, card.approvalId, outbound)
@@ -103,7 +108,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone 
       const withMeeting = linkMeeting && view.basis.meetingId !== null
       const r = await (outbound ? sameAsApproval(card.companyId, view.id, recordId, withMeeting, outbound) : sameAsApproval(card.companyId, view.id, recordId, withMeeting))
       putApproval(key, r)
-      if (r.success) { setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` }); onDone?.() }
+      if (r.success) { setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` }); if (r.approval.state === DONE_STATE['same-as']) onDone?.() }
       else if (r.offline) void settle('same-as', view.state, 'start')
       else setMessage({ tone: 'error', text: r.error })
     } finally {
@@ -122,7 +127,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound, onDone 
           ? await (outbound ? sendBackApproval(card.companyId, view.id, reason, outbound) : sendBackApproval(card.companyId, view.id, reason))
           : await (outbound ? withdrawApproval(card.companyId, view.id, outbound) : withdrawApproval(card.companyId, view.id))
       putApproval(key, r)
-      if (r.success) onDone?.()
+      if (r.success) { if (r.approval.state === DONE_STATE[kind]) onDone?.() }
       else if (r.offline) void settle(kind, view.state, 'start')
       else {
         setMessage({ tone: 'error', text: r.error })

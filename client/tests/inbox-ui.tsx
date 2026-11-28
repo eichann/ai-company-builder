@@ -12,7 +12,8 @@
 // `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
 // `&chatcard=1`: the draft's card as a consultation shows it, outside the inbox (its ［任せる］ runs it there).
 // `?many=N` (working through the inbox, notifications.md "Working through the inbox"): N more 新着 on a fixed clock
-// (2026-11-27), so the list has more than its first 15 rows; `&approvals=N` N more approvals waiting. `?narrow=1`: the
+// (2026-11-27), so the list has more than its first 15 rows; `&approvals=N` N more approvals waiting (approving lands,
+// `&slow=1` a second later, `&failed=1` answered as a failed write). `?narrow=1`: the
 // panel 360 px wide (the kind chips fold into 「その他」). The keys ↑ ↓ Enter Esc are the app's (`useKeybindings`).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -241,6 +242,10 @@ function Preview() {
     approveApproval: async (companyId, id) => {
       setActed(a => [a, `approve ${id}`].filter(Boolean).join('|'))
       if (APPROVALS === 0) return { success: false, offline: true, error: '（見本）' } as never
+      // `&slow=1`: the answer comes a second later (the member may open another card meanwhile).
+      if (params.get('slow') === '1') await new Promise(resolve => setTimeout(resolve, 1000))
+      // `&failed=1`: the outside write failed — the server answers 200 with the request `failed` (it stays in the turn).
+      if (params.get('failed') === '1') return { success: true, approval: { ...view, id, state: 'failed', viewerMayApprove: false }, names: {} } as never
       state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total - 1, items: state.myTurn.items.filter(i => i.id !== id) } }
       setTimeout(() => changed.emit({ companyId }), 0)
       return { success: true, approval: { ...view, id, state: 'approved', viewerMayApprove: false, outcome: { at: FIXED(1), by: 'u-me', onBehalfOf: null, note: '承認します', resultOperationId: 'op-2' } } } as never
