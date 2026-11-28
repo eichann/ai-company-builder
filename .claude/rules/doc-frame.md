@@ -487,7 +487,16 @@ rewritten — the player is ACB's UI, a view of its own drawn above the document
   it serves only `acb-drive-video://` (and `file://` 404), its one request hook lets a request through only
   when it names **the requesting page's own player's token** (`owns`, by `webContentsId`), every permission
   and download refused; popups denied, redirects refused, every navigation refused but its own page.
-  Measured in the harness, each guard removed alone: another token's page, the web, `data:` and a local
+  **A page load the hook refused is loaded again** (`PLAYER_PAGE_RELOADS`, 3, only the page main asked for
+  last, only `ERR_BLOCKED_BY_CLIENT`): a load that replaces one still under way (［ここで再生］: 準備 → 選ぶ →
+  準備 → 再生 within milliseconds) sometimes reaches the hook without `webContentsId`, and the player stayed
+  blank with no button (measured under CPU load, 2026-11-29; CI's flaky 「plays and seeks」). The hook itself
+  is unchanged. Still refused after the 3 loads, the shell tells the players once (`onPageRefused`), which
+  show 「動画を読み込めませんでした。」［もう一度］ (a playing player's streams end; while 準備 / 選ぶ the next page
+  comes anyway); that page refused the same way stays as it is (no loop). A page main did not ask for (the
+  player going to an older address of its own) is never loaded again. Measured: a load replaced by the next
+  one before it failed fires no `did-fail-load` at all, and the refused page's `validatedURL` is exactly the
+  address main asked for. Measured in the harness, each guard removed alone: another token's page, the web, `data:` and a local
   address stayed refused; `window.open` made no window; a redirect of its page was not followed;
   `Notification.requestPermission()` answered `denied`; the session's own request to a local listener
   reached nothing (the hook; Chromium never proxies loopback); the document session and the app's do not
@@ -580,7 +589,10 @@ rewritten — the player is ACB's UI, a view of its own drawn above the document
   B's answers paced and cut at a 1.5 s deadline: placement at zoom 1 / scrolled / 150 % / cut beside a
   50 MB `src`, no player for a script's element, hidden with the document, the keyboard kept (a skip only
   off CI when the window cannot hold the focus), not picked → pick → plays and seeks with 206s and the
-  member's cookie, hidden → paused → ［続きから再生］ at 0.5 s, the shell's guards above, the player over the
+  member's cookie, the playing page's first load refused by the hook and loaded again (a page the hook
+  keeps refusing: 1 + 3 loads, then ［もう一度］ 1 + 3, then nothing; a refused older address the player went
+  to by itself: asked once), hidden → paused →
+  ［続きから再生］ at 0.5 s, the shell's guards above, the player over the
   area on top, a cut answer asked again with the video going on, another player's page refused with no
   request to the server, closing aborts a paced stream; a second run without `standard` does not play);
   `ipc-window-links.test.ts` (privileges, not on the app's session); `editor-html-viewer.spec.ts` (the
@@ -593,7 +605,9 @@ rewritten — the player is ACB's UI, a view of its own drawn above the document
   the overlay raised, closed on another page (the player over the area too), closed with the view, the pick
   when not picked, the `view` purpose sent (`google-drive-ux.test.ts`); in Electron: the chunks joined,
   `standard`, the embed's box times the document's zoom, the navigation lock, the redirect guard, the
-  popup handler, the permission handlers, the session hook, the overlay raised, the pause on hide. Not shown
+  popup handler, the permission handlers, the session hook, the page loaded again after the hook refused it (its limit, only the page main asked
+  for last, the players told),
+  the overlay raised, the pause on hide. Not shown
   on a developer's Mac (the test window could not hold the system's focus there): the player's focus guard —
   the keyboard test fails rather than skips on CI. Kept on
   purpose (layers no single removal shows): the id check of the boxes read (main asks only its own ids),
