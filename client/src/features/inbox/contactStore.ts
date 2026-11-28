@@ -41,6 +41,8 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
   /** The stamp each id was last asked at, and the newest read of it (an older answer landing later never wins). */
   const asked = new Map<string, string>()
   const newest = new Map<string, number>()
+  /** The read (its ticket) whose answer each id shows now. */
+  const written = new Map<string, number>()
   let company: string | null = null
   let seq = 0
   const listeners = new Set<() => void>()
@@ -49,7 +51,7 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
   const forCompany = (companyId: string) => {
     if (company === companyId) return
     company = companyId
-    entries = new Map(); asked.clear(); newest.clear()
+    entries = new Map(); asked.clear(); newest.clear(); written.clear()
   }
 
   function start(companyId: string, recordId: string) {
@@ -59,13 +61,20 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
     void read(companyId, recordId).then(r => r, () => ({ success: false as const, gone: false as const, offline: true, error: '連絡を読めませんでした' })).then(r => {
       if (!era.holds(started) || company !== companyId || newest.get(recordId) !== ticket) return
       entries = new Map(entries)
+      // Each id keeps the read that started last: an older read through another id of the same contact (its
+      // 返事のお願い, read for a notice before the card's press) never puts back what a newer one replaced.
+      const put = (id: string, entry: ContactEntry) => {
+        if ((written.get(id) ?? 0) > ticket) return
+        written.set(id, ticket)
+        entries.set(id, entry)
+      }
       if (r.success) {
         // One contact answers for its interaction and every 返事のお願い of it: a row keyed by either finds it.
         const shown: ContactEntry = { kind: 'shown', view: r.contact }
-        for (const id of [recordId, r.contact.interaction.id, ...r.contact.replyRequests.map(x => x.id)]) entries.set(id, shown)
-      } else if (r.gone) entries.set(recordId, { kind: 'gone' })
+        for (const id of [recordId, r.contact.interaction.id, ...r.contact.replyRequests.map(x => x.id)]) put(id, shown)
+      } else if (r.gone) put(recordId, { kind: 'gone' })
       // A failure keeps what was shown (offline must not empty the card); only a first read shows the failure.
-      else if (!entries.has(recordId)) entries.set(recordId, { kind: 'failed', offline: r.offline, error: r.error })
+      else if (!entries.has(recordId)) put(recordId, { kind: 'failed', offline: r.offline, error: r.error })
       notify()
     })
   }

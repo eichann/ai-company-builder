@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ArrowCounterClockwise, CheckSquare, Square } from '@phosphor-icons/react'
 import { Button, StatusBadge, type StatusBadgeVariant } from '../../../shared/ui/primitives'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { CALM, NEXT_STEP } from '../../../../shared/thing-words'
 import { finishContact, undoContactFinish, type ContactWrites } from '../api'
-import { contactLook, finishRequestOf, type ContactButton, type ContactTone } from '../contactModel'
-import { pressFinish, pressUndo, type ContactSaid } from '../contactPress'
+import { contactLook, finishRequestOf, undoAtShown, type ContactButton, type ContactTone } from '../contactModel'
+import { pressFinish, pressUndo, type ContactResend, type ContactSaid } from '../contactPress'
 import type { ContactStore, EraPort } from '../contactStore'
 import { useContacts } from '../hooks/useContacts'
 
@@ -42,6 +42,8 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, name
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<ContactSaid | null>(null)
   const [asking, setAsking] = useState<Extract<ContactButton, { kind: 'finish' }> | null>(null)
+  // Two clicks before the next draw are one press (the state above is the draw's).
+  const pressing = useRef(false)
 
   if (!entry) return <p className="text-small text-text-muted">{CALM.loading}</p>
   if (entry.kind === 'gone') return <p className="text-small text-text-muted">この連絡は見つからないか、見られなくなりました。</p>
@@ -50,21 +52,27 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, name
   const look = contactLook(view, nameOf)
   const reread = () => store.refresh(companyId, contactId)
 
-  const finish = async (b: Extract<ContactButton, { kind: 'finish' }>, note?: string) => {
-    const request = finishRequestOf(view, b, note)
-    if (!request || busy) return
-    const hadDrafts = (view.replyRequests.find(r => r.id === b.replyId)?.drafts.length ?? 0) > 0
+  const run = async (work: () => Promise<void>) => {
+    if (pressing.current) return
+    pressing.current = true
     setBusy(true)
+    try { await work() } finally { pressing.current = false; setBusy(false) }
+  }
+  const send = (press: ContactResend) => run(async () => {
     setSaid(null)
-    await pressFinish(req => finishContact(companyId, view.interaction.id, req, writes), request, b.end, hadDrafts, { era, say: setSaid, reread })
-    setBusy(false)
+    await pressFinish(req => finishContact(companyId, view.interaction.id, req, writes), press, { era, say: setSaid, reread })
+  })
+  const finish = (b: Extract<ContactButton, { kind: 'finish' }>, note?: string) => {
+    const request = finishRequestOf(view, b, note)
+    if (!request) return
+    const hadDrafts = (view.replyRequests.find(r => r.id === b.replyId)?.drafts.length ?? 0) > 0
+    return send({ request, end: b.end, hadDrafts })
   }
-  const undo = async () => {
-    if (!said?.undo || busy) return
-    setBusy(true)
-    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), said.undo, { era, say: setSaid, reread })
-    setBusy(false)
-  }
+  const undo = () => run(async () => {
+    if (!said?.undo) return
+    // At the versions shown now: the card read the contact again after the press.
+    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), undoAtShown(said.undo, view), { era, say: setSaid, reread })
+  })
   const press = (b: ContactButton) => {
     if (b.kind === 'checkDraft') onCheckDraft(b.draftId)
     else if (b.asksReason) setAsking(b)
@@ -93,6 +101,7 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, name
           {said?.undo && (
             <Button variant="secondary" disabled={busy} onClick={() => { void undo() }}><ArrowCounterClockwise size={12} aria-hidden />{NEXT_STEP.undoFinish}</Button>
           )}
+          {said?.resend && <Button variant="secondary" disabled={busy} onClick={() => { void send(said.resend!) }}>もう一度送る</Button>}
         </div>
       )}
       {said && <p role={said.refused ? 'alert' : 'status'} className={`text-small ${said.refused ? 'text-danger-text' : 'text-success-text'}`}>{said.text}</p>}

@@ -135,6 +135,21 @@ export function finishRequestOf(view: ContactView, button: Extract<ContactButton
   }
 }
 
+/**
+ * ［取り消す］ at the versions the card shows now (it read the contact again after the press): a note written after the
+ * answer — 「Gmail でもアーカイブしました」 on the contact — moves the version without changing anything, and the server
+ * still refuses an undo when something did change since the entry (`CHANGED_SINCE`). A part the view no longer has keeps
+ * the answer's version.
+ */
+export function undoAtShown(req: ContactUndoRequest, view: ContactView | undefined): ContactUndoRequest {
+  if (!view) return req
+  const reply = view.replyRequests.find(r => r.id === req.replyRequest.id)
+  return {
+    ...(req.interaction ? { interaction: { ...req.interaction, expectedVersion: view.interaction.version } } : {}),
+    replyRequest: { ...req.replyRequest, expectedVersion: reply?.version ?? req.replyRequest.expectedVersion },
+  }
+}
+
 /** What ［取り消す］ sends: each part's entry and the record's version now. Nothing to take back → null. */
 export function undoRequestOf(r: ContactFinishResult): ContactUndoRequest | null {
   const rr = r.replyRequest
@@ -171,7 +186,9 @@ export function refusalWords(r: ContactRefusal, pressed: 'finish' | 'undo'): str
   if (r.offline) return `${r.error}（届いたかどうかは、読み直した表示で確かめてください）`
   if (r.gone) return 'この連絡は、もう見られません'
   switch (r.code) {
-    case 'VERSION_CONFLICT': return 'ほかの人か AI が先に変えたため、どちらも変えていません。最新を読み込みました。確かめてから、もう一度押してください'
+    case 'VERSION_CONFLICT': return pressed === 'finish'
+      ? 'ほかの人か AI が先に変えたため、どちらも変えていません。最新を読み込みました。確かめてから、もう一度押してください'
+      : 'ほかの人か AI が先に変えたため、取り消せませんでした（どちらもそのままです）。最新を読み込みました'
     case 'CHANGED_SINCE': return 'そのあとに変わったため、取り消せませんでした（どちらもそのままです）。最新を読み込みました'
     case 'NOT_THIS_CONTACT': return 'この返事のお願いは、この連絡のものではなくなりました。最新を読み込みました'
     case 'NOT_A_FINISH': return 'この変更は、ここからは取り消せません（どちらもそのままです）'

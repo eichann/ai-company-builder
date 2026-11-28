@@ -30,14 +30,14 @@ test('［返した］ answered after another company was opened (or a sign-out) 
   const sent = later<ContactFinishAnswer>()
   const said: ContactSaid[] = []
   let reads = 0
-  const pressed = pressFinish(() => sent.promise, request, 'replied_elsewhere', false, { say: s => said.push(s), reread: () => { reads += 1 } })
+  const pressed = pressFinish(() => sent.promise, { request, end: 'replied_elsewhere', hadDrafts: false }, { say: s => said.push(s), reread: () => { reads += 1 } })
   endCompanyEra()
   sent.answer(done)
   await pressed
   assert.equal(said.length, 0)
   assert.equal(reads, 0)
   // In the same company the answer is shown with its ［取り消す］ and the contact read again.
-  await pressFinish(async () => done, request, 'replied_elsewhere', false, { say: s => said.push(s), reread: () => { reads += 1 } })
+  await pressFinish(async () => done, { request, end: 'replied_elsewhere', hadDrafts: false }, { say: s => said.push(s), reread: () => { reads += 1 } })
   assert.equal(said.length, 1)
   assert.deepEqual(said[0].undo, { replyRequest: { id: 'reply_request-aaa111', version: 5, expectedVersion: 5 } })
   assert.equal(reads, 1)
@@ -86,4 +86,38 @@ test('one read answers for the contact and every 返事のお願い of it, and a
   await new Promise(r => setTimeout(r, 0))
   assert.equal(store.view('reply_request-aaa111')?.interaction.version, 9)
   assert.equal(store.view('interaction-bbb222')?.interaction.version, 9)
+})
+
+test('an older read through the 返事のお願い never puts back the contact as it was before the card\'s press (Codex review)', async () => {
+  const older = later<ContactReadResult>()
+  const newer = later<ContactReadResult>()
+  const store = createContactStore((_companyId, id) => (id === 'reply_request-aaa111' ? older.promise : newer.promise))
+  // The row's notices name the 返事のお願い; then the card presses and reads the contact again through its interaction.
+  store.want('co-a', ['reply_request-aaa111@3'])
+  store.refresh('co-a', 'interaction-bbb222')
+  store.want('co-a', ['interaction-bbb222@card'])
+  newer.answer({ success: true, contact: { ...view, interaction: { ...view.interaction, version: 9 } } })
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(store.view('reply_request-aaa111')?.interaction.version, 9)
+  older.answer({ success: true, contact: view })
+  await new Promise(r => setTimeout(r, 0))
+  for (const id of ['interaction-bbb222', 'reply_request-aaa111']) assert.equal(store.view(id)?.interaction.version, 9, id)
+})
+
+test('［取り消す］ that did not reach the server stays to be pressed again; a refused one does not (Codex review)', async () => {
+  const undo = { replyRequest: { id: 'reply_request-aaa111', version: 5, expectedVersion: 5 } }
+  const said: ContactSaid[] = []
+  const deps = { say: (s: ContactSaid) => said.push(s), reread: () => {} }
+  await pressUndo(async () => ({ success: false, offline: true, gone: false, code: null, part: null, error: 'つながりません' }), undo, deps)
+  await pressUndo(async () => ({ success: false, offline: false, gone: false, code: 'CHANGED_SINCE', part: 'replyRequest', error: '変わりました' }), undo, deps)
+  assert.deepEqual(said.map(s => s.undo), [undo, null])
+})
+
+test('a ［返した］ whose answer was lost can be sent again as it was; a refused one cannot (independent review)', async () => {
+  const press = { request, end: 'replied_elsewhere' as const, hadDrafts: false }
+  const said: ContactSaid[] = []
+  const deps = { say: (s: ContactSaid) => said.push(s), reread: () => {} }
+  await pressFinish(async () => ({ success: false, offline: true, gone: false, code: null, part: null, error: 'つながりません' }), press, deps)
+  await pressFinish(async () => ({ success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'interaction', error: '先に変えました' }), press, deps)
+  assert.deepEqual(said.map(s => s.resend), [press, undefined])
 })

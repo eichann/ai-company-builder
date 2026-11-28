@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ContactReplyView, ContactView } from '../../../shared/contact-card'
-import { contactLook, contactPlace, finishRequestOf, refusalWords, undoRequestOf, type ContactButton } from './contactModel'
+import { contactLook, contactPlace, finishRequestOf, refusalWords, undoAtShown, undoRequestOf, type ContactButton } from './contactModel'
 
 const NONE = { replied_elsewhere: false, close: false, drop: false }
 const ALL = { replied_elsewhere: true, close: true, drop: true }
@@ -103,4 +103,12 @@ test('a contact whose reply is over but a やること is left goes to 「確認
   assert.equal(contactPlace(contact([reply()], tasks)), null)
   assert.equal(contactPlace(contact([reply({ state: 'closed', may: NONE })], [tasks[1]])), null)
   assert.equal(contactPlace(contact([], tasks)), null)
+})
+
+test('［取り消す］ is sent at the versions the card shows now, so a note written after the press (Gmail\'s archive) does not refuse it (independent review)', () => {
+  const req = { interaction: { version: 8, expectedVersion: 8 }, replyRequest: { id: 'reply_request-aaa111', version: 5, expectedVersion: 5 } }
+  const shown = contact([reply({ state: 'closed', version: 5, may: NONE })], [], { version: 9 })
+  assert.deepEqual(undoAtShown(req, shown), { interaction: { version: 8, expectedVersion: 9 }, replyRequest: { id: 'reply_request-aaa111', version: 5, expectedVersion: 5 } })
+  // The entry to take back is never changed; nothing shown → as answered.
+  assert.deepEqual(undoAtShown(req, undefined), req)
 })

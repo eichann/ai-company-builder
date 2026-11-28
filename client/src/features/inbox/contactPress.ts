@@ -6,8 +6,15 @@ import type { ContactFinishAnswer, ContactFinishRequest, ContactReplyEnd, Contac
 import { finishedWords, refusalWords, undoneWords, undoRequestOf } from './contactModel'
 import { SCREEN_ERA, type EraPort } from './contactStore'
 
-/** What the card says after a press: the words, whether it was refused, and what ［取り消す］ would send. */
-export interface ContactSaid { text: string; refused: boolean; undo: ContactUndoRequest | null }
+/** A finish to send again exactly as it was: its answer was lost, and it may have been written. */
+export interface ContactResend { request: ContactFinishRequest; end: ContactReplyEnd; hadDrafts: boolean }
+
+/**
+ * What the card says after a press: the words, whether it was refused, what ［取り消す］ would send, and — when the press
+ * did not reach the server, or its answer was lost — the same press to send again (the server answers `already` for a
+ * part it wrote then, with the entry to take back).
+ */
+export interface ContactSaid { text: string; refused: boolean; undo: ContactUndoRequest | null; resend?: ContactResend }
 
 interface PressDeps {
   era?: EraPort
@@ -17,16 +24,14 @@ interface PressDeps {
   reread: () => void
 }
 
-export async function pressFinish(
-  send: (request: ContactFinishRequest) => Promise<ContactFinishAnswer>, request: ContactFinishRequest, end: ContactReplyEnd, hadDrafts: boolean, deps: PressDeps,
-): Promise<void> {
+export async function pressFinish(send: (request: ContactFinishRequest) => Promise<ContactFinishAnswer>, press: ContactResend, deps: PressDeps): Promise<void> {
   const era = deps.era ?? SCREEN_ERA
   const started = era.now()
-  const r = await send(request)
+  const r = await send(press.request)
   if (!era.holds(started)) return
   deps.say(r.success
-    ? { text: finishedWords(end, r.result, hadDrafts), refused: false, undo: undoRequestOf(r.result) }
-    : { text: refusalWords(r, 'finish'), refused: true, undo: null })
+    ? { text: finishedWords(press.end, r.result, press.hadDrafts), refused: false, undo: undoRequestOf(r.result) }
+    : { text: refusalWords(r, 'finish'), refused: true, undo: null, ...(r.offline ? { resend: press } : {}) })
   deps.reread()
 }
 
@@ -35,7 +40,8 @@ export async function pressUndo(send: (request: ContactUndoRequest) => Promise<C
   const started = era.now()
   const r = await send(request)
   if (!era.holds(started)) return
-  // A refused undo keeps nothing to undo: the card reads again and offers what is true now.
-  deps.say(r.success ? { text: undoneWords(r.result), refused: false, undo: null } : { text: refusalWords(r, 'undo'), refused: true, undo: null })
+  // A refused undo keeps nothing to undo (the card reads again and offers what is true now); one that did not reach the
+  // server keeps ［取り消す］ to press again (the server answers `already` for a part taken back meanwhile).
+  deps.say(r.success ? { text: undoneWords(r.result), refused: false, undo: null } : { text: refusalWords(r, 'undo'), refused: true, undo: r.offline ? request : null })
   deps.reread()
 }

@@ -159,7 +159,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     ? <InboxCardDialog title="承認のお願い（ブラウザ操作）" note="一覧からは任せられません。サイトから読み取った中身と届く時を、カードで確かめてから押してください。" onClose={closeCard}>{browserPlans?.renderCard(card.id)}</InboxCardDialog>
     : card.kind === 'contact'
     ? <InboxCardDialog title={CONTACT_NAME} note="来た連絡と、その返事・生まれたやることを一緒に見られます。" onClose={closeCard}>
-        <ContactCard companyId={companyId} contactId={card.id} store={contacts} readKey={card.readKey} writes={contactPorts?.writes} nameOf={memberName}
+        <ContactCard key={card.id} companyId={companyId} contactId={card.id} store={contacts} readKey={card.readKey} writes={contactPorts?.writes} nameOf={memberName}
           onOpenTask={id => { setCard(null); onOpenRecord(id) }} onOpenRecord={id => { setCard(null); onOpenRecord(id) }}
           onCheckDraft={id => setCard({ kind: 'mail', id })} />
       </InboxCardDialog>

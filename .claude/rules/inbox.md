@@ -472,7 +472,8 @@ pressing each record's own action.
   `ContactWrites` (`api.ts`); `contactModel.ts` (pure: the status in one line, which buttons — `contactLook` —, the
   request a press sends, what ［取り消す］ sends, the words after a press or a refusal, `contactPlace`); `contactStore.ts`
   (the contacts as last read, one store per inbox shared by the rows and the card; reads bound to the company era,
-  `shared/lib/companyEra.ts`, and the newest read of an id wins); `contactPress.ts` (a press and its undo, era-bound:
+  `shared/lib/companyEra.ts`; each id shows the read that started last, also through another id of the same contact — an
+  older read of its 返事のお願い never puts back what the card's read after a press replaced); `contactPress.ts` (a press and its undo, era-bound:
   an answer after a company change or a sign-out says nothing and reads nothing); `hooks/useContacts.ts` (the reads
   start from the subscription, no effect); `components/ContactCard.tsx` (props in: the store, the ports, `nameOf`,
   `onOpenTask` / `onCheckDraft` / `onOpenRecord` — it knows no frame, so the 連絡 destination of stage 5 can place it as
@@ -483,9 +484,13 @@ pressing each record's own action.
   a dialog). A button whose action the server did not allow is not drawn; someone else's open 返事のお願い is one read-only
   line (「田中さんが返します（期限 12/2）」, the name from the task list's members through AppShell, else 「ほかの人」). The card
   acts on the first open 返事のお願い the member may finish. ［取り消す］ after a press sends both entries
-  (`undoRequestOf`: the contact's only when its part was written); every refusal says 「どちらも変えていません」 /
-  「どちらもそのままです」 (both or neither); offline says to check what is shown after the card reads again; every press
-  reads the contact again, answered or not. ［詳しく見る］ opens the 来た連絡's record card. A contact with no
+  (`undoRequestOf`: the contact's only when its part was written) at the versions the card shows then (`undoAtShown`: a note
+  written after the answer, such as 「Gmail でもアーカイブしました」, moves the contact's version without changing it; the
+  server's `CHANGED_SINCE` still refuses a real change); every refusal says 「どちらも変えていません」 / 「どちらもそのままです」
+  (both or neither); a press that did not reach the server (or whose answer was lost) says to check what is shown and
+  offers ［もう一度送る］ — the same request; the server answers `already` for a part it wrote, with the entry to undo — and
+  an undo not reached keeps ［取り消す］; two clicks before the next draw are one press; every press reads the contact again,
+  answered or not. ［詳しく見る］ opens the 来た連絡's record card. A contact with no
   返事のお願い has no button here (its ［済んだ］ / ［取り込まない］ stay on the record card).
 - **One row** (`model.ts`): a notice about an `interaction` or a `reply_request` whose contact the store has read becomes
   the row `contact:<interaction id>` (`asContact`: source 「連絡」, the contact's title, `openContact`); its badge is the
