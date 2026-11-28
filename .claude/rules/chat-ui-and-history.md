@@ -590,7 +590,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   - **Links**: the frame's `<base target="_blank">` makes a pressed web link (only `http(s)` survive the cleaning)
     ask for a new window — the one thing `allow-popups` permits —, which the app's window-open handler opens in the
     member's browser (`electron-adapter.ts` `keepAppPageInWindow`, `webLinkForBrowser`: the path of every chat link).
-    The frame itself never navigates (no `target` is kept, `_top` is refused by the sandbox).
+    The frame itself never navigates (no `target` is kept, `_top` is refused by the sandbox), and **main refuses it
+    too**: `keepAppPageInWindow`'s `will-frame-navigate` lets a frame showing a srcdoc go only to a srcdoc again
+    (`client/shared/srcdoc-frames.ts`; `ipc-and-main-process.md` "Windows"; `tests/reply-frame-electron.test.ts`).
   - **Height** (no scroll inside): nothing can leave the shown frame to say how tall it is, so the chat lays the same
     document out in **one hidden copy** (`measureReply`, one per window, one reply at a time): `sandbox="allow-same-origin"`
     (still no script), the same policy, `inert`, `aria-hidden`, off screen and invisible — never pressed, hovered or

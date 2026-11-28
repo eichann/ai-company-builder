@@ -89,3 +89,26 @@ test('a plugin\'s frame cannot navigate, and its window.open never reaches the b
   assert.equal(main.navigate(page), true)
   assert.deepEqual(fake.openedExternal, [])
 })
+
+// A rich reply's frame (chat-ui-and-history.md "Rich replies: the reply's closed frame"): a frame showing a srcdoc
+// stays on it — main's backstop behind the renderer's guards; a new srcdoc from the app still loads, and the plugin
+// frames and the PDF preview keep their own rules. The real engine: tests/reply-frame-electron.test.ts.
+test('a frame showing a srcdoc never navigates away from it; a new srcdoc, plugin frames and the PDF preview are unchanged', () => {
+  const main = BrowserWindow.all[0].webContents
+  const frameNavigate = (frameUrl: string, url: string) => {
+    let prevented = false
+    main.emit('will-frame-navigate', { url, isMainFrame: false, frame: { url: frameUrl }, preventDefault: () => { prevented = true } })
+    return prevented
+  }
+  for (const url of ['https://evil.example/x', 'http://127.0.0.1:3001/', 'about:blank', 'data:text/html,x', 'file:///etc/passwd', 'acb-plugin://planning/0.1.0/ui/index.html', 'javascript:alert(1)']) {
+    assert.equal(frameNavigate('about:srcdoc', url), true, url)
+  }
+  assert.equal(frameNavigate('about:srcdoc', 'about:srcdoc'), false, 'the app gives it a new reply')
+  assert.equal(frameNavigate('', 'about:srcdoc'), false, 'a new frame loads its srcdoc')
+  assert.equal(frameNavigate('about:blank', 'about:srcdoc'), false)
+  // The PDF preview's frame navigates itself (Chromium's viewer).
+  assert.equal(frameNavigate('', 'local-file:///Users/me/会社/資料.pdf'), false)
+  assert.equal(frameNavigate('local-file:///Users/me/会社/資料.pdf', 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html'), false)
+  assert.equal(frameNavigate('', 'acb-plugin://planning/0.1.0/ui/index.html'), false)
+  assert.equal(frameNavigate('acb-plugin://planning/0.1.0/ui/index.html', 'https://example.com/'), true)
+})

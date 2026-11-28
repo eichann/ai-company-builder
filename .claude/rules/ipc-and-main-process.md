@@ -207,9 +207,16 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `http:` / `https:`, opens in the member's own browser (`webLinkForBrowser`,
   `electron/external-url.ts`; never `file:`, `javascript:`, `mailto:` or a custom scheme). Owner
   decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
-  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. The main window alone adds
+  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. Subframes
+  (`will-frame-navigate`): a plugin's frame navigates nowhere (`plugin-frame.md`), and **a frame showing a srcdoc —
+  a rich reply's frame, its hidden copy, the diagrams' drawing frame — only to a srcdoc again**
+  (`client/shared/srcdoc-frames.ts` `srcdocFrameNavigationAllowed`; main's backstop behind the renderer's guards, owner
+  decision 2026-11-28: a page loaded there would arrive without the frame's policy); every other frame, the PDF
+  preview's included, is unchanged. The main window alone adds
   `backgroundThrottling: false` (the automatic 「AI の番」 runs there while it is behind or
-  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
+  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`,
+  `tests/reply-frame-electron.test.ts` (real Electron: a press on a link that would move a sandboxed srcdoc frame is
+  refused and reaches no listener; a new srcdoc still loads; the same window without the guard does navigate).
   「ブラウザ操作」's window is not an app window: its own preferences (no preload), session and guards, and
   it never hands a link to the member's browser (`browser-window.ts`, `agent-browser.md`).
 - **Web permissions are default deny.** Electron grants every Chromium permission request
