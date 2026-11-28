@@ -292,6 +292,8 @@ installElectronAPI({
   // The synchronous save before a send, recorded in order with the requests.
   flushChatSession: (_company: string, session: ChatSession) => {
     if (manual) control.requests.push({ path: 'flushChatSession', body: JSON.parse(JSON.stringify(session)) })
+    // __acbChat.failNextFlush: the next synchronous save is refused (another screen saved the consultation).
+    if (control.failNextFlush) { control.failNextFlush = false; return { status: 'conflict', revision: 1 } as ChatSaveReceipt }
     return { status: 'saved', revision: 1 } as ChatSaveReceipt
   },
   voiceInput: {
@@ -357,6 +359,7 @@ const control = {
   steerStatus: 'delivered' as SteerStatus,
   suggestion: null as string | null,
   open: () => current !== null,
+  failNextFlush: false,
   /** The member switches light / dark (the title bar's 表示). */
   toggleTheme: () => useAppStore.getState().toggleTheme(),
   send(chunk: unknown) { current?.enqueue(sse(chunk)) },

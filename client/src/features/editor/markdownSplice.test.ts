@@ -775,6 +775,9 @@ test('the AI is handed the blocks holding the selection byte for byte and at mos
   assert.ok(!passage.before.includes('tags:'), 'the `---` block is not handed over')
   assert.ok(passage.after.startsWith('\n\n1. 研修資料の下書きを作る'))
   assert.ok(passage.markdown.length + passage.before.length + passage.after.length < MEETING.length)
+  // A selection ending where a list's first words start (inside the list, deeper than its start) does not take the list.
+  const heading = aiFix.selectedPassage(view, spliced, { from: rangeOf(view, '決まったこと').from, to: rangeOf(view, 'A社の新人研修').from })
+  assert.equal(heading?.markdown, '## 決まったこと')
   // A selection over two blocks takes both, and nothing past them.
   const two = aiFix.selectedPassage(view, spliced, { from: rangeOf(view, '進め方のメモ').from, to: rangeOf(view, '要望があり').to })
   assert.ok(two?.markdown.startsWith('## 進め方のメモ'), two?.markdown)
@@ -821,6 +824,8 @@ test('a fix is refused when the document changed while the AI was asked, and whe
   const fresh = aiFix.selectedPassage(view, spliced, rangeOf(view, '12月第2週'))!
   assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '本文です[^1]。\n\n[^1]: 注'), { ok: false, reason: 'unwritable' })
   assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '   '), { ok: false, reason: 'unwritable' })
+  // Raw HTML the passage did not have (the preview never shows it): never offered.
+  assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, fresh, '* 直した<img src="https://example.com/t.png">'), { ok: false, reason: 'html' })
   // Nothing of it was written.
   assert.equal(saved(spliced, view), MEETING.replace('名刺の発注', '名刺の発注（50枚）'))
 })

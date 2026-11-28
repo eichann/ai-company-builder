@@ -27,7 +27,7 @@
 // budget above. Owner decision pending in the pull request that added it (the alternative: count it and raise the budget).
 // 2026-11-29: 3.2 → 3.3 MiB (owner's standing rule: take the recommendation; asked in the pull request). next/ux-stage-4
 // stood at 3,353,264 bytes (2 KB under); 「AI に直してもらう」 (UX check 9 PR5: the card, the request and its words to
-// the AI, +14.6 KB) passed it. Lazy chunks count here, so splitting would not lower it; the 50 KB growth guard stays.
+// the AI, +15.1 KB) passed it. Lazy chunks count here, so splitting would not lower it; the 50 KB growth guard stays.
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N] [--base baseDistDir] [--max-growth-kb N]
 import fs from 'node:fs'

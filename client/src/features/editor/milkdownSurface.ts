@@ -110,6 +110,8 @@ export const milkdownEngine: InPlaceEngine = {
     let destroyed = false
     // The selection as last shown: a box for a link's address takes the focus, the change still applies to it.
     let lastRange: { from: number; to: number } | null = null
+    // An adopted AI fix: the write chosen for exactly that document (the AI's own Markdown or the smallest edit).
+    let adopted: { doc: PMNode; write: NonNullable<ReturnType<SplicedDocument['write']>> } | null = null
     const reported = { selection: '', menu: '', table: '' }
     const report = <T>(kind: keyof typeof reported, value: T, tell: (v: T) => void) => {
       const key = JSON.stringify(value)
@@ -133,7 +135,9 @@ export const milkdownEngine: InPlaceEngine = {
           if (!spliced || !shownDoc || doc === shownDoc) return
           // A write that throws (the editor's writer meeting a shape it cannot write) is not writable either.
           let write: ReturnType<SplicedDocument['write']> = null
-          try { write = spliced.write(doc) } catch { write = null }
+          const chosen = adopted && adopted.doc === doc ? adopted.write : null
+          adopted = null
+          try { write = chosen ?? spliced.write(doc) } catch { write = null }
           if (write) {
             write.commit()
             shownDoc = doc
@@ -253,9 +257,10 @@ export const milkdownEngine: InPlaceEngine = {
           const preview = previewFix(view, spliced, shownDoc, passage, markdown)
           const fixed = fixedDocument(view, spliced, shownDoc, passage, markdown)
           if (!preview.ok || !fixed.ok) return preview.ok ? { ok: false, reason: 'unwritable' } : preview
-          // Written first (the baseline becomes the fixed document), then shown: the tracker then finds nothing more to write.
-          fixed.write.commit()
+          // Written by the tracker like typing, with the write chosen for exactly this document.
+          adopted = { doc: fixed.tr.doc, write: fixed.write }
           view.dispatch(fixed.tr)
+          adopted = null
           return view.state.doc === shownDoc ? preview : { ok: false, reason: 'unwritable' }
         },
       },

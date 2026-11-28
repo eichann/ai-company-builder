@@ -13,6 +13,8 @@ type Control = {
   steerStatus: 'delivered' | 'not-delivered' | 'unavailable'
   suggestion: string | null
   open(): boolean
+  /** The next synchronous save of a consultation is refused. */
+  failNextFlush: boolean
   send(chunk: unknown): void
   text(id: string, delta: string): void
   finish(): void
@@ -786,6 +788,14 @@ test('chat.askToFix: sent into the shown consultation and kept; answered with th
   const saved = await chat(page, c => JSON.stringify(c.requests.filter(r => r.path === 'flushChatSession').at(-1)?.body?.messages))
   expect(saved).toContain('【ここから直す所')
   await expect(page.getByText('丁寧にしました。')).toBeVisible()
+
+  // What the member is typing stays theirs: a request whose save is refused neither replaces nor clears it.
+  await input(page).click()
+  await page.keyboard.insertText('来月の予算について')
+  await chat(page, c => { c.failNextFlush = true })
+  await ask(3)
+  await expect.poll(() => answerOf(3)).toEqual({ ok: false, reason: 'failed' })
+  await typed(page).toBe('来月の予算について')
 })
 
 // 「相談する」 on a task (tasks-ui.md "Consulting about a task"): a new consultation keeps the task as

@@ -86,13 +86,22 @@ test('asking hands over only the passage and a little around it; the fix shows r
   await expect.poll(() => saved(page)).toBe(TEXT.replace('までに送る', 'までにお送りします'))
 })
 
-test('the fix is drawn as the chat draws a reply: no raw HTML, no script', async ({ page }) => {
+test('the fix is drawn as the chat draws a reply (no image loaded); raw HTML the passage did not have is never offered', async ({ page }) => {
   await open(page)
   await ask(page, '来週は研修です', '3行に縮めて')
+  await answer(page, { ok: true, reply: '```acb-fix\n予定です。**研修**です。![図](https://example.com/t.png)\n```' })
+  await expect(card(page).locator('[data-ai-fix-preview] strong')).toHaveText('研修')
+  await expect(card(page).locator('[data-ai-fix-preview]')).toContainText('画像「図」')
+  expect(await card(page).locator('[data-ai-fix-preview] img').count()).toBe(0)
+  await card(page).getByRole('button', { name: 'やめる' }).click()
+
+  await ask(page, '来週は研修です', '3行に縮めて')
   await answer(page, { ok: true, reply: '```acb-fix\n予定です。<img src=x onerror="window.__pwned=1"><b>太</b>\n```' })
-  await expect(card(page).locator('[data-ai-fix-preview]')).toContainText('予定です。')
-  expect(await card(page).locator('[data-ai-fix-preview] img, [data-ai-fix-preview] b').count()).toBe(0)
+  await expect(card(page)).toContainText('文書になかった HTML の書き方が入っている')
+  await expect(card(page).getByRole('button', { name: '採用' })).toHaveCount(0)
+  expect(await page.locator('[data-ai-fix] img, [data-ai-fix] b').count()).toBe(0)
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined()
+  expect(await saved(page)).toBe(TEXT)
 })
 
 test('［やめる］ changes nothing, whether the AI answered or not; a refusal is said in the card', async ({ page }) => {

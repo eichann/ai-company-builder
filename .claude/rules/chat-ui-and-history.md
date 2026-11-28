@@ -106,8 +106,8 @@ one place an added agent brings its own controls; everything else asks the regis
   fixes") is the request `inlineFix`: the shown tab sends it into **its current consultation** (not a new one) unless
   anything of the tab runs or waits (`tabBusy`; then answered `busy`), waits for the turn that carried it to end
   (`inlineFixRef`, settled in `onFinish` with `inlineFixTurnAnswer`) and answers the command with the reply; a send that
-  never went out (its save failed) is answered `failed`. A second request replaces one still waiting for the tab, which is
-  answered `busy`.
+  never went out (its save failed) is answered `failed`, and the member's draft in the composer is neither cleared nor
+  replaced by it (`besideComposer`). Any request that replaces one still waiting for the tab answers that one `busy`.
 - **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
   assumes one chat on screen:
   - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on

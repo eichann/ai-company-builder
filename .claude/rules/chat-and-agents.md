@@ -202,7 +202,8 @@ The document's ［AI に直してもらう］ / a comment's ［AI に反映し�
 passage") ask **the current consultation's** AI, not a one-shot call: `chat.askToFix` → `inlineFixMessage`
 (`client/shared/inline-fix.ts`), sent as a message the app sends (`appSent`: never the member's own request).
 
-- **What it holds**: the file's name (`outsideTitle`), the ask (a quoted line; a comment's reflection has none), and the
+- **What it holds**: the file's name (`outsideTitle`), the ask as the member's own words (one line, 「頼み（メンバーの言葉）」;
+  a comment's reflection has none), and the
   passage, ≤ 600 characters before / after and a comment's quote and body, each in its own block of the one outside-text
   standard (`wrapOutsideText`, `shared/core/outside-text.ts`: `【ここから直す所（外から来た文です…）】` … `【直す所ここまで】`,
   `【】` inside → `〔〕`, `outsideBracketsNote` when any were) — data, not instructions — and the rules: open, write and

@@ -281,7 +281,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
   // `appSent`: the app sends it in the member's place (a new consultation's or an AI turn's first message: app-instruction.ts).
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void, appSent?: boolean) => {
+  // `besideComposer`: sent beside what the member is typing (「AI に直してもらう」): their draft is neither cleared nor replaced.
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void, appSent?: boolean, besideComposer?: boolean) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -352,8 +353,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       onCreated?.(message.id)
       // An edit leaves the composer (and its saved draft) alone; a failed save
       // then keeps the conversation as it was and nothing is sent.
-      if (!await saveRef.current([...base, message], true, !editing)) {
-        if (!editing) chatInputApiRef.current?.setValue(text)
+      if (!await saveRef.current([...base, message], true, !editing && !besideComposer)) {
+        if (!editing && !besideComposer) chatInputApiRef.current?.setValue(text)
         if (dropped.length > 0) { pendingRecordIdsRef.current = []; setPendingRecords(dropped) }
         return
       }
@@ -460,7 +461,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       const waiting = { messageId: null as string | null, answer }
       inlineFixRef.current = waiting
       // The turn's end answers it (above); a send that never went out (its save failed) is answered here.
-      void sendTurn(message, undefined, undefined, undefined, undefined, id => { waiting.messageId = id }, true)
+      void sendTurn(message, undefined, undefined, undefined, undefined, id => { waiting.messageId = id }, true, true)
         .catch(() => {})
         .finally(() => { if (inlineFixRef.current === waiting) { inlineFixRef.current = null; answer({ ok: false, reason: 'failed' }) } })
       return

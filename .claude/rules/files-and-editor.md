@@ -603,7 +603,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   is the chat's `MarkdownMessage` (raw HTML dropped, no remote images: `chatMarkdownSafety`). The editor imports no chat
   part; `FEATURE_IMPORT_EXCEPTIONS` unchanged. No chat pane → 「相談の欄が開いていない…」.
 - **What the AI gets** (`InPlaceSurface.selectedPassage` / `passageAt`, `milkdownAiFix.ts`): the top-level blocks holding the
-  selection (a list item → its whole list; a selection ending at the start of the next block does not take it), byte for
+  selection (a list item → its whole list; a selection ending where the next block's first words start — inside a list
+  or quote, deeper than its start — does not take it), byte for
   byte as the file holds them (`SplicedDocument.passage`, the write-back's own offsets), and at most 600 characters before
   and after, cut at a line, never the `---` block (`contextAround`); the file's name, not its folder. Never the whole file
   (a passage over 6,000 characters is refused on screen; the command's zod limits refuse it too). Only what is written can
@@ -615,12 +616,13 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   request at a time (`hooks/useAiFix.ts`); the answer of a request put away is dropped (its id).
 - **Adopting goes through the write-back** (`adoptFix`): refused when the file's text or the shown document changed since the
   passage was taken (`fixedDocument`: 「AI に頼んでいる間に文書が変わったため…」), when the fix holds a block kind the
-  editor does not keep or text it would lose (`SplicedDocument.read`: footnotes …), or is empty. Two faithful ways are
+  editor does not keep or text it would lose (`SplicedDocument.read`: footnotes …), raw HTML tags the passage did not
+  have (`htmlTags`: the preview never shows them — a tracking image, a hidden link), or is empty. Two faithful ways are
   tried — the AI's Markdown as written over the passage (`writeSource`: reads back as the screen shows, neighbours keep their
   bytes) and the write-back's smallest edit (`write`) — and the one changing fewer lines is written (a tie: the AI's), so a
   list the AI rewrote with `-` bullets changes only the line whose words changed, and a table is written as the AI wrote
-  it. It is committed, then shown (the tracker finds nothing more to write); saving, ⌘S and the external-change band as for
-  typing. The file changed from outside while asked (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
+  it. The tracker writes it like typing, with the write chosen for exactly that document (`adopted`); saving, ⌘S and the
+  external-change band as for typing. The file changed from outside while asked (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
   変わったため…」 above it; the answer is dropped. `〔〕` in the answer become the passage's `【】` again when the passage had
   `【】` and no `〔〕` (`restoreBrackets`: outside text reaches the AI with them replaced).
 - **A comment is never resolved for the member** (owner): adopting a comment's fix says 「コメントは解決にしていません…」 with
@@ -628,8 +630,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
 - **Kept in the consultation**: the request is a message the app sends in the member's place (`appSent`, the shape it is
   stored in already) and the AI's reply follows it (`chat-ui-and-history.md`). Whether a fix was adopted is not recorded.
 - Tests: `markdownSplice.test.ts` (the passage of a nested list byte for byte, ≤ 600 around, no frontmatter; a selection to
-  the next block's start; a `-` list fix written as its one `*` line; 「表にして」 written as the AI wrote it, only the
-  paragraph's lines; changed meanwhile / footnote / empty refused, nothing written; a comment's quote → its block; the card
+  the next block's start and to a list's first words; a `-` list fix written as its one `*` line; 「表にして」 written as
+  the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; a comment's quote → its block; the card
   shown in the flow and not written), `tests/inline-fix.test.ts` (the message's outside-text blocks, a passage that spells a
   footer, the ask as a quoted line, the comment as outside text, the command's limits, `contextAround`, the answer's
   block, `restoreBrackets`, the pane's answer read strictly, a turn answering only its own request),
@@ -637,7 +639,7 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   ［採用］ writes one line; the fix drawn without raw HTML or script; ［やめる］ before and after the answer, the dropped answer,
   a refusal; typing meanwhile and a change from outside refused; a completed review's comment → its words handed over, the
   fix adopted, no reply file, the review file byte for byte, ［レビューに戻る］), `tests/ui/chat-panel.spec.ts` 「chat.askToFix…」
-  — each guard mutation-checked (the staleness check, the kept kinds, the outside-text wrapping, the limits, the line cut,
+  — each guard mutation-checked (the staleness check, the kept kinds, no new HTML, the outside-text wrapping, the limits, the line cut,
   the next-block rule, the fewer-lines choice, the request id, the busy refusal, the chat's renderer, the comment left
   unresolved, the lost notice).
 

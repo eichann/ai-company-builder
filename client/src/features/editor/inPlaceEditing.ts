@@ -108,8 +108,11 @@ export interface InPlacePassage {
 /** What adopting a fix would write: the file's lines it replaces and adds. */
 export type InPlaceFixPreview =
   | { ok: true; removed: string[]; added: string[] }
-  /** `changed`: the document changed since the passage was taken; `unwritable`: the fix cannot be written faithfully. */
-  | { ok: false; reason: 'changed' | 'unwritable' }
+  /**
+   * `changed`: the document changed since the passage was taken; `unwritable`: the fix cannot be written faithfully;
+   * `html`: the fix brings raw HTML the passage did not have.
+   */
+  | { ok: false; reason: 'changed' | 'unwritable' | 'html' }
 
 export type InPlaceOpening = { ok: true; surface: InPlaceSurface } | { ok: false; reason: InPlaceRefusal }
 
