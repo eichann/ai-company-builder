@@ -41,6 +41,10 @@ export type AgentAnswers = ElectronPort<'respondAgentInteraction' | 'respondTool
 export type ChatServerReads = ElectronPort<'getChatServerInfo' | 'onChatServerInfo'>
 /** Leaving the app: opening a URL in the member's browser. */
 export type ChatOutbound = ElectronPort<'openExternal'>
+/** Writing on this computer: a rich reply kept as a page in the member's 今日のフォルダ (main builds the path). */
+export type ReplyPageWrites = ElectronPort<'saveReplyPage'>
+/** Reading on this computer: whether a page kept earlier is still there. */
+export type ReplyPageReads = ElectronPort<'exists'>
 
 type Args<K extends keyof ElectronAPI> = ElectronAPI[K] extends (...args: infer A) => unknown ? A : never
 
@@ -196,6 +200,14 @@ export function onChatServerInfo(callback: Args<'onChatServerInfo'>[0], reads: C
 
 export function openInBrowser(url: string, outbound: ChatOutbound = window.electronAPI) {
   return outbound.openExternal(url)
+}
+
+export function replyPageStillThere(filePath: string, reads: ReplyPageReads = window.electronAPI) {
+  return reads.exists(filePath)
+}
+
+export function saveReplyPage(rootPath: string, todayFolder: string, consultation: Args<'saveReplyPage'>[2], html: string, writes: ReplyPageWrites = window.electronAPI) {
+  return writes.saveReplyPage(rootPath, todayFolder, consultation, html)
 }
 
 /**

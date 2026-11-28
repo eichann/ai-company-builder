@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { defineCommands } from './define'
 import { TAB_KIND_GROUPS } from '../thing-words'
 import { isManualPageId } from '../../../shared/core/manual'
+import { INLINE_FIX_LIMITS } from '../inline-fix'
 
 export const COMMANDS = defineCommands([
   {
@@ -78,6 +79,26 @@ export const COMMANDS = defineCommands([
     id: 'chat.insertText', title: '入力欄に文を入れる', class: 'local',
     args: z.object({
       text: z.string().min(1),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
+    // 「AI に直してもらう」 on a document edited in place (files-and-editor.md "Asking the AI to fix a passage"): the
+    // passage and a little text around it go to the pane's current consultation as a message the app sends
+    // (kept in its history); answers the AI's reply text when that turn ends (`InlineFixReply`, inline-fix.ts).
+    // Nothing is written: the member adopts the fix on the document. Sending to the AI, hence outbound.
+    id: 'chat.askToFix', title: '文書の一部の直しを AI に頼む', class: 'outbound',
+    args: z.object({
+      ask: z.string().min(1).max(INLINE_FIX_LIMITS.ask).describe('What the member asked (a suggestion or their own words)'),
+      file: z.string().min(1).max(INLINE_FIX_LIMITS.file).describe('The document\'s file name (no folder)'),
+      passage: z.string().min(1).max(INLINE_FIX_LIMITS.passage).describe('The Markdown to be replaced, as the file holds it'),
+      before: z.string().max(INLINE_FIX_LIMITS.around).describe('Text before the passage, for context only'),
+      after: z.string().max(INLINE_FIX_LIMITS.around).describe('Text after the passage, for context only'),
+      comment: z.object({
+        quote: z.string().max(INLINE_FIX_LIMITS.commentQuote),
+        body: z.string().min(1).max(INLINE_FIX_LIMITS.commentBody),
+      }).optional().describe('The review comment it reflects (「AI に反映してもらう」)'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },
@@ -272,6 +293,90 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'editor' },
     // Does nothing on an HTML document's tab: the document keeps ⌘F (its own find, or nothing).
     keybinding: { key: 'mod+f', area: 'editor', notInHtmlDocument: true },
+  },
+  // A Markdown document edited in place (files-and-editor.md "Editing a document in place"): the selection
+  // bubble's operations. Each declines its key unless the focus is in that document (⌘B / ⌘K then reach the
+  // app's own: the left column, 探す), and leaves an HTML document's own keys to it. Written back like typing.
+  {
+    id: 'editor.toggleBold', title: '太字にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+b', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleItalic', title: '斜体にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+i', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleStrike', title: '取り消し線を付ける／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+shift+s', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleCode', title: 'コードの書き方にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+e', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.editLink', title: 'リンクを付ける／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+k', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setBodyText', title: '文字の大きさを本文にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+0', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingOne', title: '見出し1にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+1', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingTwo', title: '見出し2にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+2', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingThree', title: '見出し3にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+3', area: 'editor', notInHtmlDocument: true },
+  },
+  // The 「/」 list of a document edited in place (files-and-editor.md "The 「/」 list, line starts and the
+  // table bar"): each declines its key unless that list shows in the focused document (and not while a word
+  // is being composed), so ↑ ↓ Enter Esc stay the text's — and Esc another part's — otherwise.
+  {
+    id: 'editor.blockMenuNext', title: '「/」の一覧で次の形を選ぶ', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'ArrowDown', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuPrevious', title: '「/」の一覧で前の形を選ぶ', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'ArrowUp', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuChoose', title: '「/」の一覧で選んだ形にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'Enter', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.blockMenuClose', title: '「/」の一覧を閉じる', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'Escape', area: 'editor', notInHtmlDocument: true },
   },
 ])
 

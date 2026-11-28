@@ -134,6 +134,7 @@ contract.invoke docView:setBounds
 contract.invoke docView:setZoom
 contract.invoke editor:backupBeforeOverwrite
 contract.invoke editor:backupEdits
+contract.invoke editor:saveImage
 contract.invoke env:status
 contract.invoke env:update
 contract.invoke fs:copy
@@ -267,6 +268,7 @@ contract.invoke recordViews:forFile
 contract.invoke recordViews:search
 contract.invoke recordViews:topics
 contract.invoke recordsTable:page
+contract.invoke replyPage:save
 contract.invoke shell:openExternal
 contract.invoke skillShelf:editLocally
 contract.invoke skillShelf:openBackup
@@ -682,7 +684,9 @@ contract.type ElectronAPI.runBrowserPlan = runBrowserPlan: Invoke<'browserPlans:
 contract.type ElectronAPI.runBrowserWrite = runBrowserWrite: Invoke<'browserLines:runWrite'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
+contract.type ElectronAPI.saveDocumentImage = saveDocumentImage: Invoke<'editor:saveImage'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
+contract.type ElectronAPI.saveReplyPage = saveReplyPage: Invoke<'replyPage:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
 contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
@@ -992,6 +996,7 @@ contract.type IpcInvokeChannels.'docView:setBounds' = 'docView:setBounds': { arg
 contract.type IpcInvokeChannels.'docView:setZoom' = 'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
 contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
 contract.type IpcInvokeChannels.'editor:backupEdits' = 'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string, reason?: EditorEditsReason]; result: EditorBackupResult }
+contract.type IpcInvokeChannels.'editor:saveImage' = 'editor:saveImage': { args: [documentPath: string, bytes: ArrayBuffer]; result: DocumentImageResult }
 contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
 contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
 contract.type IpcInvokeChannels.'fs:copy' = 'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
@@ -1125,6 +1130,7 @@ contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': {
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'recordsTable:page' = 'recordsTable:page': { args: [companyId: string, query: RecordsTableQuery]; result: RecordsTablePage }
+contract.type IpcInvokeChannels.'replyPage:save' = 'replyPage:save': { args: [rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string]; result: ReplyPageSaveResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:openBackup' = 'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
@@ -1377,6 +1383,7 @@ main.handle docView:setBounds @ features/doc-frames/ipc.ts (viewId, bounds)
 main.handle docView:setZoom @ features/doc-frames/ipc.ts (viewId, factor)
 main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string, filePath: string)
 main.handle editor:backupEdits @ features/fs/ipc.ts (rootPath: string, filePath: string, content: string, reason?: unknown)
+main.handle editor:saveImage @ features/fs/ipc.ts (documentPath: string, bytes: unknown)
 main.handle env:status @ features/env/ipc.ts (rootPath: string)
 main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
 main.handle fs:copy @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
@@ -1510,6 +1517,7 @@ main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, compa
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle recordsTable:page @ features/records-table/ipc.ts (companyId, query)
+main.handle replyPage:save @ features/reply-pages/ipc.ts (rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:openBackup @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
@@ -2108,8 +2116,12 @@ preload sameAsApproval -> invoke approvals:sameAs($0, $1, $2, $3)
 preload sameAsApproval : (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => Promise<ApprovalResult>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
 preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
+preload saveDocumentImage -> invoke editor:saveImage($0, $1)
+preload saveDocumentImage : (documentPath: string, bytes: ArrayBuffer) => Promise<DocumentImageResult>
 preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)
 preload saveOwnBrokerKey : (companyId: string, service: string, secret: string, displayName?: string | undefined) => Promise<OwnKeysResult>
+preload saveReplyPage -> invoke replyPage:save($0, $1, $2, $3)
+preload saveReplyPage : (rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string) => Promise<ReplyPageSaveResult>
 preload searchChatSessions -> invoke chatHistory:search($0, $1)
 preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
 preload searchRecords -> invoke recordViews:search($0, $1)

@@ -35,6 +35,7 @@ import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 import type { AppCommandAnswer } from '../shared/app-commands'
+import type { ReplyPageConsultation } from '../shared/reply-pages'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackFeature } from '../shared/slack'
@@ -124,6 +125,7 @@ const api: ElectronAPI = {
     invoke('editor:backupBeforeOverwrite', rootPath, filePath),
   backupEdits: (rootPath: string, filePath: string, content: string, reason?: EditorEditsReason) =>
     invoke('editor:backupEdits', rootPath, filePath, content, reason),
+  saveDocumentImage: (documentPath: string, bytes: ArrayBuffer) => invoke('editor:saveImage', documentPath, bytes),
   createDirectory: (path: string) => invoke('fs:createDirectory', path),
   exists: (path: string) => invoke('fs:exists', path),
 
@@ -445,6 +447,7 @@ const api: ElectronAPI = {
   answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
   onAppCommandRequest: callback => subscribe('appCommand:request', callback),
   answerAppCommand: (requestId: string, answer: AppCommandAnswer) => invoke('appCommand:respond', requestId, answer),
+  saveReplyPage: (rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string) => invoke('replyPage:save', rootPath, todayFolder, consultation, html),
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   getSlackStatus: (companyId: string) => invoke('slack:status', companyId),

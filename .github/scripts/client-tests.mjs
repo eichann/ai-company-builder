@@ -53,6 +53,8 @@ const MACOS = {
   'tests/doc-player-electron.test.ts': 'launches the real Electron app, which needs a display',
   // Company videos played by Chromium's real media player (files-and-editor.md "Videos"): same reason.
   'tests/video-electron.test.ts': 'launches the real Electron app, which needs a display',
+  // A rich reply's frame refused a navigation by main (chat-ui-and-history.md "Rich replies: the reply's closed frame"): same reason.
+  'tests/reply-frame-electron.test.ts': 'launches the real Electron app, which needs a display',
 }
 
 const os = process.argv[2]

@@ -10,7 +10,7 @@
 // company-watcher.test.ts). These tests pin what lives in main.ts itself —
 // the allowed-roots check, which refusal each handler applies, and each
 // handler's result shape — so splitting main.ts cannot change them silently.
-import { test, after, before } from 'node:test'
+import { test, after, before, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -687,4 +687,106 @@ test('fs and skills handlers: a skill file the member may not change is refused 
   assert.deepEqual(await h.invoke('fs:copy', skill, path.join(company, '.claude/skills/mine')), { success: true })
   assert.equal(await h.invoke('fs:writeFile', path.join(company, '.claude/skills/mine/make.py'), 'mine\n'), true)
   assert.match(fs.readFileSync(path.join(company, '.git/info/exclude'), 'utf-8'), /\.claude\/skills\/draft\//, 'still private')
+})
+
+// Images in a document (files-and-editor.md "Images in a document"): the renderer hands the bytes and the document;
+// main decides the place (images/ beside it), the name (the clock) and the kind (the bytes), and never replaces a file.
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16]).buffer
+const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').buffer
+
+test('editor:saveImage keeps a pasted image in images/ beside the document, named by the date and time, never replacing a file', async () => {
+  const company = h.companyDir('images-co')
+  await h.invoke('fs:registerAllowedRoot', company)
+  writeFiles(company, { '営業部/提案.md': '# 提案\n', '営業部/images/20261129-143005-2.png': 'already here', '営業部/メモ.txt': 'not markdown' })
+  const doc = path.join(company, '営業部', '提案.md')
+  mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 29, 14, 30, 5) })
+  try {
+    assert.deepEqual(await h.invoke('editor:saveImage', doc, PNG), { success: true, address: 'images/20261129-143005.png' })
+    // The same second again: the next free name (-2 is taken by a file already there, which stays as it was).
+    assert.deepEqual(await h.invoke('editor:saveImage', doc, PNG), { success: true, address: 'images/20261129-143005-3.png' })
+    assert.deepEqual(await h.invoke('editor:saveImage', doc, JPEG), { success: true, address: 'images/20261129-143005.jpg' }, 'the kind comes from the bytes')
+  } finally {
+    mock.timers.reset()
+  }
+  assert.deepEqual([...fs.readFileSync(path.join(company, '営業部/images/20261129-143005.png'))], [...new Uint8Array(PNG)])
+  assert.equal(fs.readFileSync(path.join(company, '営業部/images/20261129-143005-2.png'), 'utf-8'), 'already here')
+  assert.equal(fs.readFileSync(doc, 'utf-8'), '# 提案\n', 'the document itself is the editor\'s to write')
+
+  const type = { success: false, error: '入れられるのは PNG・JPEG・GIF・WebP の画像だけです' }
+  assert.deepEqual(await h.invoke('editor:saveImage', doc, SVG), type, 'no SVG, whatever it is called')
+  assert.deepEqual(await h.invoke('editor:saveImage', doc, new TextEncoder().encode('<html>').buffer), type)
+  assert.deepEqual(await h.invoke('editor:saveImage', doc, 'not bytes'), type)
+  const big = new Uint8Array(20 * 1024 * 1024 + 1)
+  big.set(new Uint8Array(PNG))
+  assert.deepEqual(await h.invoke('editor:saveImage', doc, big.buffer), { success: false, error: '画像が20MBを超えています' }, 'as a Finder drop: 20 MB')
+  assert.equal((await h.invoke<{ success: boolean }>('editor:saveImage', path.join(company, '営業部', 'メモ.txt'), PNG)).success, false, 'only beside a Markdown document')
+  assert.equal(fs.existsSync(path.join(company, 'images')), false)
+  assert.deepEqual(fs.readdirSync(path.join(company, '営業部/images')).sort(), ['20261129-143005-2.png', '20261129-143005-3.png', '20261129-143005.jpg', '20261129-143005.png'])
+})
+
+test('editor:saveImage writes nowhere a file operation may not: an images link (out or in), a file named images, a not-downloaded or reserved folder, a skill file', async () => {
+  const company = h.companyDir('images-guards')
+  const other = h.companyDir('images-guards-out')
+  await h.invoke('fs:registerAllowedRoot', company)
+  writeFiles(other, { 'x.txt': 'x' })
+  writeFiles(company, {
+    'a/doc.md': 'a', 'b/doc.md': 'b', 'c/doc.md': 'c', 'c/images': 'a file', '資料/doc.md': 'd', '評価メモ/doc.md': 'e', 'inside/keep.txt': 'k',
+    '.git/acb-sparse-config.json': JSON.stringify({ excluded: ['資料/images'] }),
+    '.git/config': '[core]\n\tsparseCheckout = true\n',
+    '.git/info/sparse-checkout': '/*\n!/資料/images/\n',
+    '.git/acb-private-scopes.json': JSON.stringify({ companyId: 'img-co', version: '1', fetchedAt: '', scopes: [] }),
+  })
+  fs.symlinkSync(other, path.join(company, 'a', 'images'))
+  fs.symlinkSync(path.join(company, 'inside'), path.join(company, 'b', 'images'))
+  h.server.on('POST', '/api/companies/img-co/paths/check', req => {
+    const { paths } = JSON.parse(req.body ?? '{}') as { paths: string[] }
+    return { json: { success: true, data: { results: paths.map(p => ({ path: p, usable: !p.startsWith('評価メモ/images') })) } } }
+  })
+  const refusal = async (doc: string) => {
+    const r = await h.invoke<{ success: boolean; error?: string }>('editor:saveImage', path.join(company, doc), PNG)
+    assert.equal(r.success, false, doc)
+    return r.error
+  }
+  assert.equal(await refusal('a/doc.md'), LINK_ESCAPE)
+  assert.match(String(await refusal('b/doc.md')), /画像を置けるフォルダではない/, 'a link inside is not the folder either')
+  assert.match(String(await refusal('c/doc.md')), /画像を置けるフォルダではない/)
+  assert.equal(await refusal('資料/doc.md'), notDownloadedUserMessage('資料/images'))
+  assert.match(String(await refusal('評価メモ/doc.md')), /フォルダ名は使えません/)
+  assert.deepEqual(fs.readdirSync(other), ['x.txt'])
+  assert.deepEqual(fs.readdirSync(path.join(company, 'inside')), ['keep.txt'])
+  assert.equal(fs.readFileSync(path.join(company, 'c', 'images'), 'utf-8'), 'a file')
+  assert.equal(fs.existsSync(path.join(company, '資料', 'images')), false)
+  assert.equal(fs.existsSync(path.join(company, '評価メモ', 'images')), false)
+
+  // A document at the top of the company folder: `images/` there would be a new department for everyone.
+  writeFiles(company, { 'README.md': 'top', 'sub/folder.md/x.txt': 'a folder named like a document', 'inside/real.md': 'real' })
+  assert.match(String(await refusal('README.md')), /いちばん上にある文書/)
+  assert.equal(fs.existsSync(path.join(company, 'images')), false)
+  // The document itself must be a file: not a folder named `.md`, not a link (even one pointing inside).
+  fs.symlinkSync(path.join(company, 'inside', 'real.md'), path.join(company, 'sub', 'a-link.md'))
+  for (const doc of ['sub/folder.md', 'sub/a-link.md']) assert.ok(await refusal(doc), doc)
+  assert.equal(fs.existsSync(path.join(company, 'sub', 'images')), false)
+  assert.equal(fs.existsSync(path.join(company, 'sub', 'folder.md', 'images')), false)
+  assert.equal(fs.existsSync(path.join(company, 'inside', 'images')), false)
+  // A disk error is said in a plain sentence, not Node's text.
+  writeFiles(company, { 'd/doc.md': 'd' })
+  const writeFile = fs.promises.writeFile
+  fs.promises.writeFile = (async () => { throw Object.assign(new Error("EACCES: permission denied, open '/x'"), { code: 'EACCES' }) }) as typeof fs.promises.writeFile
+  try {
+    assert.equal(await refusal('d/doc.md'), '画像を保存できませんでした。もう一度試してください')
+  } finally {
+    fs.promises.writeFile = writeFile
+  }
+
+  // A skill's document: the images would be skill files, which this member may not change.
+  const skills = h.companyDir('images-skills')
+  await h.invoke('fs:registerAllowedRoot', skills)
+  writeFiles(skills, { '.claude/skills/report/SKILL.md': '---\nname: report\n---\n' })
+  git(h.base, skills, ['init', '-q', '-b', 'main'])
+  writePrivateScopesCache(skills, { companyId: 'img-skills', version: 'v', fetchedAt: new Date().toISOString(), scopes: [] })
+  h.server.on('GET', '/api/companies/img-skills/me/capabilities', { json: { success: true, data: { role: 'member', managedDepartmentFolders: [], skillEditing: { everywhere: false, folders: [] } } } })
+  const r = await h.invoke<{ success: boolean; error?: string }>('editor:saveImage', path.join(skills, '.claude/skills/report/SKILL.md'), PNG)
+  assert.match(String(r.error), /Skill を直せる人/)
+  assert.equal(fs.existsSync(path.join(skills, '.claude/skills/report/images')), false)
 })

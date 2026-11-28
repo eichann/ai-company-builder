@@ -37,7 +37,7 @@ export type SceneStep =
   | { fill: string; text: string }
   /** Chooses the option with this label in the target `<select>`. */
   | { select: string; option: string }
-  /** Clicks the target, moves to its end (⌘↓) and types `text` (an editor). */
+  /** Clicks the target, moves to its end (⌘↓; a document edited in place: its last character) and types `text`. */
   | { typeAtEnd: string; text: string }
   /** Presses a key (Playwright key name, e.g. `Escape`). */
   | { press: string }
@@ -110,7 +110,8 @@ const TITLE_BAR = 'header:has(button[aria-label="サーバーと同期"])'
 const SALES_FILES: SceneStep[] = [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }]
 const VISIT_MEMO = 'role=button[name=/^訪問メモ_1123\\.md/]'
 const PROPOSAL = 'role=button[name=/^提案書_A社向け\\.md/]'
-const EDITOR = '.cm-content[data-language="markdown"]'
+// A Markdown file opens as the document, edited in place (files-and-editor.md "Editing a document in place").
+const EDITOR = '[data-in-place-editor] .ProseMirror'
 // The editor continues the list itself after Enter (「- 」).
 const ADDED_LINE = '\n次回：12/1 に見積を持って再訪問'
 // The main screen's three panes, found from the bars between them.
@@ -183,9 +184,9 @@ const HTML_OPEN: SceneStep[] = [
 ]
 const CHAT_HEADER = { page: 'chat-header', query: { limits: 'ok' } } as const
 /** Selects `text` in the document as a mouse would (the review's comment box opens on mouse-up). */
-const SELECT_TEXT = (text: string): SceneStep => ({ run: `(() => {
+const SELECT_TEXT = (text: string, within = 'body'): SceneStep => ({ run: `(() => {
   const wanted = ${JSON.stringify(text)}
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  const walker = document.createTreeWalker(document.querySelector(${JSON.stringify(within)}), NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const at = node.textContent.indexOf(wanted)
     if (at === -1) continue
@@ -508,7 +509,48 @@ export const scenes: Scene[] = [
     steps: [...SALES_FILES, { click: VISIT_MEMO }, { waitFor: 'text=納期は3月末を希望' }, { typeAtEnd: EDITOR, text: ADDED_LINE }, { press: 'ControlOrMeta+s' }],
     annotations: [
       { box: VISIT_MEMO }, { marker: { target: VISIT_MEMO, label: '1', at: 'right' } },
-      { box: '.cm-line:has-text("次回：12/1")' }, { marker: { target: '.cm-line:has-text("次回：12/1")', label: '2', at: 'left' } },
+      { box: '[data-in-place-editor] li:has-text("次回：12/1")' }, { marker: { target: '[data-in-place-editor] li:has-text("次回：12/1")', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'doc-selection-bubble',
+    about: 'Words selected in a paragraph of 提案書_A社向け.md: the one bubble — decorations, 文字の大きさ, リンク, ［コメント］, ［AI に直してもらう］.',
+    ...MAIN,
+    // The bubble shows while the document has the focus; 文字の大きさ only in a paragraph or heading (not a list item).
+    keepFocus: true,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { click: EDITOR }, SELECT_TEXT('受発注の手作業を減らし', '[data-in-place-editor]'), { waitFor: 'role=toolbar[name="選んだ文字の飾り"]' }, SETTLE],
+    crop: { region: { x: 260, y: 90, width: 760, height: 320 } },
+    annotations: [
+      { box: 'role=toolbar[name="選んだ文字の飾り"]' },
+      { marker: { target: 'role=button[name="太字"]', label: '1', at: 'below' } },
+      { marker: { target: 'role=button[name=/本文/]', label: '2', at: 'below' } },
+      { marker: { target: 'role=toolbar[name="選んだ文字の飾り"] >> role=button[name="コメント"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=toolbar[name="選んだ文字の飾り"] >> role=button[name="AI に直してもらう"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'doc-block-menu',
+    about: '提案書_A社向け.md: Enter twice after the last item, then 「/」 — the list of shapes a line can take.',
+    ...MAIN,
+    // The list shows while the document has the focus.
+    keepFocus: true,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { typeAtEnd: EDITOR, text: '\n\n/' }, { waitFor: 'role=listbox[name="形を選ぶ"]' }, SETTLE],
+    crop: { region: { x: 260, y: 200, width: 600, height: 560 } },
+    annotations: [
+      { box: 'role=listbox[name="形を選ぶ"]' },
+      { marker: { target: 'role=listbox[name="形を選ぶ"]', label: '1', at: 'right' } },
+    ],
+  },
+  {
+    id: 'doc-table-bar',
+    about: '提案書_A社向け.md: a table made from the 「/」 list, the caret in it — the bar over its top right.',
+    ...MAIN,
+    keepFocus: true,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }, { typeAtEnd: EDITOR, text: '\n\n/表' }, { press: 'Enter' }, { waitFor: 'role=toolbar[name="表の操作"]' }, SETTLE],
+    crop: { region: { x: 260, y: 300, width: 760, height: 480 } },
+    annotations: [
+      { box: 'role=toolbar[name="表の操作"]' },
+      { marker: { target: 'role=toolbar[name="表の操作"]', label: '1', at: 'left' } },
     ],
   },
   {
@@ -2093,7 +2135,7 @@ export const scenes: Scene[] = [
     page: 'editor-tabs',
     query: { view: 'tabs' },
     steps: [
-      { click: 'role=button[name="エディタ"]' }, { typeAtEnd: '.cm-content', text: '\n追記' },
+      { click: 'role=button[name="もとの書き方"]' }, { typeAtEnd: '.cm-content', text: '\n追記' },
       { run: 'Object.keys(window.__acbFiles).forEach(p => window.__acbFailWrites.add(p))' },
       { run: 'window.__acbRequestClose()' }, { waitFor: 'role=alertdialog' },
     ],

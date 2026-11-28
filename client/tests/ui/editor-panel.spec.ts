@@ -184,7 +184,7 @@ test('⌘⇧V switches a Markdown file between editor and preview, and the choic
 test('⌘F in a Markdown preview finds text: count, next, previous, Escape closes and clears', async ({ page }) => {
   await open(page)
   await tab(page, LONG_DOC).click()
-  await page.getByRole('button', { name: 'プレビュー' }).click()
+  await page.getByRole('button', { name: '文章', exact: true }).click()
   await expect(page.getByRole('heading', { name: '第1回' })).toBeVisible()
   // The pressed button is gone: the editor takes the focus back on the next frame (slow runners lag).
   await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-command-area="editor"]'))).toBe(true)
@@ -212,7 +212,7 @@ test('⌘F in a preview also finds the name and description shown from the file\
     w.__acbFileChange(p)
   }, LONG_DOC)
   await tab(page, LONG_DOC).click()
-  await page.getByRole('button', { name: 'プレビュー' }).click()
+  await page.getByRole('button', { name: '文章', exact: true }).click()
   await expect(page.getByRole('note', { name: 'このファイルの情報' })).toContainText('proposal-writer')
   await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-command-area="editor"]'))).toBe(true)
   await shortcut(page, { key: 'f' })
@@ -226,7 +226,7 @@ test('⌘F in a preview also finds the name and description shown from the file\
 test('the preview keeps its scroll position when the member opens another file and comes back', async ({ page }) => {
   await open(page)
   await tab(page, LONG_DOC).click()
-  await page.getByRole('button', { name: 'プレビュー' }).click()
+  await page.getByRole('button', { name: '文章', exact: true }).click()
   const scroller = page.locator('.markdown-body').locator('..')
   await expect(page.getByRole('heading', { name: '第1回' })).toBeVisible()
   await scroller.evaluate(el => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 })
@@ -242,7 +242,7 @@ test('each Markdown file keeps its own preview scroll position when the member s
   // first one's position, and coming back did not restore it.
   await open(page)
   await tab(page, LONG_DOC).click()
-  await page.getByRole('button', { name: 'プレビュー' }).click()
+  await page.getByRole('button', { name: '文章', exact: true }).click()
   const scroller = page.locator('.markdown-body').locator('..')
   await expect(page.getByRole('heading', { name: '第1回' })).toBeVisible()
   await scroller.evaluate(el => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 })

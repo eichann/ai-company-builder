@@ -35,7 +35,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //   ?limits=ok|warn|rejected|unknown   which usage snapshot the server reports
 //   ?agent=codex  Codex instead of Claude Code
 //   ?history=long  two restored tabs with a 240-message conversation (windowed
-//                  rendering, 「以前のメッセージを表示」, code highlighting)
+//                  rendering, 「以前のメッセージを表示」, code highlighting); with ?rich=1 every reply
+//                  holds an ```acb-html block (drawn in its closed frame: only those near the screen)
 //   ?history=edit  one restored conversation whose first message references
 //                  files (editing and resending a message)
 //   ?turn=manual   the reply streams only what window.__acbChat sends (the
@@ -61,6 +62,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
+// The app's theme as the chat reads it (a rich reply's frame follows it).
+useAppStore.setState({ theme: params.get('theme') === 'dark' ? 'dark' : 'light' })
 const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
 // ?storage=keep: a reload keeps what the page remembered (a new Playwright page starts empty anyway).
@@ -68,6 +71,7 @@ if (params.get('storage') !== 'keep') { try { localStorage.clear() } catch { /* 
 // The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('preview-user')
 const longHistory = params.get('history') === 'long'
+const richHistory = params.get('rich') === '1'
 const editHistory = params.get('history') === 'edit'
 // Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
 const manyHistory = params.get('history') === 'many'
@@ -117,7 +121,9 @@ function longSession() {
     const [lang, code] = CODE_SAMPLES[i % CODE_SAMPLES.length]
     messages.push({ id: `u${i}`, role: 'user', content: `質問${i + 1}: ${lang} の例を見せてください`, timestamp: new Date(now - (240 - i * 2) * 60_000).toISOString() })
     messages.push({ id: `a${i}`, role: 'assistant', timestamp: new Date(now - (239 - i * 2) * 60_000).toISOString(),
-      content: `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
+      content: richHistory
+        ? `## 回答 ${i + 1}\n\n見積もりの比べです。\n\n\`\`\`acb-html\n<div class="acb-key"><strong>要点</strong> 回答 ${i + 1} では B社が安くなります。</div>\n<table class="acb-compare"><thead><tr><th>項目</th><th>A社</th><th class="best">B社</th></tr></thead><tbody><tr><td>保守</td><td>12,000円</td><td class="best">9,000円</td></tr><tr><td>初期費用</td><td>0円</td><td class="best">5万円</td></tr></tbody></table>\n\`\`\`\n\n以上です。`
+        : `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
   }
   return { id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messages, createdAt: new Date(now - 300 * 60_000).toISOString(), updatedAt: new Date(now).toISOString(), revision: 1 }
 }
@@ -198,7 +204,22 @@ const MEETING_ITEM: TaskListItem = {
   due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
 }
 const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[], deleted: [] as string[] }
+// ?pages=1: a today folder, so a rich reply offers ［大きく見る］［ページとして残す］; what the chat asked main to keep is
+// recorded in __acbChat.pagesSaved (the page's HTML, the folder, the consultation) and answered with a new name each time.
+const pagesOn = params.get('pages') === '1'
+const PREVIEW_TODAY = '営業部/.personal/inbox/日付別/2026/20261128'
+const pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: unknown; html: string }> = []
+// Pages on "disk" (a spec removes one through __acbChat.pagesOnDisk, as the member deleting it would).
+const pagesOnDisk = new Set<string>()
 installElectronAPI({
+  exists: async filePath => pagesOnDisk.has(filePath),
+  saveReplyPage: async (rootPath, todayFolder, consultation, html) => {
+    pagesSaved.push({ rootPath, todayFolder, consultation, html })
+    if ((window as unknown as { __acbPageRefusal?: string }).__acbPageRefusal) return { success: false, error: (window as unknown as { __acbPageRefusal: string }).__acbPageRefusal }
+    const name = pagesSaved.length === 1 ? 'AI の返事.html' : `AI の返事 (${pagesSaved.length}).html`
+    pagesOnDisk.add(`${rootPath}/${todayFolder}/ページ/${name}`)
+    return { success: true, path: `${rootPath}/${todayFolder}/ページ/${name}`, name }
+  },
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   getAiTurnStopConfirmed: async () => true,
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
@@ -271,6 +292,8 @@ installElectronAPI({
   // The synchronous save before a send, recorded in order with the requests.
   flushChatSession: (_company: string, session: ChatSession) => {
     if (manual) control.requests.push({ path: 'flushChatSession', body: JSON.parse(JSON.stringify(session)) })
+    // __acbChat.failNextFlush: the next synchronous save is refused (another screen saved the consultation).
+    if (control.failNextFlush) { control.failNextFlush = false; return { status: 'conflict', revision: 1 } as ChatSaveReceipt }
     return { status: 'saved', revision: 1 } as ChatSaveReceipt
   },
   voiceInput: {
@@ -336,6 +359,9 @@ const control = {
   steerStatus: 'delivered' as SteerStatus,
   suggestion: null as string | null,
   open: () => current !== null,
+  failNextFlush: false,
+  /** The member switches light / dark (the title bar's 表示). */
+  toggleTheme: () => useAppStore.getState().toggleTheme(),
   send(chunk: unknown) { current?.enqueue(sse(chunk)) },
   text(id: string, delta: string) { control.send({ type: 'text-delta', id, delta }) },
   finish() {
@@ -365,6 +391,11 @@ const control = {
   aiTurns,
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
+  /** HTML pages the chat asked the editor to show (`editor.viewDocument`). */
+  viewed: [] as string[],
+  /** Rich replies kept as pages (?pages=1), and which are still on "disk". */
+  pagesSaved,
+  pagesOnDisk,
   answered(id: string, response: AgentInteractionResponse) {
     control.answers.push({ id, response })
     const toolCallId = id.replace(/^ask-/, '')
@@ -418,6 +449,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 // The main screen's file opener, as AppShell registers it.
 commands.register('file.open', ({ path }) => { control.opened.push(path) })
+// The editor's HTML viewer, as the editor registers it (?pages=1 only: elsewhere a consultation has no editor).
+if (pagesOn) commands.register('editor.viewDocument', ({ path }) => { control.viewed.push(path) }, { target: 'editor' })
 // What a skill's 実行 (or, later, another feature) runs, for the specs.
 Object.assign(window, { __acbCommands: { run: runCommand } })
 
@@ -493,7 +526,7 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       {params.get('tabs') === '1' && <MiddleTabs />}
       {recordHistory && <OpenRecordStandIn recordId={params.get('focus')} />}
       <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
-        <ChatPanel departmentPath="/tmp/acb-preview" listOpenAtStart={listOpen} aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
+        <ChatPanel departmentPath="/tmp/acb-preview" listOpenAtStart={listOpen} todayFolder={pagesOn ? () => PREVIEW_TODAY : undefined} aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
           focus={params.get('focus') ? { recordId: params.get('focus')!, title: RECORD_TITLES[params.get('focus')!] ?? '見積書を作り直す' } : null} />
       </div>
     </div>,

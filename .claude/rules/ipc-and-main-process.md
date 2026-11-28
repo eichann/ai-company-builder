@@ -31,7 +31,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status, claudeSignIn:* — `chat-and-agents.md` "Signing in to Claude Code"), `env`,
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
-  editor:backupBeforeOverwrite, editor:backupEdits; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
+  editor:backupBeforeOverwrite, editor:backupEdits; editor:saveImage keeps an image pasted or dropped into a document in
+  `images/` beside it, main naming and placing it, `files-and-editor.md` "Images in a document"; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
@@ -54,6 +55,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `records.md` "The app's views"),
   `after-meeting` (afterMeeting:read / note: 「会議のあと」's card, the run's files on this PC and the card's mark; removable,
   `jobs.md` "The 4b-4 screens (PR6-A)"),
+  `reply-pages` (replyPage:save: a rich reply kept as a page in the member's 今日のフォルダ, the path built in main, `wx`;
+  `chat-ui-and-history.md` "Rich replies: ［大きく見る］…"),
   `records-table` (recordsTable:page: 「記録の一覧」, one page of one kind through `/records/query`;
   `tasks-ui.md` "The records table (B4)"),
   `notifications` (notifications:watch / state / refresh / markRead / settings / setSetting and the event
@@ -207,9 +210,17 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `http:` / `https:`, opens in the member's own browser (`webLinkForBrowser`,
   `electron/external-url.ts`; never `file:`, `javascript:`, `mailto:` or a custom scheme). Owner
   decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
-  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. The main window alone adds
+  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. Subframes
+  (`will-frame-navigate`): a plugin's frame navigates nowhere (`plugin-frame.md`), and **a frame showing a srcdoc —
+  a rich reply's frame, its hidden copy, the diagrams' drawing frame —, a frame inside one, and a navigation a srcdoc
+  frame starts (`initiator`), only to a srcdoc again**
+  (`client/shared/srcdoc-frames.ts` `srcdocFrameNavigationAllowed`; main's backstop behind the renderer's guards, owner
+  decision 2026-11-28: a page loaded there would arrive without the frame's policy); every other frame, the PDF
+  preview's included, is unchanged. The main window alone adds
   `backgroundThrottling: false` (the automatic 「AI の番」 runs there while it is behind or
-  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
+  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`,
+  `tests/reply-frame-electron.test.ts` (real Electron: a press on a link that would move a sandboxed srcdoc frame is
+  refused and reaches no listener; a new srcdoc still loads; the same window without the guard does navigate).
   「ブラウザ操作」's window is not an app window: its own preferences (no preload), session and guards, and
   it never hands a link to the member's browser (`browser-window.ts`, `agent-browser.md`).
 - **Web permissions are default deny.** Electron grants every Chromium permission request
@@ -325,7 +336,7 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 
 ## Guards on what the renderer hands main (keep them)
 
-- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `editor:backupEdits`, `env:*`,
+- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `editor:backupEdits`, `editor:saveImage`, `env:*`,
   `git:*` incl. sync / log / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
   goes through `AllowedRoots.validate` (`client/electron/allowed-roots.ts`): inside a registered
   company root **by name and by real location** — every symlink resolved (`realpathSync.native`;
@@ -389,7 +400,8 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);
-  `skills:publish` / `makePrivate` refuse a multi-line entry (`makePrivate` also a skill already
+  `editor:saveImage` takes only the bytes and the document (main makes the path: `images/` beside it, a real folder —
+  never a link —, the kind from the bytes, `wx`); `skills:publish` / `makePrivate` refuse a multi-line entry (`makePrivate` also a skill already
   shared); `fs:createFile` / `rename` / `move` / `copyFromExternal` / `copy` never replace an
   existing target (`files-and-editor.md`); `skills:toggleNurturing` only a
   `SKILL.md`; `shell:openExternal` only `http:` / `https:` / `mailto:` (`electron/external-url.ts`).

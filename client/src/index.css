@@ -392,3 +392,47 @@ body {
   0% { left: -35%; }
   100% { left: 100%; }
 }
+
+/* ============================================================================
+   A Markdown document edited in place (features/editor/milkdownSurface.ts):
+   ProseMirror's own required rules, then what differs from the reading view.
+   ============================================================================ */
+.acb-in-place {
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+}
+.acb-in-place pre { white-space: pre-wrap; }
+.acb-in-place li { position: relative; }
+.ProseMirror-hideselection *::selection { background: transparent; }
+.ProseMirror-hideselection { caret-color: transparent; }
+.ProseMirror-selectednode { outline: 2px solid var(--color-focus-ring); }
+/* Raw HTML stays as written, quietly: it is kept byte for byte, not drawn. */
+.acb-in-place span[data-type="html"] {
+  color: var(--color-text-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+/* A checklist item: a box in front of its text. */
+.acb-in-place li[data-item-type="task"] { list-style: none; }
+.acb-in-place li[data-item-type="task"]::before {
+  content: "☐";
+  position: absolute;
+  left: -1.4em;
+  color: var(--color-text-muted);
+}
+.acb-in-place li[data-item-type="task"][data-checked="true"]::before { content: "☑"; }
+/* The empty line the caret is in, while the document has the focus: 「「/」で形を選べます」 (milkdownBlocks.ts). */
+.acb-in-place.ProseMirror-focused p.acb-empty-line::before {
+  content: attr(data-hint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-text-subtle);
+}
+/* ⌘F in a document edited in place: the browser's highlights, the text untouched. */
+::highlight(acb-find) { background-color: rgb(var(--color-warning-bg-rgb)); }
+::highlight(acb-find-current) { background-color: rgb(var(--color-warning-border-rgb)); }

@@ -13,6 +13,8 @@ type Control = {
   steerStatus: 'delivered' | 'not-delivered' | 'unavailable'
   suggestion: string | null
   open(): boolean
+  /** The next synchronous save of a consultation is refused. */
+  failNextFlush: boolean
   send(chunk: unknown): void
   text(id: string, delta: string): void
   finish(): void
@@ -751,6 +753,49 @@ test('chat commands: a new consultation sends its message; inserted text waits i
   await page.waitForTimeout(300)
   await typed(page).toBe('来月の予算について')
   expect(await chatBodies()).toHaveLength(1)
+})
+
+// 「AI に直してもらう」 (files-and-editor.md "Asking the AI to fix a passage"): the request goes into the shown
+// consultation as a message the app sends (kept in its history), the passage as outside text; the answer is the
+// reply when that turn ends; while the AI works, another request is refused (nothing is queued behind the member).
+test('chat.askToFix: sent into the shown consultation and kept; answered with the reply when its turn ends; busy while a turn runs', async ({ page }) => {
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
+  const ask = (n: number) => page.evaluate(n => {
+    const w = window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> }; __fix: Record<number, unknown> }
+    w.__fix ??= {}
+    void w.__acbCommands.run('chat.askToFix', { ask: 'もっと丁寧に', file: '定例メモ.md', passage: '* 見積もりを送る', before: '## 決まったこと', after: '' })
+      .then(answer => { w.__fix[n] = answer })
+  }, n)
+  const answerOf = (n: number) => page.evaluate(n => (window as unknown as { __fix?: Record<number, unknown> }).__fix?.[n] ?? null, n)
+  const chatBodies = () => chat(page, c => c.requests.filter(r => r.path === '/api/chat').map(r => r.body as { messages: Array<{ role: string; parts: Array<{ text?: string }>; metadata?: { appSent?: boolean } }> }))
+  await expect(input(page)).toBeVisible()
+  await ask(1)
+  await expect.poll(async () => (await chatBodies()).length).toBe(1)
+  const sent = (await chatBodies())[0].messages.filter(m => m.role === 'user').at(-1)!
+  expect(sent.metadata?.appSent).toBe(true)
+  const text = sent.parts.map(part => part.text ?? '').join('')
+  expect(text).toContain('【ここから直す所')
+  expect(text).toContain('* 見積もりを送る')
+  expect(text).toContain('ファイルは開かず、書き換えず')
+  await turnStarted(page)
+  // Another request while this turn runs: refused at once.
+  await ask(2)
+  await expect.poll(() => answerOf(2)).toEqual({ ok: false, reason: 'busy' })
+  expect(await answerOf(1)).toBeNull()
+  await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '丁寧にしました。\n\n```acb-fix\n* 見積もりをお送りします\n```'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
+  await expect.poll(() => answerOf(1)).toEqual({ ok: true, reply: '丁寧にしました。\n\n```acb-fix\n* 見積もりをお送りします\n```' })
+  // Kept in the consultation: the request saved with it before it went (as any message), the reply shown in it.
+  const saved = await chat(page, c => JSON.stringify(c.requests.filter(r => r.path === 'flushChatSession').at(-1)?.body?.messages))
+  expect(saved).toContain('【ここから直す所')
+  await expect(page.getByText('丁寧にしました。')).toBeVisible()
+
+  // What the member is typing stays theirs: a request whose save is refused neither replaces nor clears it.
+  await input(page).click()
+  await page.keyboard.insertText('来月の予算について')
+  await chat(page, c => { c.failNextFlush = true })
+  await ask(3)
+  await expect.poll(() => answerOf(3)).toEqual({ ok: false, reason: 'failed' })
+  await typed(page).toBe('来月の予算について')
 })
 
 // 「相談する」 on a task (tasks-ui.md "Consulting about a task"): a new consultation keeps the task as

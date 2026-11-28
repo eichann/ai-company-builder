@@ -190,6 +190,16 @@ export interface DocumentReading {
 export const readAsWritten: DocumentReading = { findQuote: quoteAsWritten, snapshotOf: documentText => documentText }
 
 /**
+ * A save that failed after its retries. `comment` / `reply`: the member's text
+ * stays in its input, pressing the button again retries. `other`: `retry` runs
+ * the same action again.
+ */
+export interface ReviewSaveFailure {
+  kind: 'comment' | 'reply' | 'other'
+  retry?: () => void
+}
+
+/**
  * For display only: a completed review's comment is 「位置不明」 (`orphaned`) when
  * its text is no longer in the document. Never written back — members fix the
  * document from these reviews, so opening one must not change anyone's file.

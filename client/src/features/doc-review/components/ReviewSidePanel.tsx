@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { ArrowBendDownRight, CheckCircle, Trash, User } from '@phosphor-icons/react'
+import { ArrowBendDownRight, CheckCircle, Sparkle, Trash, User } from '@phosphor-icons/react'
 import type { CommentSeverity, Review, ReviewComment } from '../model'
 import { SEVERITY_ORDER, SeverityBadge } from './severity'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
@@ -60,6 +60,7 @@ export function ReviewSidePanel({
   onToggleResolved,
   onClickComment,
   onAddReply,
+  onAskAi,
   readOnly = false,
 }: {
   review: Review
@@ -68,6 +69,8 @@ export function ReviewSidePanel({
   onClickComment: (comment: ReviewComment) => void
   /** Resolves to false when not saved: the reply box stays open with the text. */
   onAddReply?: (commentId: string, body: string) => Promise<boolean> | void
+  /** ［AI に反映してもらう］ (the editor's, files-and-editor.md "Asking the AI to fix a passage"): an open comment whose words are found. Never resolves it. */
+  onAskAi?: (comment: ReviewComment) => void
   readOnly?: boolean
 }) {
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
@@ -198,6 +201,15 @@ export function ReviewSidePanel({
                 >
                   <ArrowBendDownRight size={11} />
                   返信
+                </button>
+              )}
+              {onAskAi && !comment.resolved && !comment.orphaned && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onAskAi(comment) }}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-small text-caption font-normal text-ai-text hover:bg-ai-bg transition-colors"
+                >
+                  <Sparkle size={11} />
+                  AI に反映してもらう
                 </button>
               )}
               {!readOnly && onDeleteComment && (

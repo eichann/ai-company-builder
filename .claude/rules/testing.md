@@ -143,8 +143,8 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
 handle for a 15k-file company and a first file-tree view of one ~55 KB read (#151); search of
 「の」 over ~6.5k files capped at 500 matches / < 1 MB, folder `git log` (#153); autosave of an
 ~8 MB history returning at once, summaries < 500 KB, the 564-message conversation rendering only
-its latest window (#154); the renderer bundle ≤ 3.2 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; 2.5 → 2.55 on 2026-11-03 for drag-to-link, 2.55 → 3.0 on 2026-11-03 「ちょっと上げて良い」, 3.0 → 3.2 on 2026-11-25 after #846 + #847 together passed it, owner decisions; reasons in the script).
-- **Growth per pull request** (owner decision 2026-11-03, with the 3.0 MiB budget, now 3.2): on a pull request
+its latest window (#154); the renderer bundle ≤ 3.3 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; 2.5 → 2.55 on 2026-11-03 for drag-to-link, 2.55 → 3.0 on 2026-11-03 「ちょっと上げて良い」, 3.0 → 3.2 on 2026-11-25 after #846 + #847 together passed it, 3.2 → 3.3 on 2026-11-29 for 「AI に直してもらう」 (asked in its pull request), owner decisions; reasons in the script).
+- **Growth per pull request** (owner decision 2026-11-03, with the 3.0 MiB budget, now 3.3): on a pull request
   the job also builds the base (the checkout is the PR merged into its base, so `HEAD^1` is the base
   tip; `git worktree`, install, `vite build`) and `check-bundle-size.mjs --base <dir>` fails when the
   renderer JS grows by more than 50 KB (`--max-growth-kb`). Built in the same job rather than read from
@@ -156,7 +156,9 @@ its latest window (#154); the renderer bundle ≤ 3.2 MiB JS (raised from 2.2 �
   mermaid for a reply's diagrams (`chat-ui-and-history.md` "Diagrams in a reply") is one file there, loaded only when a
   diagram is drawn, never at start. `check-bundle-size.mjs` does not add it to the renderer JS above; it measures each
   such file against its own budget in `ON_DEMAND_VENDOR` (`[perf] bundle.onDemand.<name>`) and fails on any file there
-  that is not listed, so the folder is no way around the budget.
+  that is not listed, so the folder is no way around the budget. The in-place document editor (Milkdown, its chunk
+  named after `src/features/editor/milkdownSurface.ts`, `files-and-editor.md` "Editing a document in place") is the
+  second, 430 KB (2026-11-28, owner decision asked in its pull request).
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.
 - Run one: `cd client && npx tsx --test tests/perf/git-search.perf.test.ts`; bundle:

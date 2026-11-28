@@ -706,11 +706,19 @@ test('the app shortcuts a document hands over are the command catalog\'s, of the
   const all = Object.values(COMMANDS as Record<string, CommandDefinition>).filter(def => def.keybinding && ['editor', 'app'].includes(def.keybinding.area))
   const around = all.filter(def => !def.keybinding!.notInHtmlDocument)
   const kept = all.filter(def => def.keybinding!.notInHtmlDocument)
-  assert.deepEqual(kept.map(def => def.id), ['editor.find'], 'control: ⌘F is marked as nothing on an HTML tab')
+  // ⌘F, the Markdown selection bubble's keys (⌘I, ⌘⇧S, ⌘E, ⌘⌥0〜3 …) and the 「/」 list's (↑ ↓ Enter Esc) do nothing on an HTML tab.
+  assert.deepEqual(kept.map(def => def.id), ['editor.find', 'editor.toggleBold', 'editor.toggleItalic', 'editor.toggleStrike', 'editor.toggleCode', 'editor.editLink', 'editor.setBodyText', 'editor.setHeadingOne', 'editor.setHeadingTwo', 'editor.setHeadingThree', 'editor.blockMenuNext', 'editor.blockMenuPrevious', 'editor.blockMenuChoose', 'editor.blockMenuClose'], 'control: the keys marked as nothing on an HTML tab')
+  assert.equal(docViewShortcutOf(press('f', { metaKey: true }), true), null, 'the document keeps ⌘F')
+  assert.equal(docViewShortcutOf(press('f', { ctrlKey: true }), false), null, 'the document keeps Ctrl+F')
   for (const def of kept) {
-    assert.equal(docViewShortcutOf(press('f', { metaKey: true }), true), null, `${def.id}: the document keeps ⌘F`)
-    assert.equal(docViewShortcutOf(press('f', { ctrlKey: true }), false), null, `${def.id}: the document keeps Ctrl+F`)
+    const [key, ...mods] = def.keybinding!.key.split('+').reverse()
+    const got = docViewShortcutOf(press(key, { metaKey: true, shiftKey: mods.includes('shift'), altKey: mods.includes('alt'), code: /^\d$/.test(key) ? `Digit${key}` : undefined }), true)
+    // Never handed over as the Markdown command; the same key may still be an app command (⌘B the left column, ⌘K 探す).
+    assert.notEqual(got, def.id, `${def.id}: not handed over from an HTML document`)
+    assert.ok(got === null || around.some(a => a.id === got && a.keybinding!.area === 'app'), `${def.id}: ${got}`)
   }
+  assert.equal(docViewShortcutOf(press('i', { metaKey: true }), true), null, 'the document keeps ⌘I (its own italic)')
+  assert.equal(docViewShortcutOf(press('b', { metaKey: true }), true), 'layout.toggleLeft', '⌘B is still the left column')
   assert.ok(around.some(def => def.id === 'find.byName') && around.some(def => def.id === 'editor.togglePreview'), 'control: ⌘K and ⌘⇧V are in the catalog')
   for (const def of around) {
     const [key, ...mods] = def.keybinding!.key.split('+').reverse()

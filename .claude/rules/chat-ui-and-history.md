@@ -8,6 +8,9 @@ paths:
   - "client/tests/chat-history-store.test.ts"
   - "client/src/features/chat/chat-rendering.test.ts"
   - "client/tests/chat-header-ui.*"
+  - "client/tests/chat-reply-cleaning-ui.*"
+  - "client/tests/chat-rich-reply-ui.*"
+  - "client/tests/ui/fixtures/reply-html-traps.ts"
   - "client/tests/ui-stream-limits.test.ts"
   - "client/shared/chat-server-api.ts"
   - "client/electron/chat-server.ts"
@@ -99,7 +102,12 @@ one place an added agent brings its own controls; everything else asks the regis
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
   chat input. The one request a tab takes while not shown is `aiTurn`: the automatic 「AI の番」
-  in a fresh background tab (`ai-turns.md`).
+  in a fresh background tab (`ai-turns.md`). `chat.askToFix` (「AI に直してもらう」, `chat-and-agents.md` "In-place
+  fixes") is the request `inlineFix`: the shown tab sends it into **its current consultation** (not a new one) unless
+  anything of the tab runs or waits (`tabBusy`; then answered `busy`), waits for the turn that carried it to end
+  (`inlineFixRef`, settled in `onFinish` with `inlineFixTurnAnswer`) and answers the command with the reply; a send that
+  never went out (its save failed) is answered `failed`, and the member's draft in the composer is neither cleared nor
+  replaced by it (`besideComposer`). Any request that replaces one still waiting for the tab answers that one `busy`.
 - **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
   assumes one chat on screen:
   - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on
@@ -385,7 +393,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`tasks-ui.md` "Consulting about a task"). A message the app wrote for the AI keeps
   `appInstruction` (`client/shared/app-instruction.ts`): restored as `metadata.appInstruction`,
   never drawn as a bubble, previewed or searched (`tasks-ui.md`). A message the app sent in the member's place to start a
-  consultation (`chat.newConsultation`'s first message, an automatic 「AI の番」's) keeps `appSent` (`metadata.appSent`,
+  consultation (`chat.newConsultation`'s first message, an automatic 「AI の番」's) or into it (`chat.askToFix`'s request:
+  the in-place fix stays in the consultation's history, followed by the AI's reply) keeps `appSent` (`metadata.appSent`,
   `appSentOf`): drawn as a bubble as before, but never the member's own request (`records.md` "The AI at the member's
   request").
 - **`updatedAt` is when the conversation changed** (staging 2026-11-02: every conversation showed the
@@ -415,8 +424,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - While a reply streams, the list follows the bottom unless the member scrolled up to read:
   only a move up that leaves the view more than 120 px from the bottom stops following
   (`hooks/useChatAutoScroll.ts`). The browser's scroll anchoring also moves the view (down) when
-  the reply grows; counting that as reading stopped the follow under load. Test:
-  `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」.
+  the reply grows; counting that as reading stopped the follow under load. Content that grows after its
+  render (a rich reply's frame taking its height) asks the same rule through `ChatFollowContext`
+  (`chatFollow.ts`, `followIfFollowing`), never a rule of its own. Test:
+  `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」, `tests/ui/chat-rich-reply.spec.ts`.
 - The scrolling list (`MessageList`) is `relative`, the containing block of anything absolutely
   positioned inside it (Tailwind `sr-only`, overlays). Without it a card's `sr-only` text was
   laid out against the page ~10 000 px down and the whole window painted shifted (staging,
@@ -494,7 +505,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   labels, its `%%{init}%%` directives and front matter removed (`mermaidWithoutConfig`) and its settings `secure`; every
   SVG — mermaid's and the AI's — keeps only drawing elements (no script, foreignObject, image, a — unwrapped to a group —,
   animate / set, feImage), no `on*`, no reference but `#id`, no outside `url()`, no CSS with `@import`, fonts or
-  escapes (`sanitizeSvg`, parsed in an inert DOMParser document); and the result is an `<img src="data:image/svg+xml">`,
+  escapes (`svgCleaning.ts` `sanitizeSvg`, on the walk shared with a rich reply's HTML, "Cleaning the AI's markup"
+  below); and the result is an `<img src="data:image/svg+xml">`,
   so even what a sanitiser missed cannot run or load. Diagrams are drawn whatever 「返事の形」 (it only says whether the
   AI is told they are welcome: `client/shared/reply-style.ts`; `chat-and-agents.md` "What ACB tells the AI"). Each
   picture is drawn once per text and theme and kept (`watchDiagram`, ≤ 100 unwatched kept), one mermaid at a time.
@@ -511,6 +523,186 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   and with mermaid's directives honoured; an undrawable block stays code; the
   switch and the request; `SCREENSHOTS=<dir>`), `tests/chat-panel-helpers.test.ts` (the request reads it per request),
   `tests/chat-standing-instructions.test.ts` (the one line with the turn, only for リッチ and an agent that takes it).
+- **Cleaning the AI's markup** (one walk, two allowlists; owner 2026-11-28: the rule lives in one place).
+  `markupCleaning.ts` holds what every cleaner of the AI's markup shares: the text is parsed in an inert DOMParser
+  document (`parseInert`: nothing runs or loads while it is cut); `cleanTree` walks it once, removes comments and
+  processing instructions and every `on*` attribute whatever the allowlist says, and asks the allowlist's
+  `CleaningRules` only what to keep (an element kept, unwrapped — its words stay —, removed with its contents, or
+  replaced; an attribute's kept value or none; a last check once its inside is clean); `cssLoadsOrRuns` is the one
+  list of CSS that loads or runs something (an outside `url()`, `@import`, `@font-face`, `image-set` / `image()`,
+  `expression()`, `javascript:`, any escape). The two allowlists: a diagram's picture (`svgCleaning.ts`
+  `sanitizeSvg`, "Diagrams in a reply" — unchanged by the move, except that comments inside a picture now go too,
+  which draws the same) and a rich reply's HTML (`replyHtmlCleaning.ts` `sanitizeReplyHtml`, below). A gap found in
+  the walk is fixed there, for both.
+- **Rich replies: the cleaning of the AI's HTML** (owner decisions 2026-11-28, 「リッチな返信」; PR1 of 4: the
+  function and its tests; PR2 draws it in the reply's closed frame, below; PR3 the AI's line; PR4 the buttons, below).
+  `sanitizeReplyHtml(markup) → { html, css }`, the first of the two guards (the second is the closed frame, PR2): what
+  it returns runs nothing, loads nothing, sends nothing, cannot leave the reply's box and does not move for ever,
+  **even drawn in a frame that would allow it** (the spec checks exactly that). Kept: text, headings, lists, tables,
+  emphasis, quotes, `details` / `summary`, sections, `class` / `style` / `title` / `lang` / `dir` / `role` /
+  `aria-label` / `aria-hidden` and a few per-element attributes (`colspan`, `open`, …). **Newly allowed** (owner):
+  `input` of type `radio` / `checkbox` only (`type`, `name`, `id`, `checked`, `value`) and `label` (`for`) — tabs and
+  toggles through `:checked`; every other input type, `form`, `button`, `select`, `textarea`, … go with their
+  contents, so nothing can be typed or sent —; `a` with an `http(s)` address only, with no user name or password
+  (`https://app.acb@evil.example/` reads as one place and goes to another; written back as the browser reads it; any
+  other link — `javascript:`, `data:`, `file:`, no scheme — keeps its words, not itself; `ping`, `target`, `download`
+  go); CSS `animation-*` / `transition-*` and `@keyframes`, cleaned like any declaration, **at most 3 animations on an
+  element, each at most 10 runs of at most 10 s, starting at most 10 s late** (`infinite`, longer, later and more are
+  dropped: no endless motion, not even a chain of delayed runs — independent review). Pictures:
+  a raster `data:image/(png|jpeg|gif|webp);base64` only; an inline `<svg>` or an SVG `data:` image goes through
+  `sanitizeSvg` with its CSS animation and transition taken out first (a reply's picture does not move: an SVG image
+  runs its own CSS motion, past the limits above — Codex review; the diagrams are not touched), must be well-formed
+  XML, and becomes `<img src="data:image/svg+xml;charset=utf-8,…">` in one spelling. Removed with contents: script, noscript, template, style (its CSS is read separately), link, meta, base,
+  title, head, xmp, noembed, noframes, iframe / frame / frameset, object, embed, portal, fencedframe, media, picture, canvas, map, dialog,
+  MathML; any other element (marquee, a custom element) is unwrapped. **CSS** (`<style>` text and `style`
+  attributes) is read by the browser's own parser (a constructed `CSSStyleSheet`, which loads nothing; escapes are
+  undone, custom properties keep theirs and are refused by `cssLoadsOrRuns`) and written back as listed properties
+  (or their longhands) — **a custom property only with a plain name (`--[A-Za-z0-9_-]{1,64}`) and a plain value
+  (colours, numbers, `var()`, `calc()`: no quotes, braces or semicolons)**, since the parser hands its name back with
+  escapes undone (independent review: an escaped name spelled `}` or `</style>` and ended the rule or the element) —
+  with values that hold no `url()` at all, `cross-fade`, `element()`, `paint()`, `src()`,
+  `attr()`, escapes or `<` (so the CSS can never end the `<style>` it is put in), no viewport units, `position` only
+  `static` / `relative` / `absolute`, `content` only a plain string, no viewport or container units (`vh`, `dvw`,
+  `cqw`, …); only style rules (their nested rules dropped),
+  `@media` / `@supports` around them and `@keyframes` stay — `@import`, `@font-face`, `@layer` and every other
+  at-rule go —, and no selector naming the document (`:root`, `:scope`, a top-level `&`, `:host`, `html`, `body`,
+  `::backdrop`, …; `*` and the like still match the frame's root, which the closed frame keeps apart — the frame
+  puts its own CSS in a `<style>` before the reply's and clips what it shows to its box). **What is kept must read back
+  the same**: the sheet and each `style` are parsed again and must clean to themselves, and the sheet holds no `<`;
+  otherwise it is dropped whole (so nothing is left open to swallow the CSS that follows). Raster pictures may be
+  animated (GIF, APNG, WebP): the motion limits are CSS's only.
+  **A piece still being written** is cleaned the same way: the parsers close what is open, a tag cut inside an
+  attribute is no element. Anything that throws gives `{ html: '', css: '' }` (nothing rather than half cleaned).
+  Tests: `tests/ui/chat-reply-cleaning.spec.ts` (preview `chat-reply-cleaning-ui.html`, which exposes the function;
+  traps in `tests/ui/fixtures/reply-html-traps.ts` — both demo versions' and the parsers' corners): a reply as the AI
+  writes it keeps its look and scriptless parts; an independent audit of the allowlist finds nothing in the cleaned
+  traps and the result reads the same when cleaned again (no markup that changes on a second reading); the cleaned
+  traps drawn in an unsandboxed frame, pressed, hovered, checked and tabbed through run nothing, make no outside
+  request, stay in the frame, fix nothing over the app and run no endless animation — and the same frame with the
+  traps as written does all four (the checks can fail); every piece cut every 3 characters is as clean; CSS put after
+  the reply's (a sentinel rule, a sentinel declaration) still reads as its own.
+  Mutation-checked guard by guard (the PR lists them).
+- **Rich replies: the reply's closed frame** (PR2 of 「リッチな返信」, owner decisions 2026-11-28 「シームレス版」).
+  A text part with a ```` ```acb-html ```` (an explanation) or ```` ```acb-slide ```` (one 1280×720 page) block
+  (`richReply.ts` `hasRichBlock` / `richPiecesOf`: the fence at a line's start, its info exactly that, case-insensitive,
+  not inside another fence; ```` ```html ```` and every other fence stay code) is drawn **whole — its Markdown too — in
+  one frame with no line or background of its own** (`components/ChatRichReply.tsx`), whatever 「返事の形」; with the
+  Markdown display off it stays plain text. Tool rows and cards stay outside: each such text part is its own frame.
+  - **Two guards, each enough alone.** (1) Every piece — the AI's blocks and the chat's own Markdown (drawn the
+    chat's way into static HTML, `richReplyMarkdown.tsx`: raw HTML skipped, pictures as words, code by the chat's
+    highlighter) — goes through `sanitizeReplyHtml`, each on its own, and the pieces are joined as one tree
+    (`richReplyFrame.ts` `frameContentOf`: a block cannot close the frame's wrappers; the CSS is refused if it holds
+    `<`); a block still being written is cut back to its last whole tag, outside an open `<style>` or table row
+    (`writtenSoFar`), and cleaned like the rest. (2) **The frame the member sees has `sandbox="allow-popups"` only — no
+    `allow-scripts`, no `allow-same-origin` (an opaque origin: the chat cannot reach into it, it cannot reach the
+    chat) — and its document starts with its own policy** `FRAME_CSP` (`default-src 'none'; img-src data:;
+    style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'`) and
+    `x-dns-prefetch-control: off`, before anything of the reply. Neither is to be widened for a convenience (no script for the height, no same origin for
+    the links): this is the owner's line.
+  - **Links**: the frame's `<base target="_blank">` makes a pressed web link (only `http(s)` survive the cleaning)
+    ask for a new window — the one thing `allow-popups` permits —, which the app's window-open handler opens in the
+    member's browser (`electron-adapter.ts` `keepAppPageInWindow`, `webLinkForBrowser`: the path of every chat link).
+    The frame itself never navigates (no `target` is kept, `_top` is refused by the sandbox), and **main refuses it
+    too**: `keepAppPageInWindow`'s `will-frame-navigate` lets a frame showing a srcdoc (also after an in-page jump,
+    `about:srcdoc#…`), a frame inside one and a navigation one starts go only to a srcdoc again
+    (`client/shared/srcdoc-frames.ts`; `ipc-and-main-process.md` "Windows"; `tests/reply-frame-electron.test.ts`).
+  - **Height** (no scroll inside): nothing can leave the shown frame to say how tall it is, so the chat lays the same
+    document out in **one hidden copy** (`measureReply`, one per window, one reply at a time): `sandbox="allow-same-origin"`
+    (still no script), the same policy, `inert`, `aria-hidden`, off screen and invisible — never pressed, hovered or
+    focused —, reads its height there (pictures decoded first) and is emptied again. **The box is as tall as the reply
+    can become** (Codex review: the shown frame cannot say it grew): once written, the copy is also laid out with
+    every `<details>` open, check boxes both ways and each radio choice (`tallestState`, at most 24 inputs: the
+    layouts run on the app's thread), so a step opened or a tab switched is never cut off — a reply that can be
+    opened keeps that room below it while closed. Heights are kept per width, theme and text, only once written
+    (`knownHeights`, ≤ 200). The copy is made again if it left the page; an unmeasured reply keeps the ordinary
+    rendering. **Owner condition for the copy (2026-11-28): no frame of the app is ever sandboxed with both
+    `allow-scripts` and `allow-same-origin`** — `tests/frame-sandbox.test.ts` reads every string of the app's code
+    (renderer, main, shared; comments left out) and fails on a file holding both, and pins the two sandboxes here
+    exactly; the spec checks every frame on the chat page. Over **20,000 px** as written (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
+    途中までを表示しています。続きは［大きく見る］で見られます。」 follows, with a ［大きく見る］ button when the conversation can keep pages (`onOpenLarge`, below).
+  - **Being written**: drawn again at most every 80 ms (`RICH_UPDATE_MS`), one drawing at a time. The shown frame is
+    never rewritten: the next one loads out of sight and takes the old one's place once drawn (two animation frames
+    after its `load`), so there is no empty moment; until the first frame has drawn, the chat's ordinary rendering
+    holds the place. A new height makes the list follow the bottom only when it was following (`ChatFollowContext`).
+  - **The look is the chat's**: the app's tokens (`:root` / `.dark` custom properties) and its Markdown typography
+    (the `prose` rules, `CHAT_MARKDOWN_CLASS` shared with `MarkdownMessage`) are read from the app's own style sheets
+    into the frame, then a few resets and the ready-made boxes (`acb-key`, `acb-note`, `acb-warn`, `acb-ok`,
+    `acb-steps`, `acb-compare`, `acb-tabs`, `acb-tip`, `acb-bar`, `acb-muted`: tokens only). **The AI is told about
+    them** (PR3) only with 「返事の形：リッチ」 (`reply-style.ts` `RICH_HTML_INSTRUCTION`, its markup in `RICH_HTML_PIECES`,
+    `chat-and-agents.md` "What ACB tells the AI"); ふつう and the API key add nothing, and such a block is drawn
+    either way. Nothing was added to the cleaning for them: `class` is kept on any element, and only the frame's own
+    CSS gives these names a look. Test: `tests/ui/chat-rich-reply.spec.ts` 「the ready-made pieces the AI is told
+    about…」 (every piece kept by the cleaning, each class has a frame rule, the boxes have their own background, and
+    boxes and marks reach a contrast of 4.5 in light and dark), `tests/chat-standing-instructions.test.ts`. The reply's CSS sits in a
+    `<style>` of its own after the frame's. **Light / dark** follows the app, not the computer: the frame's `<html>`
+    gets `dark`, and the reply's own `prefers-color-scheme` queries are rewritten to always / never hold
+    (`cssForTheme`); a switch loads the next frame the same way (no empty moment). A slide is scaled to the reply's
+    width by CSS alone (`container-type` + `calc(100cqw / 1280px)`).
+  - **Long conversations**: a frame is drawn only within 600 px of the list's view (one IntersectionObserver per
+    list, disconnected with its last reply) and taken down farther away, its box keeping its height; on top of
+    `MessageList`'s latest-50 window.
+  - Selection and copy across the reply's words, tables and boxes work inside the one frame. A ```` ```mermaid ````
+    block or a page card inside such a reply stays code / a plain link (the frame draws neither).
+  Tests: `src/features/chat/richReply.test.ts` (which replies and pieces, cut-off pieces, the theme rewrite),
+  `tests/ui/chat-rich-reply.spec.ts` (real chat `chat-header-ui.html?turn=manual`, and the frame alone on
+  `chat-rich-reply-ui.html`): the sandbox, policy and hidden copy as above, words and HTML in one frame, selection,
+  ```` ```html ```` stays code; the demo's traps streamed 400 characters at a time then pressed, hovered, checked and
+  tabbed: nothing ran, no request and no window left, nothing fixed, no endless motion; the uncleaned traps and raw CSS
+  measured in the hidden copy run and load nothing and are not left there; a web link leaves only as one
+  new window to its address; every piece cleaned and kept in its place; height = content, the 20,000 px stop; a step
+  opened, a tab switched and a taller dark layout never cut off; no empty
+  moment and at most about one frame per 80 ms while written; following / not moving the reader; light / dark with the
+  reply's own dark colours; a slide scaled whole; `?history=long&rich=1` keeps ≤ 8 frames live while scrolling and the
+  list's height unchanged; **the frame alone with uncleaned traps** runs and loads nothing, shares no origin and cannot
+  move the app — and with its policy off the traps load, with its sandbox off a link moves the app (the checks can
+  fail). The policy is pinned whole. Mutation-checked: the sandbox, the policy, following, the double frame,
+  near-screen drawing, the height, the tallest state, heights per theme and the theme rewrite each fail a test when
+  taken out. `SCREENSHOTS=<dir>` shoots a reply light and dark.
+- **Rich replies: ［大きく見る］［ページとして残す］［コードとして見る］** (PR4 of 「リッチな返信」, owner decisions 2026-11-28 ①④).
+  `components/ChatRichReplyView.tsx` wraps every rich reply: three small icon buttons at its top right (a `toolbar`
+  「この返事の表示」), transparent until the pointer is over the reply or one of them has the keyboard's focus (always in
+  the tab order, after the reply; placed after the frame in the page's order, so drawn over it without a z-index).
+  - **［大きく見る］** keeps the reply as a page and runs `editor.viewDocument` on it (in a consultation's own window
+    `file.open`, as the page cards): the HTML viewer opens it (doc-frame.md: its own view, no network, an opaque origin,
+    that folder only). **［ページとして残す］** keeps the same page and shows it under the reply as a page card
+    (「ページとして残しました」, 「ページ・あなただけに見えます・<name>」), which opens it the same way. The same reply in the
+    same conversation keeps one file (remembered per conversation and text, ≤ 100) while it is still there (`fs:exists`;
+    moved or deleted → kept again under a free name); a refusal shows as an alert line. **Every way to keep the page — the
+    two buttons and the long reply's line 「続きは［大きく見る］で」 — goes through one entry**, `replyPages.ts`
+    `keepReplyPage`: nothing is kept while the reply is still being written, and one keep runs at a time per reply (a
+    press meanwhile, from any button or view of it, keeps nothing more), so a half-written page or a second copy is never
+    made; all three buttons are disabled meanwhile (Codex review of 段4).
+  - **The page is the AI's HTML as written** (owner ④): `richReplyPage.ts` `replyPageDocument` — the reply's Markdown as
+    the chat draws it, each ```` ```acb-html ```` / ```` ```acb-slide ```` block uncleaned, the app's tokens, typography and
+    ready-made boxes (`appCss`, `FRAME_CSS`); a small script of its own sets `.dark` from the computer's setting (the
+    reply's own `prefers-color-scheme` follows the computer there too). Only the viewer may hold it: the chat's frame
+    still draws the cleaned reply.
+  - **Main writes it** (`electron/features/reply-pages/ipc.ts`, `replyPage:save(rootPath, todayFolder, consultation,
+    html)`; `files-and-editor.md`): the renderer hands the company folder (checked by the allowed roots), the today
+    folder the chat requests already carry, which consultation (company and conversation id) and the page — never a
+    file path. Main builds `<root>/<today folder>/ページ/<name>.html` with `replyPageFolderOf` (only a today folder of the
+    app's shape: never the top level, never another place), refuses a department not on this computer, a folder not
+    downloaded and a reserved name (the folder's and the file's), checks the folder by real location before and after
+    making it and refuses a link anywhere from the department down to `ページ/` (Codex review: a link to a shared folder
+    inside the company folder passes the root check, and the page would be synced), names the page after
+    the consultation's stored title (`client/shared/reply-pages.ts` `replyPageBaseName`: path, Windows, control,
+    invisible and direction characters out, ≤ 40 characters, else 「AI の返事」) and creates it with `wx`, trying
+    「名前 (2).html」… up to 50: nothing is ever replaced. The buttons that keep a page show only where the conversation has
+    a today folder (`ReplyPagesContext`, given by `ChatConversation`): not in a consultation's own window.
+  - **［コードとして見る］** shows the reply as the chat's ordinary Markdown (its blocks as code, no frame); pressed again
+    (「整えた表示に戻す」, `aria-pressed`) the frame comes back.
+  Tests: `tests/ipc-reply-pages.test.ts` (the page in ページ/ named after the consultation, as written; a taken name gets
+  (2), (3) and the member's file is untouched; another root, a climb, another shape, the top level, a department not
+  here, a link out of the company folder and a link to a shared folder inside it are refused with nothing written
+  there; not a page refused; the name rule; mutation-checked: `wx`, the folder shape, the real-location check, the link
+  check), `tests/ipc-path-guard.test.ts` (`rootPath`
+  GUARDED), `tests/ui/chat-rich-reply.spec.ts` 「the reply's buttons」 (`chat-header-ui.html?pages=1`: hidden until
+  hover or focus, three buttons only with a today folder; disabled while written; the line's ［大きく見る］ disabled while
+  written and one page however many presses of all of them; ［大きく見る］ asks main once with the
+  uncleaned block and opens the viewer, the chat's frame still without the script, and a deleted page is kept again; ［ページとして残す］'s card and a refusal; ［コードとして見る］;
+  the 20,000 px line's button; mutation-checked: the focus rule, the one file per reply), `src/features/chat/replyPages.test.ts`
+  (`keepReplyPage`: never while written, a press while one keeps keeps nothing, the same file after, a deleted page kept
+  again, a refusal then a retry; mutation-checked: the written check, the one-at-a-time check).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

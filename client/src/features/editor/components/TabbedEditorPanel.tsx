@@ -18,6 +18,8 @@ import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, Rea
 import { ExternalCompareView } from './ExternalCompareView'
 import { LocalImage, PdfPreview, VideoPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
+import type { SelectionSlot } from '../selectionSlot'
+import type { ReviewFrameSlot } from '../reviewFrameSlot'
 import { HtmlDocumentPane } from './HtmlDocumentPane'
 import { HtmlSourceBar } from './HtmlViewToggle'
 
@@ -53,6 +55,12 @@ interface TabbedEditorPanelProps {
   tabsEnd?: ReactNode
   /** One line above the tabs (what a tidy did). */
   notice?: ReactNode
+  /** A Markdown document is read and edited in the same view; without it the preview reads only (the source edits). */
+  inPlaceEditing?: boolean
+  /** What the screen plugs into the selected words (the review's comment box: selectionSlot.ts). */
+  selection?: SelectionSlot
+  /** What the screen plugs in around a document: the review's state, banners, history, side panel and diff (reviewFrameSlot.ts). */
+  reviewFrame: ReviewFrameSlot
 }
 
 export function TabbedEditorPanel({
@@ -76,6 +84,9 @@ export function TabbedEditorPanel({
   arrangement,
   tabsEnd,
   notice: topNotice,
+  inPlaceEditing = false,
+  selection,
+  reviewFrame,
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
@@ -89,7 +100,7 @@ export function TabbedEditorPanel({
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   // Another company is another document view (its Drive videos play with that company's session).
   const companyId = useAppStore(s => s.currentCompany?.id ?? null)
-  const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode()
+  const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode(inPlaceEditing ? 'preview' : 'editor')
   const scroll = useScrollMemory(fileTabs, shownFile, mdViewMode)
   const { saveCurrentScrollPosition } = scroll
   const isActivePreviewTab = shownFile === previewFilePath
@@ -105,7 +116,7 @@ export function TabbedEditorPanel({
   const files = useOpenFiles(fileTabs, shownFile, reviewReloadRef, setError)
   const { fileContents, setContent } = files
   const activeFile = shownFile ? fileContents.get(shownFile) : null
-  const { review, textSelection } = useEditorReview(shownFile, activeFile?.content || '')
+  const { review, textSelection } = useEditorReview(reviewFrame, shownFile,activeFile?.content || '')
   reviewReloadRef.current = review.reload
 
   const saving = useFileSaving({
@@ -264,6 +275,7 @@ export function TabbedEditorPanel({
       <div className="flex-1 overflow-hidden min-w-0">
         {activeFile && activeFilePath && activeFile.comparing && activeFile.external?.kind === 'changed' ? (
           <ExternalCompareView
+            diff={reviewFrame.diff}
             arrived={activeFile.external.diskContent}
             mine={activeFile.content}
             changedAgain={!!activeFile.changedWhileComparing}
@@ -273,6 +285,7 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isHtmlFile(activeFilePath) && !htmlSources.has(activeFilePath) ? (
           // One view per file and per showing: another tab or 中身 closes it (its scripts stop).
           <HtmlDocumentPane
+            commentBox={selection?.commentBox}
             key={`${companyId ?? ''}\n${activeFilePath}`}
             filePath={activeFilePath}
             onShowSource={() => showHtmlSource(activeFilePath, true)}
@@ -280,6 +293,7 @@ export function TabbedEditorPanel({
             zoom={htmlZooms.current.get(activeFilePath)}
             onZoom={zoom => htmlZooms.current.set(activeFilePath, zoom)}
             review={review}
+            reviewFrame={reviewFrame}
             content={activeFile.content}
           />
         ) : activeFile?.isLoading ? (
@@ -300,18 +314,23 @@ export function TabbedEditorPanel({
           <VideoPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
+            commentBox={selection?.commentBox}
+            aiFix={selection?.aiFix}
             // One preview per file: it restores that file's scroll position when mounted.
             key={activeFilePath}
             paneId={paneId}
             filePath={activeFilePath}
             content={activeFile.content}
             review={review}
+            reviewFrame={reviewFrame}
             textSelection={textSelection}
             showDiff={showDiff}
             setShowDiff={setShowDiff}
             previewRef={scroll.mdPreviewRef}
             initialScrollRatio={scroll.ratioOf(activeFilePath)}
             onShowEditor={() => handleSetMdViewMode('editor')}
+            // The disk's changes and deletes seen (editor-disk-state.ts): an AI fix asked before one is not adopted.
+            inPlace={inPlaceEditing && !isReadOnly(activeFilePath) ? { onChange: handleContentChange, outsideChanges: activeFile.outsideChanges ?? 0 } : null}
             onEdit={() => {
               handleSetMdViewMode('editor')
               if (isActivePreviewTab && onPinFile && activeFilePath) {
@@ -339,14 +358,14 @@ export function TabbedEditorPanel({
               <div className="absolute top-3 right-3 flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
                 <button
                   className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                  title="エディタ"
+                  title="もとの書き方"
                 >
                   <Code size={12} />
                 </button>
                 <button
                   onClick={() => handleSetMdViewMode('preview')}
                   className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
-                  title="プレビュー"
+                  title="文章"
                 >
                   <Eye size={12} />
                 </button>

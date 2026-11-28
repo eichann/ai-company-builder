@@ -1,14 +1,12 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Code, Eye, PencilSimple, ChatCircleDots } from '@phosphor-icons/react'
-import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
-import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
-import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
-import { ReviewHistoryDropdown } from '../../doc-review/components/ReviewHistoryDropdown'
-import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
-import { CommentPopover } from '../../doc-review/components/CommentPopover'
-import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
+import type { ReviewFrameSlot, SnapshotDiffHandle } from '../reviewFrameSlot'
 import { MarkdownPreview } from './MarkdownPreview'
+import { InPlaceMarkdownEditor, type CommentFixStart } from './InPlaceMarkdownEditor'
+import { findTextInMarkdown } from '../../doc-review/model'
+import type { SelectionSlot } from '../selectionSlot'
+import { Callout } from '../../../shared/ui/primitives'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface Props {
@@ -16,6 +14,8 @@ interface Props {
   filePath: string
   content: string
   review: EditorReview['review']
+  /** The review's parts, handed in by the screen (reviewFrameSlot.ts). */
+  reviewFrame: ReviewFrameSlot
   textSelection: EditorReview['textSelection']
   showDiff: boolean
   setShowDiff: React.Dispatch<React.SetStateAction<boolean>>
@@ -24,31 +24,60 @@ interface Props {
   onShowEditor: () => void
   /** 編集: to the source, keeping a preview tab. */
   onEdit: () => void
+  /** Edit the document right here (files-and-editor.md "Editing a document in place"); absent: read only. */
+  inPlace?: { onChange: (text: string) => void; outsideChanges: number } | null
+  /** The review's comment box, handed in by the screen (selectionSlot.ts): ［コメント］ and a review's selection. */
+  commentBox?: SelectionSlot['commentBox']
+  /** The consultation's AI (selectionSlot.ts): ［AI に直してもらう］, and ［AI に反映してもらう］ on a completed review's comment. */
+  aiFix?: SelectionSlot['aiFix']
 }
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit,
+  paneId, filePath, content, review, reviewFrame: frame, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox, aiFix,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
-  const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
+  // ［AI に反映してもらう］: the review's reading view closes and the document opens here, where the fix is asked
+  // and shown under the comment's words. The comment is left as it is (never resolved for the member).
+  const [commentFix, setCommentFix] = useState<CommentFixStart | null>(null)
+  const reflectComment = inPlace && aiFix && review.isViewingCompleted && review.activeReview
+    ? (comment: { id: string; selectedText: string; body: string }) => {
+      const reviewId = review.activeReview!.id
+      setShowDiff(false)
+      review.closeViewingReview()
+      const at = findTextInMarkdown(content, comment.selectedText)
+      setCommentFix({
+        quote: comment.selectedText,
+        body: comment.body,
+        at: at ? { start: at.start, end: at.end } : null,
+        onStarted: () => setCommentFix(null),
+        onBackToReview: () => review.viewReview(reviewId),
+      })
+    }
+    : undefined
+  // A review being made or read shows the document as it reads (its quotes are marked in the text).
+  const editingHere = !!inPlace && !showDiff && !review.isReviewing && !review.isViewingCompleted
+  const diffViewRef = useRef<SnapshotDiffHandle | null>(null)
   return (
     <div className="h-full flex flex-col">
-      {review.saveError && <ReviewSaveError failure={review.saveError} onDismiss={review.dismissSaveError} />}
-      {review.isReviewing && review.activeReview && (
-        <ReviewBanner
-          activeReview={review.activeReview}
-          onComplete={review.completeReview}
-          onCancel={review.cancelReview}
-        />
-      )}
-      {review.isViewingCompleted && review.activeReview && (
-        <CompletedReviewBanner
-          activeReview={review.activeReview}
-          onClose={() => { review.closeViewingReview(); setShowDiff(false) }}
-          showDiff={showDiff}
-          onToggleDiff={() => setShowDiff(prev => !prev)}
-        />
+      {review.saveError && frame.saveError({ failure: review.saveError, onDismiss: review.dismissSaveError })}
+      {review.isReviewing && review.activeReview && frame.banner({
+        activeReview: review.activeReview,
+        onComplete: review.completeReview,
+        onCancel: review.cancelReview,
+      })}
+      {review.isViewingCompleted && review.activeReview && frame.completedBanner({
+        activeReview: review.activeReview,
+        onClose: () => { review.closeViewingReview(); setShowDiff(false) },
+        showDiff,
+        onToggleDiff: () => setShowDiff(prev => !prev),
+      })}
+      {editingHere && review.otherInProgressReviews.length > 0 && (
+        <div className="px-4 pt-2">
+          <Callout tone="info">
+            {review.otherInProgressReviews.map(r => r.reviewerName).join('、')} がレビュー中です。直すと、コメントの付いた言葉が見つからなくなることがあります（コメントは消えません）。
+          </Callout>
+        </div>
       )}
       <div className="flex-1 flex overflow-hidden">
         {/* Markdown content or diff view */}
@@ -58,10 +87,31 @@ export function MarkdownPreviewPane({
           onMouseUp={textSelection.handleMouseUp}
         >
           {showDiff && review.activeReview?.snapshot ? (
-            <MarkdownDiffView
-              ref={diffViewRef}
-              snapshot={review.activeReview.snapshot}
-              current={content}
+            frame.diff({
+              ref: diffViewRef,
+              snapshot: review.activeReview.snapshot,
+              current: content,
+            })
+          ) : editingHere ? (
+            <InPlaceMarkdownEditor
+              paneId={paneId}
+              filePath={filePath}
+              content={content}
+              onChange={inPlace.onChange}
+              outsideChanges={inPlace.outsideChanges}
+              onShowSource={onShowEditor}
+              previewRef={previewRef}
+              initialScrollRatio={initialScrollRatio}
+              aiFix={aiFix}
+              startFix={commentFix ?? undefined}
+              comment={commentBox ? {
+                box: commentBox,
+                // Into the member's own review (a new one when none is in progress); the quote is found in the tab's text.
+                add: (text, body, severity) => {
+                  const at = findTextInMarkdown(content, text)
+                  return review.commentAsReviewer(text, at?.start ?? 0, at?.end ?? 0, body, severity)
+                },
+              } : undefined}
             />
           ) : (
           <MarkdownPreview
@@ -85,10 +135,10 @@ export function MarkdownPreviewPane({
           <div className="absolute top-3 right-3 flex items-center gap-2 opacity-60 hover:opacity-100 transition-opacity">
             {!review.isReviewing && !review.isViewingCompleted && (
               <>
-                <ReviewHistoryDropdown
-                  reviews={review.completedReviews}
-                  onSelectReview={review.viewReview}
-                />
+                {frame.history({
+                  reviews: review.completedReviews,
+                  onSelectReview: review.viewReview,
+                })}
                 {/* 依頼ボタンはUI非表示。review-request の仕組み自体は
                     Slack通知連携で再利用予定のため残してある。 */}
                 <button
@@ -105,20 +155,20 @@ export function MarkdownPreviewPane({
               <button
                 onClick={onShowEditor}
                 className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
-                title="エディタ"
+                title="もとの書き方"
               >
                 <Code size={12} />
               </button>
               <button
                 className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                title="プレビュー"
+                title="文章"
               >
                 <Eye size={12} />
               </button>
             </div>
           </div>
-          {/* Floating edit button (hide during review) */}
-          {!review.isReviewing && (
+          {/* Floating edit button (hide during review; the document edited in place needs none) */}
+          {!review.isReviewing && !editingHere && (
             <button
               onClick={onEdit}
               className={`absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-control text-xs font-medium shadow-lg transition-colors ${PRIMARY_ACTION}`}
@@ -127,21 +177,19 @@ export function MarkdownPreviewPane({
               編集
             </button>
           )}
-          {textSelection.popover && (
-            <CommentPopover
-              position={{ x: textSelection.popover.x, y: textSelection.popover.y }}
-              selectedText={textSelection.popover.text}
-              onSubmit={textSelection.handleSubmitComment}
-              onClose={textSelection.closePopover}
-            />
-          )}
+          {textSelection.popover && commentBox?.({
+            position: { x: textSelection.popover.x, y: textSelection.popover.y },
+            selectedText: textSelection.popover.text,
+            onSubmit: textSelection.handleSubmitComment,
+            onClose: textSelection.closePopover,
+          })}
         </div>
         {(review.isReviewing || review.isViewingCompleted) && review.activeReview && (
-          <ReviewSidePanel
-            review={review.activeReview}
-            onDeleteComment={review.isReviewing ? review.deleteComment : undefined}
-            onToggleResolved={review.toggleResolved}
-            onClickComment={(comment) => {
+          frame.sidePanel({
+            review: review.activeReview,
+            onDeleteComment: review.isReviewing ? review.deleteComment : undefined,
+            onToggleResolved: review.toggleResolved,
+            onClickComment: (comment) => {
               if (showDiff && diffViewRef.current) {
                 // Scroll to the text in the diff view
                 diffViewRef.current.scrollToText(comment.selectedText)
@@ -154,10 +202,11 @@ export function MarkdownPreviewPane({
                   setTimeout(() => mark.classList.remove('ring-2', 'ring-amber-400'), 1500)
                 }
               }
-            }}
-            onAddReply={review.addReply}
-            readOnly={review.isViewingCompleted}
-          />
+            },
+            onAddReply: review.addReply,
+            onAskAi: reflectComment,
+            readOnly: review.isViewingCompleted,
+          })
         )}
       </div>
     </div>

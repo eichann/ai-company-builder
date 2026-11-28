@@ -31,6 +31,7 @@ import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession
 import type { PermissionMode } from './permission-mode'
 import type { BrowserOperatorToolset } from './browser-operator-toolsets'
 import type { EditorEditsReason } from './editor-disk-state'
+import type { DocumentImageResult } from './document-images'
 import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
@@ -66,6 +67,7 @@ import type { CompanyFolderKind } from './company-folder'
 import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame'
 import type { DocQuoteFound, DocViewReview } from './doc-review-frame'
 import type { ManualExportResult, ManualOpenResult } from './manual'
+import type { ReplyPageConsultation, ReplyPageSaveResult } from './reply-pages'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult, GoogleRelayService } from './google'
@@ -573,6 +575,12 @@ export interface IpcInvokeChannels {
    * ［届いた版を採用］ (`editor_edits`, also when `reason` is left out) or ［保存せずに進む］ (`editor_left_unsaved`).
    */
   'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string, reason?: EditorEditsReason]; result: EditorBackupResult }
+  /**
+   * Keep an image pasted or dropped into the Markdown document `documentPath` beside it
+   * (`images/<date-time>.<kind>`, never replacing a file; client/shared/document-images.ts). Main
+   * names and places it and decides the kind from the bytes; the answer is the address to write.
+   */
+  'editor:saveImage': { args: [documentPath: string, bytes: ArrayBuffer]; result: DocumentImageResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
   'fs:delete': { args: [path: string]; result: FileOpResult }
@@ -908,6 +916,8 @@ export interface IpcInvokeChannels {
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
   /** The main window's answer to appCommand:request (only the window asked may answer). */
   'appCommand:respond': { args: [requestId: string, answer: AppCommandAnswer]; result: void }
+  /** A rich reply kept as a page in the member's 今日のフォルダ's ページ/ (features/reply-pages): main builds the path. */
+  'replyPage:save': { args: [rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string]; result: ReplyPageSaveResult }
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (「Slack で許可」, slack-connector.md): the app holds no token; the sign-in URL stays in main.
@@ -1145,6 +1155,8 @@ export interface ElectronAPI {
   backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
   /** Keep the tab's unsaved edits before they are dropped for the version that arrived (.backups/<ts>_editor_edits/). */
   backupEdits: Invoke<'editor:backupEdits'>
+  /** Keep a pasted or dropped image beside a document (`images/`); the address to write, or why not. */
+  saveDocumentImage: Invoke<'editor:saveImage'>
   createDirectory: Invoke<'fs:createDirectory'>
   exists: Invoke<'fs:exists'>
 
@@ -1429,6 +1441,7 @@ export interface ElectronAPI {
   answerCloseRequest: Invoke<'app:closeResponse'>
   onAppCommandRequest: Subscribe<'appCommand:request'>
   answerAppCommand: Invoke<'appCommand:respond'>
+  saveReplyPage: Invoke<'replyPage:save'>
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (設定 → Slack): the member's view only, never a token or the sign-in URL.

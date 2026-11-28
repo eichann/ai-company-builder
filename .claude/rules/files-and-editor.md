@@ -44,6 +44,9 @@ paths:
   - "client/tests/company-watcher.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
+  - "client/src/app/editorSelection.ts"
+  - "client/src/app/editorReviewFrame.ts"
+  - "client/scripts/check-bundle-size.mjs"
   - "client/tests/doc-review-ui.*"
   - "client/tests/file-tree-ui.*"
   - "client/tests/ui/file-tree.spec.ts"
@@ -154,7 +157,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   refuse a target that exists (`code: 'name_taken'`,
   「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
   `electron/file-guards.ts`), except the same entry under another spelling (a case-only
-  rename) and the review's temporary save file renamed over its own sidecar. `fs:writeFile` is
+  rename) and the review's temporary save file renamed over its own sidecar. A rich reply kept as a page
+  (`replyPage:save`, `chat-ui-and-history.md` "Rich replies: ［大きく見る］…") is created with `wx` too, at a name main
+  chooses (「名前 (2).html」 when taken), in the today folder's `ページ/` only. `fs:writeFile` is
   saving and replaces on purpose (editor, sidecars). The tree checks typed names first
   (`client/shared/file-names.ts`: no `/ \ < > : " | ? *`, control characters, trailing space or
   dot, Windows device names, `.git`, > 255 bytes) and keeps the dialog open with the reason
@@ -336,7 +341,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, the compare
   view's two choices), `useMarkdownView.ts` (preview / source mode, scroll positions; the
   preview pane is keyed by file so each file restores its own),
-  `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
+  `useEditorReview.ts` (the review of the active document, its state from the review frame slot:
+  "The review frame"); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `ExternalCompareView`, `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`; a file's `---` frontmatter is left out of the preview and its `name` /
   `description` shown in a small quiet box above it — `markdownFrontmatter.ts`, owner 2026-11-23: a
@@ -377,6 +383,297 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   background; any `leftTab` string is kept and one no registered panel has opens the default tab
   (`renderer-structure.md`, panel registry). Existing installs hold this shape:
   keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
+
+## Editing a document in place (UX check 9, owner decision 2026-11-28, 案A)
+
+A Markdown document is read and edited in the same view (Milkdown, WYSIWYG): no switch to a page
+of symbols to fix a word. **What was not edited never changes by one byte.**
+
+- **Behind one small door** (`features/editor/inPlaceEditing.ts`): a document goes in, the file's
+  whole new text comes out after each change (`InPlaceEngine.open(host, text, { folder, onChange,
+  onChangeTakenBack })`). Milkdown (`milkdownSurface.ts`) and the write-back (`markdownSplice.ts`)
+  are behind it; replacing either changes nothing outside. The screen (`components/InPlaceMarkdownEditor.tsx`)
+  knows only the door. It is shown where the screen passes `inPlaceEditing` to `TabbedEditorPanel`
+  (`AppShell` does; a preview page without it keeps the read-only preview).
+- **The write-back** (`SplicedDocument`): the file is cut into its top-level blocks by Milkdown's
+  own reader (source offsets), each read alone (link reference definitions handed to every block);
+  the `---` block (`splitFront`, BOM / trailing spaces / `...` accepted) never reaches the editor.
+  A change is written as the smallest edit that **reads back as exactly what the screen shows**:
+  (0) nothing at all when what the file holds did not change — an empty paragraph or list item
+  (Enter before anything is typed) has no Markdown (the editor would write `<br />`), so it is left
+  out of what is written (`writable`) until text is typed into it; (1) the same text change in the
+  file's own bytes, first inside that text block's own source range (so two equal list items cannot
+  take each other's change), else located by its unique surroundings; or whole new lines in the
+  source's own indentation and list marker (`-`, a repeated `1.`, or the next number); (2) a table's changed cells / one row / one
+  column in its own padding; (3) only the changed blocks rewritten by the editor (reference links
+  kept as references). Each candidate is accepted only when the written region reads back equal
+  (what the editor derives for showing aside: a heading's `id`, a list item's number `label`)
+  **and** the blocks right before and after it still read as the same blocks from the same bytes;
+  changes in several places at once are written run by run; a block deleted whole takes the blank
+  lines after it; a written change becomes the baseline (the next one is placed against it). CRLF
+  files keep CRLF (a region's new lines follow the region's own). Spaces typed at the start or end
+  of a line (before the next word) are left out of what is written, as a reader drops them: they
+  stay on screen and reach the file with the next word (`trimEdges`; code keeps every space).
+  Measured (demo, 2026-11-28): opening and leaving 0 lines, one character 1 line, Enter in a list
+  one new line, bold / a heading level 1 line; a column added changes every row (accepted, owner).
+- **Never written approximately**: a document with a block kind it does not hold (footnotes, …:
+  `unsupported`), whose text the editor would lose on reading (`lossy`: visible text of each block
+  vs the editor's), that the editor tidies when shown, or whose unchanged write-back is not the file
+  byte for byte, stays in the reading view (`MarkdownPreview`) with a callout and
+  ［もとの書き方で直す］ (the source); nothing is written. A change that cannot be written faithfully
+  is taken back on screen (the last written state shown again, the caret kept; not while a word is
+  being composed) with a callout — the screen never shows what the file does not hold. The editor failing to load → the same reading view.
+- **Saving, external changes and leaving are the editor's as before**: each written change goes
+  through `handleContentChange` (the tab's text, its dot, the preview tab pinned on the first edit),
+  so autosave, ⌘S, the external-change band (it pauses autosave; the member's text stays on screen),
+  ［比べて選ぶ］ and saving / 保存せずに進む before leaving apply unchanged and keep exactly what was
+  typed. The compare view replaces the document while it is open; after ［届いた版を採用］ the document
+  opens afresh on the version that arrived (the edits kept in the backups first), after
+  ［自分の版を保存］ on the edits written — the next change is placed against that text. Any change of
+  the tab's text that did not come from the editor (the disk followed, a version picked, the source
+  edited) opens the document afresh. Tests: `editor-in-place.spec.ts` (both picks, 保存せずに進む).
+- **The source** is the same `CodeEditor` (記号の画面): the toggle's ［もとの書き方］ button (back:
+  ［文章］; were エディタ / プレビュー) and ⌘⇧V (`mdViewMode`; nothing chosen yet → the document view
+  where in-place editing is on — a member who chose the source before keeps it). Reading view instead of editing: 閲覧のみ files, a review being
+  made or read (its quotes are marked in the text), the snapshot diff. Someone else's review in
+  progress: one line says comments may lose their place (they are never deleted) — no confirm.
+- Raw HTML is shown as written, quietly (kept byte for byte); images load from the document's folder
+  (`local-file://`); ⌘-click opens an `http(s)` / `mailto` link; ⌘F uses the browser's highlights
+  (`usePreviewSearch` `marking: 'highlights'`: a `<mark>` in the editor's DOM would be read as an
+  edit).
+- **Bundle**: Milkdown is imported only when a document is first shown in place; `vite.config.ts`
+  puts that chunk in `dist/vendor/` under its own budget (`check-bundle-size.mjs`
+  `ON_DEMAND_VENDOR`, 430 KB; 372 KB today). Versions pinned (`@milkdown/*` 7.23.0).
+- Tests: `src/features/editor/markdownSplice.test.ts` (the real Milkdown under jsdom: unchanged
+  write-back byte for byte on frontmatter, `*` lists indented by 4, aligned / unpadded tables, HTML,
+  comments, `***`, escapes, code fences, reference links, `===` / `---` headings, Japanese, CRLF;
+  one typed character exactly; two far edits each their own line; a new list item; bold, a heading
+  level, a table row; the refusals; read-back and neighbour checks — each guard mutation-checked),
+  `tests/ui/editor-in-place.spec.ts` on `tests/editor-in-place-ui.html` (real keys, autosave, Enter in
+  a list, ⌘⇧V, the AI writing the file with and without edits, closing the window, a refused
+  document, ⌘F).
+- PR2 is "The selection bubble" below, PR3 "The 「/」 list, line starts and the table bar", PR4 "Images in a
+  document", PR5 "Asking the AI to fix a passage".
+
+## The selection bubble (UX check 9 PR2, owner decision 2026-11-28)
+
+- Selecting words in a document edited in place shows **one bubble** (`components/SelectionBubble.tsx`,
+  `role="toolbar"` 「選んだ文字の飾り」): 太字・斜体・取り消し線・コード (pressed = every selected
+  character has it; press again takes it off), リンク (an address box: `https://…`, `mailto:`, a
+  relative path; on a link ［リンクを外す］ takes the whole link off), 文字の大きさ (本文 / 見出し1〜3 —
+  offered only for one line where a heading can stand, a top-level paragraph or heading, not a list
+  item or a table cell; a paragraph written over several lines has only the selected line changed;
+  the size it already has changes nothing), ［コメント］. No typeface, colour or
+  underline (a Markdown file cannot keep them; owner). Its presses never take the focus from the
+  document. The operations are the door's (`InPlaceSurface.toggleMark / setLink / setSize`,
+  `milkdownFormat.ts`) and are written back like typing: the changed line only.
+- **Keys go through the command catalog** (`commands.md`): `editor.toggleBold` ⌘B, `toggleItalic`
+  ⌘I, `toggleStrike` ⌘⇧S, `toggleCode` ⌘E, `editLink` ⌘K, `setBodyText` ⌘⌥0, `setHeadingOne|Two|Three`
+  ⌘⌥1〜3 (area `editor`, `notInHtmlDocument`: an HTML document keeps them). Each declines its key
+  unless the focus is in the document (⌘K also needs a selection) and, on a Mac, a Ctrl+letter (the
+  text's own Ctrl+B back / Ctrl+E line end), so ⌘B / ⌘K stay the app's left column / 探す elsewhere. Milkdown's own keys for the
+  same operations are switched off (one press, one change). ⌥ keys match by the physical key too, on
+  a Mac's ⌥⌘ only (`KeyInput.code`: ⌥⌘1 is `¡` there; Windows' AltGr = Ctrl+Alt types a character).
+- **［コメント］ through a slot** (`selectionSlot.ts` `SelectionSlot.commentBox`): `app/editorSelection.ts`
+  hands doc-review's `CommentPopover` to `TabbedEditorPanel` (`selection`); the editor imports no
+  other feature's parts for it, and the same box serves a review's selection in the reading view and
+  the HTML document view. The comment goes into the member's own review in progress, or a new
+  review of theirs holding it in one write (`useMarkdownReview.commentAsReviewer`; never into a
+  completed review being read, nor while the reviews load or after they could not be read: a second
+  review of theirs would be written beside the first; a review request is answered as by
+  「レビューする」) — the sidecar's name and shape are those 「レビューする」 + a comment
+  write (`editor-selection-bubble.spec.ts` checks the keys' order). The document then shows as
+  reviewed (reading view, its comment beside it). `useTextSelection` moved from doc-review to
+  `editor/hooks/` (the selection is the editor's). With this, `FEATURE_IMPORT_EXCEPTIONS` lost
+  `editor -> doc-review/components/CommentPopover.tsx` and `…/hooks/useTextSelection.ts` (the rest
+  of the review went with "The review frame", below).
+- **The review frame** (`reviewFrameSlot.ts` `ReviewFrameSlot`, 2026-11-29): the review shown around
+  a document — its state (`useReview`: doc-review's `useMarkdownReview`), the banners above it
+  (`saveError`, `banner`, `completedBanner`), ［レビュー履歴］ (`history`), the side panel (`sidePanel`)
+  and the snapshot diff in its place (`diff`, also the 「比べる」 of a file changed on disk,
+  `ExternalCompareView`) — is handed to `TabbedEditorPanel` (`reviewFrame`, required) by
+  `app/editorReviewFrame.ts`, doc-review's parts as they are. The editor keeps deciding which document
+  is reviewed and how it is read (`useEditorReview`: HTML's `htmlReading`, the 「seen」 mark), where each
+  part stands (`MarkdownPreviewPane`, `HtmlDocumentPane`) and what each press does; the editor's own
+  port of the review's state is `OpenDocumentReview`. `useReview` is a hook: the screen hands in one
+  that never changes (a module constant). With this the editor imports nothing of doc-review but
+  `model.ts` (pure functions and types: `findTextInMarkdown`, `markReviewSeen`, `CommentSeverity`,
+  `Review`, `DocumentReading`; `ReviewSaveFailure` moved there from the hook for the port's type).
+  Nothing changed on screen or in the sidecars (the same elements in the same places).
+- Tests: `tests/ui/editor-selection-bubble.spec.ts` (bubble and keys, each written as its one line;
+  size; link by ⌘K and off; ［コメント］ → the review file and the reviewed view; ⌘B / ⌘K the app's
+  outside the document — mutation-checked: Milkdown's keys left on, the `acceptsKey`),
+  `markdownSplice.test.ts` (a mark in a nested list and off, a size on one line of a multi-line
+  paragraph, a `----` heading to body text, spaces typed at a line's end),
+  `src/shared/commands/commands.test.ts` (⌥⌘1 on a Mac; ⌘B bold in the document, else the left column).
+
+## The 「/」 list, line starts and the table bar (UX check 9 PR3, owner decision 2026-11-28)
+
+- **「/」 list**: 「/」 typed onto an empty top-level line opens it for that line (the caret at its end, up to 16
+  letters after it; a 「/todo」 line the file already holds is text — its Enter stays a new line) and shows
+  `components/BlockTools.tsx` `BlockMenu` (`role="listbox"` 「形を選ぶ」): 見出し1〜3・箇条書き・番号つきの箇条書き・
+  チェックリスト・引用・コード・区切り線・表 (3×3), the one list in `blockChoices.ts` (names, the line start shown
+  beside each, the words typed after 「/」 that find it — `matchBlockChoices`). Nothing found → no list. The choice
+  turns the 「/…」 line into that block (`InPlaceSurface.turnInto`, `milkdownBlocks.ts` `turnIntoBlock`; a divider
+  and a table at the end get an empty line after them for the caret, not written while empty). The 「/」 is text
+  until then (written as typed). The pointer picks only when it moves.
+- **Its keys are the catalog's** (`commands.md`): `editor.blockMenuNext` ↓, `blockMenuPrevious` ↑,
+  `blockMenuChoose` Enter, `blockMenuClose` Esc (`notInHtmlDocument`). Each declines unless the list shows in
+  the focused document and no word is being composed (`KeyInput.isComposing`); the editor's own plugin only
+  leaves ↓ ↑ Enter alone while the list shows (`blockMenuPlugin` `handleKeyDown`: no caret move, no new line),
+  never Esc — so Esc with no list reaches another part (a list worked through, 「延ばす」). Esc closes the list for
+  that line (typing 「/」 on an empty line opens it again), the 「/」 stays.
+- **Line starts** (`lineStartRules`, replacing the editor's rules for the same starts — `REPLACED_LINE_START_RULES`):
+  「- 」「* 」「+ 」 a list, 「1. 」 a numbered list (its number kept), 「[] 」「[ ] 」 a checklist (in a list item, that
+  item; anywhere else a new checklist), 「```」 code at once, 「---」 a divider with the caret on the line after it;
+  「# 」〜 and 「> 」 are the editor's own. 「```」 / 「---」 only on a top-level line with nothing else (in a list item
+  or a quote they stay characters: the editor cannot hold a code block or divider made there). Lists are made as the
+  reader makes them (`spread: false`, the item's kind): the editor's own made loose lists that were never written.
+- **Empty line hint**: the empty top-level line holding the caret gets `acb-empty-line` (a decoration, not the
+  document); `index.css` shows 「「/」で形を選べます」 there while the document has the focus.
+- **Table bar** (`TableBar`, `role="toolbar"` 「表の操作」, over the table's top right while the caret is in it and
+  no words are selected): ［行を足す］ (under the caret's row, each cell its column's alignment, the caret into it),
+  ［列を足す］ (right of the caret's column, no alignment `---`, the caret into it), ［行を消す］ (never the header
+  row, nor the last row under it: the editor would only empty it), ［列を消す］ (never the last column) — disabled where they do not apply (`InPlaceTable.can`).
+- **Written back** (measured, as the demo): a 「/」 choice or a line start → the lines made only (a heading
+  `## 議題`, a checklist `- [ ] …`, a table's four lines); a row → 1 line; a column → one cell on every line of
+  the table (accepted, owner); words typed into a new cell → that cell (`| 商談 |  |`). How
+  (`markdownSplice.ts`): an empty table cell stays in what is written (`writable`: it keeps its column — before,
+  an empty row was dropped and words typed into its second cell could be written into the first); a table whose
+  rows or columns changed, or an empty cell typed into, is written by `tablePatch` first (the file's own lines, not
+  the editor's padding); new blocks after (before) unchanged ones are written beside those blocks' own bytes,
+  not with them rewritten (a `----` heading stayed `----`, not `##`); a list made where the region had none takes
+  the file's first bullet (else `-`), a divider the file's first (else `---`) — each read back like every
+  candidate, so a `-` list right above a `-` list is written `*` (two lists, as on screen).
+- Not built (owner): typeface, colour, a handle to drag lines (⋮⋮).
+- Tests: `markdownSplice.test.ts` (each 「/」 choice and line start written exactly, the file's bullet and divider,
+  the list beside a `-` list, a checklist item in a list, 「---」 before words, 「```」 / 「---」 in a list item stay
+  characters; the list opened only by typing 「/」 (not on the file's 「/todo」), narrowed, closed by Esc;
+  the table bar's row / column / delete and words in the right cell; the header row, the last row and column kept; a `----`
+  heading kept), `tests/ui/editor-block-tools.spec.ts` (real keys: the list, ↓ Enter, Esc then `list.back` and Enter
+  a new line, every line start, the hint, the table bar) — mutation-checked: empty cells kept, the table patch
+  first, tight lists, the file's style (and only on new lines), the region kept beside new blocks, the header row,
+  the last row, top-level 「```」 / 「---」, the list opened by typing, the editor holding Enter, the keys only while
+  the list shows. Known: inside a quote a new list / divider is written `*` / `***` (the file's way is not applied
+  after `>`; it reads back right). `doc-frame-protocol.test.ts`: the list's keys stay an HTML document's.
+- Bundle: the list and bar (~5 KB) are in the app's JS; the rest in the Milkdown chunk (372 KB of 430).
+
+## Images in a document (UX check 9 PR4, owner decision 2026-11-28)
+
+- **One rule** (`client/shared/document-images.ts`): a document's image goes in the folder `images/`
+  beside the document, named by the computer's local date and time to the second
+  (`20261129-143005.png`; the same second again `-2`, `-3`, …), and the document gets
+  `![](images/<name>)`. The same functions write the AI's one standing line (`documentImageInstruction`,
+  `chat-server.ts` with the standing instructions: the AI already put its images there; now it is told
+  the same name shape — `chat-and-agents.md` "What ACB tells the AI"). Beside the document, an image is
+  seen by whoever sees the document (a private folder's document → its images in that folder's clone).
+- **Ways in**: ⌘V in a document edited in place (only when the clipboard holds no text: Word, Excel and
+  web pages put a picture beside copied words, which must paste as words — `pastedImageFiles`) and a
+  Finder drop on it (`droppedFiles`; at the drop's place). Not in the 「/」 list (it would need a file
+  picker through main; paste and drop cover it). The source view (記号の画面) is unchanged.
+- **Main writes; the renderer hands the bytes and which document** (`editor:saveImage(documentPath,
+  bytes)`, `features/fs/ipc.ts`; port `EditorImageWrites` in `features/editor/api.ts`): the document
+  through `AllowedRoots.validate`, a Markdown name, a regular file (not a link), not at the top of a
+  company folder (a root folder is a department: 「会社フォルダのいちばん上にある文書には…」); the kind **from the bytes**
+  (`documentImageKind`: PNG, JPEG, GIF, WebP — never SVG, which can carry script and links and is opened
+  by other programs too; never what the renderer says), ≤ 20 MB (`MAX_DROP_FILE_SIZE`, a Finder drop's;
+  far under sync's `LARGE_FILE_THRESHOLD` 100 MB, so a pasted image never stops sharing); `images/`
+  through `validate` (a link out of the company is refused), the not-downloaded and `writeRefusal`
+  checks (reserved / private folder names, skill files, agent config), made alone (`mkdir`, not
+  recursive) and **`lstat` a folder** (a link even pointing inside, or a file named `images`, is
+  refused: 「…画像を置けるフォルダではないため…」), each name through `validate` and written with `wx`
+  (never replaces; a taken name tries the next). The answer is only the address; a disk error is a plain
+  sentence (「画像を保存できませんでした…」), never Node's text. The screen checks a
+  file's type and size first (`documentImageFileRefusal`) so a large file is never read.
+- **In the document** (`milkdownImages.ts`, behind the door: `InPlaceOptions.storeImage(file)` → the
+  address or null): kept first, then put in — on the empty top-level line holding the caret, else as a
+  new line right after the top-level block holding it (a list item never gains a paragraph); several
+  files one line each, in order; the document changed meanwhile → at the caret. Written back like
+  typing: `![](images/…)` plus its blank line; nothing else changes. A file not kept → one line above
+  the document 「画像を入れられませんでした。<name>: <reason>」 (［閉じる］), nothing put in. Shown from
+  `local-file://` like every image of the document (its version followed). Known: an image kept while the
+  document was closed or switched to the source is left in `images/` with nothing pointing to it; words
+  pasted from Word keep the editor's own paste (unchanged by this, `file://` pictures in its HTML included).
+- Tests: `tests/document-images.test.ts` (the kinds by bytes — SVG / HTML none —, the 20 MB limit under
+  sync's, names, the AI's line from the same functions), `tests/ipc-fs.test.ts` 「editor:saveImage …」
+  (the place, the clock fixed by `mock.timers`, `-2` / `-3`, an existing file kept, SVG / HTML / not bytes
+  / 20 MB / not Markdown refused; a link out, a link inside, a file named `images`, a not-downloaded
+  `images`, a reserved one, a skill's document, a document at the top, a folder named `.md`, a linked
+  document refused and nothing written; a disk error in plain words), `ipc-path-guard.test.ts`
+  (GUARDED), `markdownSplice.test.ts` (the empty line, after a paragraph, after a nested list, two
+  images: each exactly its line; a paste with words stays words), `chat-standing-instructions.test.ts`,
+  `tests/ui/editor-in-place.spec.ts` (⌘V and a Finder drop through the real editor; a PDF / SVG refused
+  in one line) — each guard mutation-checked.
+
+## Asking the AI to fix a passage (UX check 9 PR5, owner decision 2026-11-28)
+
+- **Where**: the bubble's ［AI に直してもらう］ (`SelectionBubble` mode `aiFix`: 「もっと丁寧に」「表にして」「3行に縮めて」 —
+  `INLINE_FIX_SUGGESTIONS` — or the member's own words, ≤ 500) and, on a **completed** review being read, a comment's
+  ［AI に反映してもらう］ (`ReviewSidePanel` `onAskAi`: open, not orphaned comments; the reading view closes, the document
+  opens in place and the fix is asked for the block holding the comment's words, found with `findTextInMarkdown`).
+- **Through the slot, to the current consultation** (`selectionSlot.ts` `AiFixPart`, composed by `app/editorSelection.ts`):
+  `ask` runs the command `chat.askToFix` (`commands.md`) on the chat pane used last — its shown tab's consultation,
+  never a separate one-shot call — and reads the answer with `inlineFixResult` (`client/shared/inline-fix.ts`); `preview`
+  is the chat's `MarkdownMessage` (raw HTML dropped, no remote images: `chatMarkdownSafety`). The editor imports no chat
+  part; `FEATURE_IMPORT_EXCEPTIONS` unchanged. No chat pane → 「相談の欄が開いていない…」.
+- **What the AI gets** (`InPlaceSurface.selectedPassage` / `passageAt`, `milkdownAiFix.ts`): the top-level blocks holding the
+  selection (a list item → its whole list; a selection ending where the next block's first words start — inside a list
+  or quote, deeper than its start — does not take it), byte for
+  byte as the file holds them (`SplicedDocument.passage`, the write-back's own offsets), and at most 600 characters before
+  and after, cut at a line, never the `---` block (`contextAround`); the file's name, not its folder. Never the whole file
+  (a passage over 6,000 characters is refused on screen; the command's zod limits refuse it too). Only what is written can
+  be taken (a change still being taken back has no passage). How it is worded: `chat-and-agents.md` "In-place fixes".
+- **Shown in the document's flow**, right under the passage (`showBelow`: a ProseMirror widget, `fixBelowPlugin`; never
+  part of the text, never written), not a floating box: `AiFixCard` (the AI colour set) — 「相談の AI に頼んでいます」 with
+  ［やめる］, then 直したあとの見た目 and the file's lines adopting would replace and add (`previewFix`), ［やめる］［採用］, or
+  a plain sentence with ［閉じる］ (busy, stopped, failed, no ```` ```acb-fix ```` block, not writable, changed). One
+  request at a time (`hooks/useAiFix.ts`); the answer of a request put away is dropped (its id).
+- **Adopting goes through the write-back** (`adoptFix`): refused when the file's text or the shown document changed since the
+  passage was taken (`fixedDocument`: 「AI に頼んでいる間に文書が変わったため…」), when the fix holds a block kind the
+  editor does not keep or text it would lose (`SplicedDocument.read`: footnotes …), raw HTML tags the passage did not
+  have (the preview never shows them — a tracking image, a hidden link: judged by the editor's own Markdown reader,
+  `SplicedDocument.rawHtml` — every `html` node at any depth, tags, comments and HTML blocks, compared whole — never by a
+  pattern, so a tag broken over lines or attributes, in capitals or slipped into a comment is HTML all the same, and a
+  tag written as code is words), an image on the internet the passage did not have (owner decision 2026-11-29: a
+  planted instruction's tracking image — the document is opened on other computers and in other apps; `remoteImages` over
+  the nodes the reader made, so a reference-style image counts; the address read as a browser's URL parser reads it —
+  tabs and line breaks dropped, outer spaces and controls trimmed, `\` as `/` — then `http:` / `https:` with or without
+  `//`, or `//host` (`onTheInternet`, Codex review); the passage's own and an
+  image beside the document, `images/…`, are taken), or is empty. Two faithful ways are
+  tried — the AI's Markdown as written over the passage (`writeSource`: reads back as the screen shows, neighbours keep their
+  bytes) and the write-back's smallest edit (`write`) — and the one changing fewer lines is written (a tie: the AI's), so a
+  list the AI rewrote with `-` bullets changes only the line whose words changed, and a table is written as the AI wrote
+  it. The tracker writes it like typing, with the write chosen for exactly that document (`adopted`); saving, ⌘S and the
+  external-change band as for typing. **With edits not saved yet**, a change or a delete from outside keeps the member's
+  text on screen (only the external-change band shows), so the text check cannot see it: the tab counts every change and
+  delete from outside it sees (`outsideChanges` in `client/shared/editor-disk-state.ts`: `applyDiskDecision` for the
+  watcher's reload, missing mark or conflict, and `withExternal` — the one place that sets `external` — also for a change a
+  save or a compare button reads first; never our own save or the same version seen again), the request keeps the count it was asked at
+  (`useAiFix`), and a request asked before another one shows refused at once, whatever the AI answered — no ［採用］, adopting
+  refused too — with 「AI に頼んでいる間にこのファイルがほかで変わったか消されたため…」. The file changed from outside while asked with no edits (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
+  変わったため…」 above it; the answer is dropped. `〔〕` in the answer become the passage's `【】` again when the passage had
+  `【】` and no `〔〕` (`restoreBrackets`: outside text reaches the AI with them replaced).
+- **A comment is never resolved for the member** (owner): adopting a comment's fix says 「コメントは解決にしていません…」 with
+  ［レビューに戻る］ (`review.viewReview`); nothing is written to the review or reply files.
+- **Kept in the consultation**: the request is a message the app sends in the member's place (`appSent`, the shape it is
+  stored in already) and the AI's reply follows it (`chat-ui-and-history.md`). Whether a fix was adopted is not recorded.
+- Tests: `markdownSplice.test.ts` (the passage of a nested list byte for byte, ≤ 600 around, no frontmatter; a selection to
+  the next block's start and to a list's first words; a `-` list fix written as its one `*` line; 「表にして」 written as
+  the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; raw HTML read by the reader — a tag over lines,
+  a line break in an attribute, capitals, a tag beside or inside the passage's own comment, a new comment, an HTML block, a tag in a
+  table cell refused, the passage's own HTML and a tag in code kept; a new image on the internet — https, HTTP, `//host`,
+  `https:host`, `/\host`, a tab inside the scheme, by reference, inside a link, in a table — refused, the passage's own and `images/…` kept; a comment's quote → its block; the card
+  shown in the flow and not written), `tests/inline-fix.test.ts` (the message's outside-text blocks, a passage that spells a
+  footer, the ask as a quoted line, the comment as outside text, the command's limits, `contextAround`, the answer's
+  block, `restoreBrackets`, the pane's answer read strictly, a turn answering only its own request),
+  `tests/ui/editor-ai-fix.spec.ts` (asking hands over the passage only and the card stands right after the list;
+  ［採用］ writes one line; the fix drawn without raw HTML or script, a new image on the internet refused; ［やめる］ before and after the answer, the dropped answer,
+  a refusal; typing meanwhile and a change from outside refused; with edits not saved, a change from outside before the answer and a
+  delete after it refused, the edits kept, nothing written; a completed review's comment → its words handed over, the
+  fix adopted, no reply file, the review file byte for byte, ［レビューに戻る］), `tests/ui/chat-panel.spec.ts` 「chat.askToFix…」
+  — each guard mutation-checked (the staleness check, the kept kinds, no new HTML, the outside-text wrapping, the limits, the line cut,
+  the next-block rule, the fewer-lines choice, the request id, the busy refusal, the chat's renderer, the comment left
+  unresolved, the lost notice).
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
 
@@ -503,9 +800,11 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
   components never call `window.electronAPI`), over two small ports — `ReviewReads` (readFile,
   readDirectory, exists) and `ReviewWrites` (writeFile, renameItem, deleteItem); nothing is sent
-  outside the computer; state in `hooks/useMarkdownReview.ts` and
-  `hooks/useTextSelection.ts`; banners, side panel, popover, history and the snapshot diff in
-  `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
+  outside the computer; state in `hooks/useMarkdownReview.ts` (the selection that starts a comment is
+  the editor's: `features/editor/hooks/useTextSelection.ts`, the box reached through the selection
+  slot, "The selection bubble"); banners, side panel, popover, history and the snapshot diff in
+  `components/` (the editor reaches them and the hook only through its slots, composed in `app/`:
+  "The review frame"). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching, merging edits), `api.test.ts` (atomic write, retries, unreadable files, one at a
   time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).

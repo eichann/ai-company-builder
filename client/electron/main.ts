@@ -52,6 +52,7 @@ import { APP_LINK_SCHEME, appLinkInArgs } from './features/app-link/link'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
+import { registerReplyPagesIpc } from './features/reply-pages/ipc'
 import { wireSync } from './features/sync/wire'
 import { createChatServerConfig } from './features/chat/server-config'
 import { registerSkillsIpc } from './features/skills/ipc'
@@ -911,6 +912,12 @@ const files = registerFsIpc(ipc, {
   onFileChanges: changes => skills.invalidateForChanges(changes),
 })
 lifecycle.beforeQuit(() => files.closeWatchers())
+// A rich reply kept as a page in the member's 今日のフォルダ (features/reply-pages): main alone builds its path.
+registerReplyPagesIpc(ipc, {
+  paths: allowedRoots,
+  writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath),
+  consultationTitle: (companyId, sessionId) => chatHistory.history.get(companyId, sessionId)?.title ?? null,
+})
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).

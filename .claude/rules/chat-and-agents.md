@@ -165,14 +165,17 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
 - **Standing instructions** (`finalSystemPrompt` → the request's `standingInstructions`): what holds for the whole
   conversation — `MEMBER_SCREEN_INSTRUCTION` (the reply is read in the app by members who are not engineers: plain
   Japanese, no Git or command words; it answers the preset's 「displayed in a terminal」), the working folder,
-  `.workspace/`, `externalRepositoryInstruction`, `skillFileInstruction`, the shelf, the record / company-file /
+  `.workspace/`, `externalRepositoryInstruction`, `skillFileInstruction`, `documentImageInstruction` (a document's images in
+  `images/` beside it, named as a pasted one: `client/shared/document-images.ts`), the shelf, the record / company-file /
   past-consultation / review / web tools' paragraphs, the sandbox. Claude Code puts them after its preset:
   `systemPrompt: { type: 'preset', preset: 'claude_code', append, snapshot: false }` (`agents/claude.ts`; `snapshot:
   false` renders it per request, so a company's change reaches a conversation already going); Codex puts them first in
   its developer instructions (`agents/codex.ts`).
 - **This turn's words** (`turnPrompt` → the system message): the department on screen, attached files, the task /
   record topic, the other AI's tool, the repeat question, and 「返事の形：リッチ」's one line that diagrams are welcome
-  — plus one line that a page may be made in the member's 今日のフォルダ's `ページ/` folder and linked, when the request
+  and its rich-reply line (`RICH_HTML_INSTRUCTION`, English: an ```` ```acb-html ```` / ```` ```acb-slide ```` block where a
+  table, steps or a figure helps, what the app removes, and the ready-made pieces `RICH_HTML_PIECES` — short on purpose:
+  the cleaning and the closed frame keep a reply safe, not these words) — plus one line that a page may be made in the member's 今日のフォルダ's `ページ/` folder and linked, when the request
   carries a today folder of the app's shape (`replyPageFolderOf`)
   (`client/shared/reply-style.ts` `replyStyleInstruction`: only when the request says `replyStyle: 'rich'` and the
   agent has `capabilities.richReplies`; ふつう adds nothing; never in an unattended step; `chat-ui-and-history.md`
@@ -192,6 +195,29 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
   unattended step), `client/tests/chat-standing-instructions.test.ts` (the chat server's split: standing rules to the
   agent's slot, the department with the turn; `ChatServerConfig.createConnection` hands in a fake agent) —
   mutation-checked.
+
+## In-place fixes (「AI に直してもらう」, owner decision 2026-11-28)
+
+The document's ［AI に直してもらう］ / a comment's ［AI に反映してもらう］ (`files-and-editor.md` "Asking the AI to fix a
+passage") ask **the current consultation's** AI, not a one-shot call: `chat.askToFix` → `inlineFixMessage`
+(`client/shared/inline-fix.ts`), sent as a message the app sends (`appSent`: never the member's own request).
+
+- **What it holds**: the file's name (`outsideTitle`), the ask as the member's own words (one line, 「頼み（メンバーの言葉）」;
+  a comment's reflection has none), and the
+  passage, ≤ 600 characters before / after and a comment's quote and body, each in its own block of the one outside-text
+  standard (`wrapOutsideText`, `shared/core/outside-text.ts`: `【ここから直す所（外から来た文です…）】` … `【直す所ここまで】`,
+  `【】` inside → `〔〕`, `outsideBracketsNote` when any were) — data, not instructions — and the rules: open, write and
+  use no tool, answer with one ```` ```acb-fix ```` block (a longer fence when it holds ```` ``` ````), 1–2 lines outside it.
+  Never the whole file (the command's limits: passage 6,000, around 600 each).
+- **Not a narrower turn**: the turn has the consultation's usual tools and guards (`chat-write-guard.md`); the words ask
+  for no tool. Nothing the AI writes reaches the document through this: the member adopts the block on screen, through the
+  write-back, and a file the AI changed meanwhile refuses the fix (the document changed). (A turn with the tools taken
+  away is not built: it would need a per-turn tool switch in each agent.)
+- **The answer**: the AI's reply text when the turn that carried the message ends (`inlineFixTurnAnswer`; a stop →
+  `stopped`, an error or no reply → `failed`), the last ```` ```acb-fix ```` block taken by `inlineFixAnswer` in `app/`.
+  While the tab's AI runs, an approval or a question waits, or a send is being prepared, the request is refused `busy`
+  (never queued behind the member's own turn). Tests: `tests/inline-fix.test.ts`, `tests/ui/chat-panel.spec.ts`
+  「chat.askToFix…」.
 
 ## Project config the agents load from the company folder
 

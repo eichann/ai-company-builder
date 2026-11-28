@@ -127,8 +127,19 @@ async function runStep(page: Page, step: SceneStep): Promise<void> {
   else if ('fill' in step) await (await one(page, step.fill)).fill(step.text)
   else if ('select' in step) await (await one(page, step.select)).selectOption({ label: step.option })
   else if ('typeAtEnd' in step) {
-    await (await one(page, step.typeAtEnd)).click()
+    const target = await one(page, step.typeAtEnd)
+    await target.click()
     await page.keyboard.press('ControlOrMeta+End')
+    // A document edited in place (contenteditable): the caret to its very end (⌘End is not that there).
+    await target.evaluate(el => {
+      if (!(el as HTMLElement).isContentEditable) return
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      range.collapse(false)
+      const sel = window.getSelection()!
+      sel.removeAllRanges()
+      sel.addRange(range)
+    })
     await page.keyboard.type(step.text)
   } else if ('press' in step) await page.keyboard.press(step.press)
   else if ('run' in step) await page.evaluate(step.run)

@@ -86,6 +86,7 @@ CLIENT_MAC=(
   client/tests/doc-player-electron.test.ts client/tests/doc-player-harness/
   client/tests/cookie-encryption-electron.test.ts client/tests/cookie-encryption-harness/
   client/tests/video-electron.test.ts client/tests/video-electron-harness/ client/tests/fixtures/video/
+  client/tests/reply-frame-electron.test.ts client/tests/reply-frame-electron-harness/
   client/index.html
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs

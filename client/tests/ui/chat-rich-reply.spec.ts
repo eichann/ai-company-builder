@@ -1,0 +1,595 @@
+// A rich reply drawn whole in its closed frame (chat-ui-and-history.md "Rich replies: the reply's closed frame"), in the
+// real chat (chat-header-ui.html?turn=manual) and, for the frame alone, chat-rich-reply-ui.html. The text is the AI's,
+// which may have read a planted instruction: two guards — the cleaning and the closed frame — and each must hold
+// alone. `outside` records every request that would leave the preview server.
+import { test, expect, type BrowserContext, type Page } from '@playwright/test'
+import { expectNoPageErrors, openPreview } from './helpers'
+import { ALL_TRAPS, GOOD_REPLY } from './fixtures/reply-html-traps'
+import { RICH_HTML_PIECES } from '../../shared/reply-style'
+
+type Control = { open(): boolean; send(chunk: unknown): void; text(id: string, delta: string): void; finish(): void; toggleTheme(): void
+  viewed: string[]; opened: string[]; pagesOnDisk: Set<string>; pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: { companyId: string; sessionId: string }; html: string }> }
+type PageGlobals = { __acbChat: Control; __pwned?: unknown[] }
+
+const input = (page: Page) => page.locator('.cm-content[role="textbox"]').locator('visible=true')
+async function send(page: Page, text: string) {
+  await input(page).click()
+  await page.keyboard.insertText(text)
+  await page.keyboard.press('Meta+Enter')
+  await expect.poll(() => chat(page, c => c.open())).toBe(true)
+}
+const chat = async <T>(page: Page, fn: (control: Control) => T) =>
+  (await page.evaluateHandle(() => (window as unknown as PageGlobals).__acbChat)).evaluate(fn)
+/** Words of text part `id` arriving. */
+const say = async (page: Page, id: string, text: string) =>
+  (await page.evaluateHandle(() => (window as unknown as PageGlobals).__acbChat)).evaluate((c, [id, text]) => c.text(id, text), [id, text])
+/** The whole reply, streamed `size` characters at a time with a pause between: as the AI writes it. */
+async function reply(page: Page, text: string, { size = text.length, pause = 0, id = 't1' } = {}) {
+  await page.evaluate(id => (window as unknown as PageGlobals).__acbChat.send({ type: 'text-start', id }), id)
+  for (let at = 0; at < text.length; at += size) {
+    await say(page, id, text.slice(at, at + size))
+    if (pause) await page.waitForTimeout(pause)
+  }
+}
+const finish = (page: Page, id = 't1') => page.evaluate(id => { const c = (window as unknown as PageGlobals).__acbChat; c.send({ type: 'text-end', id }); c.finish() }, id)
+const frames = (page: Page) => page.locator('iframe[data-rich-reply-frame]')
+const shownFrame = (page: Page) => frames(page).and(page.locator('[style*="visibility: visible"]')).last()
+const list = (page: Page) => page.locator('.overflow-auto.space-y-6').locator('visible=true')
+const fence = (info: string, body: string) => '```' + info + '\n' + body.trim() + '\n```'
+
+/** Every request leaving for anywhere but the preview server, and every new window (kept from the network, recorded). */
+async function outside(context: BrowserContext): Promise<{ requests: string[]; windows: string[] }> {
+  const seen = { requests: [] as string[], windows: [] as string[] }
+  await context.route(url => !['data:', 'blob:', 'about:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => {
+    seen.requests.push(route.request().url())
+    return route.abort()
+  })
+  context.on('page', popup => seen.windows.push(popup.url()))
+  return seen
+}
+
+/** Presses, hovers and checks everything in the shown frame (not a web link: that is the member opening it), then tabs. */
+async function pokeEverything(page: Page, frame: ReturnType<Page['frameLocator']>) {
+  for (const element of await frame.locator('body *').all()) {
+    const isWebLink = await element.evaluate(el => el.matches('a[href^="http"]')).catch(() => true)
+    await element.hover({ force: true, timeout: 300 }).catch(() => {})
+    if (!isWebLink) await element.click({ force: true, timeout: 300 }).catch(() => {})
+  }
+  for (let i = 0; i < 12; i++) await page.keyboard.press('Tab')
+  await page.waitForTimeout(800)
+}
+
+/** What happened inside a frame: a script that ran, something fixed over the page, motion for ever, where it is. */
+const insideState = (frame: ReturnType<Page['frameLocator']>) => frame.locator('html').evaluate(() => ({
+  ran: document.title === 'RAN' || document.documentElement.hasAttribute('data-ran'),
+  at: location.href,
+  fixed: [...document.querySelectorAll('*')].filter(el => /fixed|sticky/.test(getComputedStyle(el).position)).length,
+  endless: document.getAnimations().filter(a => {
+    const timing = a.effect?.getComputedTiming()
+    return !timing || !(Number(timing.iterations) <= 10) || !(Number(timing.duration) <= 10_000)
+  }).length,
+}))
+
+/** The reply's own CSS as written (the frame's second <style>), loading from outside. */
+const RAW_CSS = `@import url("https://evil.example/raw-import.css"); @font-face { font-family: E; src: url("https://evil.example/raw-font.woff2") }
+  .acb-root { background: url("https://evil.example/raw-bg.png"); font-family: E } p:hover { background-image: image-set("https://evil.example/raw-set.png" 1x) }`
+
+/** Traps that show in the frame's own document whether they ran (an opaque frame cannot reach the page's globals). */
+const LOCAL_TRAPS = `
+<script>document.title = 'RAN'</script>
+<img src="x" onerror="document.documentElement.setAttribute('data-ran', '')">
+<svg onload="document.title = 'RAN'"></svg>
+<a href="https://evil.example/top" target="_top" id="top-link">アプリごと移るリンク</a>
+<form action="https://evil.example/form" target="_top"><button id="top-form">送る</button></form>
+`
+
+test.describe('in the chat', () => {
+  test('a reply with ```acb-html is drawn whole — its words too — in one closed frame; ```html stays code', async ({ page, context }) => {
+    const seen = await outside(context)
+    const state = await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '経費の精算を教えて')
+    await reply(page, `**結論**：締め日は毎月25日です。\n\n${fence('acb-html', GOOD_REPLY)}\n\nわからないことがあれば聞いてください。`)
+    await finish(page)
+    await expect(frames(page)).toHaveCount(1)
+    const frame = frames(page).first()
+    await expect(frame).toHaveAttribute('style', /visibility: visible/)
+    // The closed frame: no script, no origin of its own, and its own policy first in its document.
+    expect(await frame.getAttribute('sandbox')).toBe('allow-popups')
+    const srcdoc = (await frame.getAttribute('srcdoc'))!
+    // The policy exactly (independent review: a later part of it weakened must fail here too).
+    expect(srcdoc).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'">`)
+    expect(srcdoc.indexOf('Content-Security-Policy')).toBeLessThan(srcdoc.indexOf('<style'))
+    expect(await frame.evaluate((el: HTMLIFrameElement) => el.contentDocument === null), 'the chat cannot reach into it').toBe(true)
+    // The words and the HTML in the same frame; nothing of the reply outside it.
+    const inside = page.frameLocator('iframe[data-rich-reply-frame]')
+    await expect(inside.getByText('締め日は毎月25日です', { exact: false })).toBeVisible()
+    await expect(inside.locator('h3', { hasText: '経費の精算' })).toBeVisible()
+    await expect(inside.getByText('わからないことがあれば聞いてください。')).toBeVisible()
+    await expect(page.locator('[data-assistant-text] pre, [data-assistant-text] code')).toHaveCount(0)
+    // Its words, table and all, can be chosen and copied as one.
+    const chosen = await inside.locator('body').evaluate(body => { const range = document.createRange(); range.selectNodeContents(body); getSelection()!.addRange(range); return getSelection()!.toString() })
+    expect(chosen).toContain('締め日は毎月25日です')
+    expect(chosen).toContain('今月')
+    expect(chosen).toContain('わからないことがあれば')
+    // The hidden copy the chat measures: no script, nothing to press.
+    const measure = page.locator('iframe[data-rich-reply-measure]')
+    expect(await measure.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(await measure.evaluate(el => [el.hasAttribute('inert'), el.getAttribute('aria-hidden'), getComputedStyle(el).visibility])).toEqual([true, 'true', 'hidden'])
+    expect((await measure.getAttribute('srcdoc'))!).toContain(`content="default-src 'none'; img-src data:;`)
+    // Owner condition: no frame on the page has both allow-scripts and allow-same-origin.
+    const sandboxes = await page.locator('iframe').evaluateAll(all => all.map(el => (el as HTMLIFrameElement).sandbox.value))
+    expect(sandboxes.filter(value => /\ballow-scripts\b/.test(value) && /\ballow-same-origin\b/.test(value))).toEqual([])
+
+    // SCREENSHOTS=<dir>: the reply beside the chat, light and dark (for the PR).
+    if (process.env.SCREENSHOTS) {
+      await page.screenshot({ path: `${process.env.SCREENSHOTS}/rich-reply-light.png` })
+      await chat(page, c => c.toggleTheme())
+      await page.waitForTimeout(600)
+      await page.screenshot({ path: `${process.env.SCREENSHOTS}/rich-reply-dark.png` })
+      await chat(page, c => c.toggleTheme())
+    }
+    await send(page, 'HTML の例は？')
+    await reply(page, `HTML の例です。\n\n${fence('html', '<table><tr><td>保守</td></tr></table>')}`)
+    await finish(page)
+    await expect(page.locator('[data-assistant-text]').last()).toContainText('<table><tr><td>保守</td></tr></table>')
+    await expect(page.locator('[data-assistant-text]').last().locator('iframe')).toHaveCount(0)
+    await expect(frames(page)).toHaveCount(1)
+    expect(seen).toEqual({ requests: [], windows: [] })
+    expectNoPageErrors(state)
+  })
+
+  test('the demo\'s traps, written a piece at a time and then pressed, hovered and tabbed: nothing runs, leaves, covers or loops', async ({ page, context }) => {
+    const seen = await outside(context)
+    const state = await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, 'まとめて')
+    await reply(page, `まとめました。\n\n${fence('acb-html', ALL_TRAPS + LOCAL_TRAPS)}\n\n以上です。`, { size: 400, pause: 15 })
+    await finish(page)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
+    await expect(inside.getByText('以上です。')).toBeVisible()
+    await pokeEverything(page, inside)
+    const result = await insideState(inside)
+    expect(result.ran, 'nothing in the reply ran').toBe(false)
+    expect(result.at).toBe('about:srcdoc')
+    expect(result.fixed, 'nothing is fixed over the chat').toBe(0)
+    expect(result.endless, 'no motion goes on for ever').toBe(0)
+    expect(await page.evaluate(() => (window as unknown as PageGlobals).__pwned ?? [])).toEqual([])
+    expect(page.url()).toContain('/tests/chat-header-ui.html')
+    expect(seen, 'no request and no window left the app').toEqual({ requests: [], windows: [] })
+    expectNoPageErrors(state)
+  })
+
+  test('a pressed web link leaves only as a new window to that address (the app opens it in the browser), never in the frame', async ({ page, context }) => {
+    const seen = await outside(context)
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '案内は？')
+    await reply(page, `こちらです。\n\n${fence('acb-html', '<p><a href="https://example.com/guide?q=1">案内のページ</a></p>')}`)
+    await finish(page)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame]')
+    await inside.getByText('案内のページ').click()
+    await expect.poll(() => seen.requests).toEqual(['https://example.com/guide?q=1'])
+    await expect.poll(() => seen.windows.length).toBe(1)
+    expect(await inside.locator('html').evaluate(() => location.href)).toBe('about:srcdoc')
+  })
+
+  test('the frame is as tall as its reply, with no scroll inside; past 20,000 px it stops and says where the rest is', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', GOOD_REPLY)}`)
+    await finish(page)
+    const frame = shownFrame(page)
+    await expect(frame).toBeVisible()
+    const inside = page.frameLocator('iframe[data-rich-reply-frame]')
+    const content = await inside.locator('.acb-root').evaluate(el => el.getBoundingClientRect().height)
+    const height = (await frame.boundingBox())!.height
+    expect(Math.abs(height - content), `frame ${height}, content ${content}`).toBeLessThanOrEqual(2)
+    await expect(page.locator('[data-rich-reply-over]')).toHaveCount(0)
+
+    await send(page, 'もっと長く')
+    await reply(page, 'とても長い返事です。\n\n```acb-html\n<div style="height: 30000px">高い</div>\n```')
+    await finish(page)
+    await expect(page.locator('[data-rich-reply-over]')).toHaveText(/続きは［大きく見る］で見られます/)
+    await expect.poll(async () => (await shownFrame(page).boundingBox())?.height).toBe(20_000)
+  })
+
+  // Codex review: the shown frame cannot say it grew, so its height is the tallest it can become.
+  test('what the member opens or switches in the frame (a step, a tab) and a taller dark layout are never cut off', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '手順とタブで')
+    const tall = (words: string) => Array.from({ length: 12 }, (_, i) => `<p>${words}${i + 1}</p>`).join('')
+    await reply(page, `${fence('acb-html', `<style>@media (prefers-color-scheme: dark) { .pad { padding-bottom: 400px } }</style><p class="pad">はじめ</p>
+<div class="acb-tabs"><input type="radio" name="t" id="t1" checked><label for="t1">短い</label><input type="radio" name="t" id="t2"><label for="t2">長い</label>
+<div class="acb-tab"><p>一行</p></div><div class="acb-tab">${tall('タブ')}</div></div>
+<details><summary>くわしく</summary>${tall('手順')}</details>`)}\n\n最後の行です。`)
+    await finish(page)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
+    const fits = async () => {
+      const content = await inside.locator('.acb-root').evaluate(el => el.getBoundingClientRect().height)
+      const frame = (await shownFrame(page).boundingBox())!.height
+      return frame + 1 >= content
+    }
+    await expect(inside.getByText('最後の行です。')).toBeVisible()
+    await inside.getByText('長い', { exact: true }).click()
+    await inside.getByText('くわしく').click()
+    await expect(inside.getByText('手順12')).toBeVisible()
+    expect(await fits(), 'opened and switched, everything still in the frame').toBe(true)
+    await chat(page, c => c.toggleTheme())
+    await expect.poll(() => page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
+    await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').getByText('長い', { exact: true }).click()
+    await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').getByText('くわしく').click()
+    expect(await fits(), 'the dark layout, opened, still in the frame').toBe(true)
+  })
+
+  test('a reply being written grows in its frame without a blank moment, redrawn at most about every 80 ms', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '比べて')
+    const rows = Array.from({ length: 30 }, (_, i) => `<tr><td>項目${i + 1}</td><td>${i * 1000}円</td></tr>`).join('\n')
+    const text = `比べました。\n\n${fence('acb-html', `<table class="acb-compare"><tbody>\n${rows}\n</tbody></table>`)}\n\n以上です。`
+    // Watch, from the page, every frame the chat makes and whether the reply is ever empty once drawn.
+    await page.evaluate(() => {
+      const w = window as unknown as { __made: number; __blank: number; __drawn: boolean }
+      w.__made = 0; w.__blank = 0; w.__drawn = false
+      // A frame shown before its document has loaded is an empty moment, as is no frame shown at all.
+      const loaded = new WeakSet<Element>()
+      new MutationObserver(records => {
+        for (const r of records) for (const n of r.addedNodes) {
+          if (!(n as Element).matches?.('iframe[data-rich-reply-frame]')) continue
+          w.__made++
+          n.addEventListener('load', () => loaded.add(n as Element))
+        }
+      }).observe(document.body, { childList: true, subtree: true })
+      const tick = () => {
+        const box = document.querySelector('[data-rich-reply]')
+        if (box) {
+          const visible = [...box.querySelectorAll('iframe[data-rich-reply-frame][style*="visibility: visible"]')]
+          if (visible.some(frame => loaded.has(frame))) w.__drawn = true
+          else if (w.__drawn) w.__blank++
+          if (visible.some(frame => !loaded.has(frame))) w.__blank++
+        }
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+    const started = Date.now()
+    await reply(page, text, { size: 12, pause: 8 })
+    await finish(page)
+    const took = Date.now() - started
+    await expect(page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').getByText('以上です。')).toBeVisible()
+    const { made, blank } = await page.evaluate(() => { const w = window as unknown as { __made: number; __blank: number }; return { made: w.__made, blank: w.__blank } })
+    expect(blank, 'never empty once drawn').toBe(0)
+    expect(made, `${made} frames in ${took} ms`).toBeGreaterThan(2)
+    expect(made, `${made} frames in ${took} ms`).toBeLessThanOrEqual(Math.ceil(took / 80) + 3)
+    await expect(frames(page)).toHaveCount(1)
+  })
+
+  test('a reply being written in its frame follows the bottom, but not while the member has scrolled up to read', async ({ page }) => {
+    await openPreview(page, 'chat-header', { list: 'open', history: 'long', turn: 'manual' })
+    const fromBottom = () => list(page).evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+    await send(page, '続きを表で')
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => `<p>行${i + 1}</p>`).join('\n')
+    await reply(page, `表です。\n\n\`\`\`acb-html\n${rows(40)}\n`)
+    await expect(shownFrame(page)).toBeVisible()
+    await expect.poll(fromBottom).toBeLessThan(5)
+
+    await list(page).evaluate(el => { el.scrollTop = el.scrollTop - 800 })
+    await expect.poll(fromBottom).toBeGreaterThan(500)
+    const before = await list(page).evaluate(el => [el.scrollTop, el.scrollHeight])
+    await say(page, 't1', Array.from({ length: 40 }, (_, i) => `<p>追加${i + 1}</p>`).join('\n') + '\n')
+    await expect.poll(() => list(page).evaluate(el => el.scrollHeight)).toBeGreaterThan(before[1] + 400)
+    await page.waitForTimeout(300)
+    expect(await list(page).evaluate(el => el.scrollTop), 'the reader stays where they scrolled to').toBe(before[0])
+    await finish(page)
+  })
+
+  test('light / dark follows the app at once, the reply\'s own dark colours included, without an empty moment', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '色つきで')
+    await reply(page, fence('acb-html', '<style>.c { color: rgb(1, 2, 3) } @media (prefers-color-scheme: dark) { .c { color: rgb(250, 251, 252) } }</style><p class="c">色の段落</p>'))
+    await finish(page)
+    const colour = () => page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('.c').evaluate(el => getComputedStyle(el).color)
+    await expect.poll(colour).toBe('rgb(1, 2, 3)')
+    await chat(page, c => c.toggleTheme())
+    await expect.poll(colour).toBe('rgb(250, 251, 252)')
+    expect(await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
+    await expect(page.locator('[data-rich-reply]')).toHaveAttribute('data-rich-reply-state', 'frame')
+    await expect(frames(page)).toHaveCount(1)
+  })
+
+  // The pieces the AI is told about (reply-style.ts RICH_HTML_PIECES) survive the cleaning, each class has a rule of the
+  // frame's own, and the boxes and marks read in light and dark (contrast against what is behind them, the chat's page too).
+  test('the ready-made pieces the AI is told about are kept, styled by the frame and readable in light and dark', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '既製の箱で')
+    // Each example as written, and a box of its own for a name the example only mentions (「acb-note, acb-warn」).
+    const examples = RICH_HTML_PIECES.map(([, example]) => example)
+    const written = new Set(examples.flatMap(example => [...example.matchAll(/class="([\w-]+)"/g)].map(match => match[1])))
+    const mentioned = [...new Set(examples.flatMap(example => example.match(/\bacb-[a-z-]+/g) ?? []))].filter(name => !written.has(name))
+    const markup = [...examples.map(example => `<div>${example.replace(/…/g, '見本の文')}</div>`), ...mentioned.map(name => `<div class="${name}">見本の文</div>`)].join('\n')
+    await reply(page, fence('acb-html', markup))
+    await finish(page)
+    const classes = [...written, ...mentioned]
+    expect(classes.length).toBeGreaterThan(10)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
+    for (const theme of ['light', 'dark']) {
+      if (theme === 'dark') {
+        await chat(page, c => c.toggleTheme())
+        await expect.poll(() => inside.locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
+      }
+      const behind = await frames(page).last().evaluate(el => {
+        for (let at: Element | null = el; at; at = at.parentElement) {
+          const bg = getComputedStyle(at).backgroundColor
+          if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg
+        }
+        return 'rgb(255, 255, 255)'
+      })
+      const seen = await inside.locator('html').evaluate((_, [classes, behind]) => {
+        const rules: string[] = []
+        const walk = (list: CSSRuleList) => { for (const rule of Array.from(list)) { if (rule instanceof CSSStyleRule) rules.push(rule.selectorText); else if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules) } }
+        walk(document.styleSheets[0].cssRules)
+        const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+        const lum = (value: string) => {
+          const [r, g, b] = rgb(value).map(c => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        }
+        const backOf = (el: Element) => {
+          for (let at: Element | null = el; at; at = at.parentElement) {
+            const bg = getComputedStyle(at).backgroundColor
+            if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg
+          }
+          return behind
+        }
+        const contrast = (el: Element) => {
+          const [a, b] = [lum(getComputedStyle(el).color), lum(backOf(el))].sort((x, y) => y - x)
+          return Math.round((a + 0.05) / (b + 0.05) * 10) / 10
+        }
+        const readable = ['acb-key', 'acb-note', 'acb-warn', 'acb-ok', 'acb-yes', 'acb-mid', 'acb-no']
+        return {
+          kept: classes.filter(name => !document.querySelector(`.${name}`)),
+          unstyled: classes.filter(name => !rules.some(selector => selector.includes(`.${name}`))),
+          contrast: Object.fromEntries(readable.map(name => [name, contrast(document.querySelector(`.${name}`)!)])),
+          bare: ['acb-key', 'acb-note', 'acb-warn', 'acb-ok'].filter(name => /rgba\(0, 0, 0, 0\)|transparent/.test(getComputedStyle(document.querySelector(`.${name}`)!).backgroundColor)),
+        }
+      }, [classes, behind] as const)
+      expect(seen.kept, `${theme}: removed by the cleaning`).toEqual([])
+      expect(seen.unstyled, `${theme}: no rule of the frame`).toEqual([])
+      expect(seen.bare, `${theme}: a box without its own background`).toEqual([])
+      for (const [name, ratio] of Object.entries(seen.contrast)) expect(ratio, `${theme}: ${name}`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  test('a 16:9 slide is scaled to the chat\'s width, whole', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 800 })
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '1枚の図で')
+    await reply(page, fence('acb-slide', '<div style="display: flex; justify-content: space-between; height: 720px"><b>左はし</b><b id="right">右はし</b></div>'))
+    await finish(page)
+    const frame = shownFrame(page)
+    await expect(frame).toBeVisible()
+    const width = (await frame.boundingBox())!.width
+    const slide = await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('.acb-slide-inner').evaluate(el => el.getBoundingClientRect().toJSON())
+    expect(slide.width).toBeLessThanOrEqual(width + 1)
+    expect(slide.width).toBeGreaterThan(width - 2)
+    expect(Math.abs(slide.height - slide.width * 9 / 16)).toBeLessThan(2)
+  })
+})
+
+test('a long conversation of rich replies draws only those near the screen and keeps the reading place', async ({ page }) => {
+  await openPreview(page, 'chat-header', { list: 'open', history: 'long', rich: '1' })
+  await expect(page.getByRole('button', { name: /^以前のメッセージを表示/ })).toBeVisible({ timeout: 15_000 })
+  await expect.poll(() => shownFrame(page).count()).toBeGreaterThan(0)
+  const live = () => frames(page).count()
+  expect(await live(), 'a handful of frames, not fifty').toBeLessThanOrEqual(8)
+  // Up through the conversation: frames follow the screen, and those taken down keep their height.
+  for (let step = 0; step < 12; step++) {
+    await list(page).evaluate(el => { el.scrollTop = Math.max(0, el.scrollTop - 1500) })
+    await page.waitForTimeout(120)
+    expect(await live()).toBeLessThanOrEqual(8)
+  }
+  const top = await list(page).evaluate(el => [el.scrollTop, el.scrollHeight])
+  await list(page).evaluate(el => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(500)
+  await list(page).evaluate((el, at) => { el.scrollTop = at }, top[0])
+  await page.waitForTimeout(500)
+  expect(await list(page).evaluate(el => el.scrollHeight), 'heights kept: the list is as long as before').toBe(top[1])
+})
+
+test('every piece of a reply is cleaned — its words, each block, one still being written — and none can leave its place', async ({ page }) => {
+  await openPreview(page, 'chat-rich-reply')
+  const reply = `前置き<script>x()</script> [リンク](javascript:alert(1))\n\n${fence('acb-html', '<p>表</p></div></div></div><p class="out">外へ</p><img src=x onerror="alert(1)"><style>.a{color:red}</style>')}\n\n${fence('acb-slide', '<b onclick="alert(1)">図</b>')}\n\n\`\`\`acb-html\n<p>途中</p><script>alert(1)</script><p>書きか`
+  const { body, css } = await page.evaluate(reply => window.__acbRichReply!.contentOf(reply, false), reply)
+  expect(body).not.toMatch(/<script|\son\w+=|javascript:/i)
+  expect(css).toContain('.a')
+  const places = await page.evaluate(body => {
+    const root = new DOMParser().parseFromString(`<div id="root">${body}</div>`, 'text/html').getElementById('root')!
+    return { pieces: [...root.children].map(el => el.className), out: root.querySelector('.out')?.closest('.acb-piece')?.className, last: root.lastElementChild!.textContent }
+  }, body)
+  expect(places.pieces).toEqual(['acb-piece acb-markdown', 'acb-piece acb-html', 'acb-piece acb-slide not-prose', 'acb-piece acb-html'])
+  expect(places.out, 'a block cannot close the frame\'s own wrappers').toBe('acb-piece acb-html')
+  expect(places.last, 'a block still being written shows up to its last whole tag').toBe('途中')
+})
+
+test.describe('the frame alone (the cleaning skipped)', () => {
+  test('raw traps in the chat\'s frame run nothing, load nothing, move nothing out of the frame', async ({ page, context }) => {
+    const seen = await outside(context)
+    const state = await openPreview(page, 'chat-rich-reply')
+    await page.evaluate(([html, css]) => window.__acbRichReply!.draw({ html, css }), [ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS, RAW_CSS])
+    const inside = page.frameLocator('#reply')
+    await pokeEverything(page, inside)
+    await inside.locator('#top-link').click({ force: true }).catch(() => {})
+    await inside.locator('#top-form').click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect((await insideState(inside)).ran, 'no script ran').toBe(false)
+    expect(await page.locator('#reply').evaluate((el: HTMLIFrameElement) => el.contentDocument === null), 'no origin shared with the app').toBe(true)
+    expect(page.url(), 'the app was not moved away').toContain('/tests/chat-rich-reply-ui.html')
+    expect(seen.requests, 'nothing loaded or sent').toEqual([])
+    expectNoPageErrors(state)
+  })
+
+  // Independent review: the hidden copy shares the app's origin, so it must be as closed as the shown frame.
+  test('raw traps in the hidden copy the chat measures run nothing, load nothing and are not left in it', async ({ page, context }) => {
+    const seen = await outside(context)
+    const state = await openPreview(page, 'chat-rich-reply')
+    await page.evaluate(([html, css]) => window.__acbRichReply!.measure(html, css), [ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS, RAW_CSS])
+    await page.waitForTimeout(800)
+    const copy = await page.locator('iframe[data-rich-reply-measure]').evaluate((el: HTMLIFrameElement) => {
+      const doc = el.contentDocument!
+      return { ran: doc.title === 'RAN' || doc.documentElement.hasAttribute('data-ran'), at: doc.location.href, left: doc.querySelector('.acb-root')!.childNodes.length }
+    })
+    expect(copy).toEqual({ ran: false, at: 'about:srcdoc', left: 0 })
+    expect(await page.evaluate(() => (window as unknown as PageGlobals).__pwned ?? [])).toEqual([])
+    expect(seen.requests, 'nothing loaded or sent').toEqual([])
+    expectNoPageErrors(state)
+  })
+
+  test('the same frame with its sandbox or its policy taken off does run, load or move the app: the checks above can fail', async ({ page, context }) => {
+    const seen = await outside(context)
+    await openPreview(page, 'chat-rich-reply')
+    const html = ALL_TRAPS.replace(/<plaintext>[\s\S]*$/, '') + LOCAL_TRAPS
+    await page.evaluate(html => window.__acbRichReply!.draw({ html, css: '', policy: false }), html)
+    await page.waitForTimeout(500)
+    expect(seen.requests.length, 'without the policy, the traps load').toBeGreaterThan(0)
+    await page.evaluate(html => window.__acbRichReply!.draw({ html, css: '', sandbox: false }), LOCAL_TRAPS)
+    expect(await page.locator('#reply').evaluate((el: HTMLIFrameElement) => el.contentDocument !== null), 'without the sandbox, the app can be reached').toBe(true)
+    await page.frameLocator('#reply').locator('#top-link').click({ force: true }).catch(() => {})
+    await expect.poll(() => page.url(), 'without the sandbox, a link moves the app away').not.toContain('/tests/chat-rich-reply-ui.html')
+  })
+})
+
+// ［大きく見る］［ページとして残す］［コードとして見る］ (chat-ui-and-history.md "Rich replies: ［大きく見る］…"): shown only
+// while the pointer is over the reply or a button has focus; the page is the AI's HTML as written, kept by main in the
+// today folder (chat-header-ui.html?pages=1 records what was asked) and opened by the editor's command only.
+test.describe('the reply\'s buttons', () => {
+  const RAW = '<p class="mine">そのまま</p><script>document.title = "ページの中だけで動く"</script>'
+  const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'この返事の表示' })
+  const opacity = (page: Page) => toolbar(page).evaluate(el => Number(getComputedStyle(el).opacity))
+
+  test('hidden until the pointer is over the reply or the keyboard reaches a button; three buttons with a today folder', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', GOOD_REPLY)}`)
+    await finish(page)
+    await expect(shownFrame(page)).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect.poll(() => opacity(page)).toBe(0)
+    await expect(toolbar(page).getByRole('button')).toHaveText(['', '', ''])
+    await expect(toolbar(page).getByRole('button', { name: '大きく見る' })).toBeAttached()
+    await expect(toolbar(page).getByRole('button', { name: 'ページとして残す' })).toBeAttached()
+    await shownFrame(page).hover()
+    await expect.poll(() => opacity(page)).toBe(1)
+    await page.mouse.move(5, 5)
+    await expect.poll(() => opacity(page)).toBe(0)
+    await toolbar(page).getByRole('button', { name: 'コードとして見る' }).focus()
+    await expect.poll(() => opacity(page)).toBe(1)
+    await page.keyboard.press('Shift+Tab')
+    await expect(toolbar(page).getByRole('button', { name: 'ページとして残す' })).toBeFocused()
+  })
+
+  test('［大きく見る］ keeps the AI\'s HTML as written in the today folder and opens it in the HTML viewer; again, the same file', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', RAW)}`)
+    // Still being written: nothing to keep yet.
+    await expect(shownFrame(page)).toBeVisible()
+    await expect(toolbar(page).getByRole('button', { name: '大きく見る' })).toBeDisabled()
+    await finish(page)
+    await shownFrame(page).hover()
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    const path = '/tmp/acb-preview/営業部/.personal/inbox/日付別/2026/20261128/ページ/AI の返事.html'
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual([path])
+    const saved = await chat(page, c => c.pagesSaved)
+    expect(saved).toHaveLength(1)
+    expect(saved[0].rootPath).toBe('/tmp/acb-preview')
+    expect(saved[0].todayFolder).toBe('営業部/.personal/inbox/日付別/2026/20261128')
+    expect(saved[0].consultation.companyId).toBe('preview-company')
+    expect(saved[0].html, 'the block as the AI wrote it, its script too').toContain(RAW)
+    expect(saved[0].html).toContain('<p>表です。</p>')
+    expect(saved[0].html).toMatch(/^<!doctype html>/)
+    // The frame in the chat still holds the cleaned reply: the script never reached it.
+    expect(await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('script').count()).toBe(0)
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual([path, path])
+    expect(await chat(page, c => c.pagesSaved.length), 'kept once').toBe(1)
+    // The member deleted it: kept again, under a new name (nothing replaced), and that one opens.
+    await chat(page, c => c.pagesOnDisk.clear())
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed.at(-1))).toBe(path.replace('AI の返事.html', 'AI の返事 (2).html'))
+    expect(await chat(page, c => c.pagesSaved.length)).toBe(2)
+  })
+
+  test('［ページとして残す］ shows the page as a card for the member alone; the card opens it; a refusal is said', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, fence('acb-html', RAW))
+    await finish(page)
+    await shownFrame(page).hover()
+    await toolbar(page).getByRole('button', { name: 'ページとして残す' }).click()
+    const card = page.locator('[data-chat-page-card]')
+    await expect(card).toContainText('ページとして残しました')
+    await expect(card).toContainText('ページ・あなただけに見えます・AI の返事.html')
+    expect(await chat(page, c => c.viewed)).toEqual([])
+    await card.click()
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual(['/tmp/acb-preview/営業部/.personal/inbox/日付別/2026/20261128/ページ/AI の返事.html'])
+
+    await send(page, 'もう一つ')
+    await reply(page, fence('acb-html', '<p>別の返事</p>'))
+    await finish(page)
+    await page.evaluate(() => { (window as unknown as { __acbPageRefusal: string }).__acbPageRefusal = 'ページを置く今日のフォルダが見つかりません。' })
+    await shownFrame(page).hover()
+    await toolbar(page).last().getByRole('button', { name: '大きく見る' }).click()
+    await expect(page.getByRole('alert').filter({ hasText: '今日のフォルダが見つかりません' })).toBeVisible()
+    expect(await chat(page, c => c.viewed)).toHaveLength(1)
+  })
+
+  test('［コードとして見る］ shows the reply as code, with no frame; pressed again, the frame comes back', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', GOOD_REPLY)}`)
+    await finish(page)
+    await expect(shownFrame(page)).toBeVisible()
+    // No today folder (a consultation's own window): only this button.
+    await expect(toolbar(page).getByRole('button')).toHaveCount(1)
+    const code = toolbar(page).getByRole('button', { name: 'コードとして見る' })
+    await code.focus()
+    await code.press('Enter')
+    await expect(frames(page)).toHaveCount(0)
+    await expect(page.locator('[data-assistant-text]').last()).toContainText('<table class="acb-compare">')
+    await expect(toolbar(page).getByRole('button', { name: '整えた表示に戻す' })).toHaveAttribute('aria-pressed', 'true')
+    await toolbar(page).getByRole('button', { name: '整えた表示に戻す' }).click()
+    await expect(shownFrame(page)).toBeVisible()
+  })
+
+  test('past 20,000 px, 「続きは［大きく見る］で」 opens the whole page', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, 'もっと長く')
+    await reply(page, 'とても長い返事です。\n\n```acb-html\n<div style="height: 30000px">高い</div>\n```')
+    await finish(page)
+    await page.locator('[data-rich-reply-over]').getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed)).toHaveLength(1)
+    expect((await chat(page, c => c.pagesSaved))[0].html).toContain('height: 30000px')
+  })
+
+  test('every way to keep the page passes one gate: nothing kept while the reply is written, one page however many presses', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, 'もっと長く')
+    await reply(page, 'とても長い返事です。\n\n```acb-html\n<div style="height: 30000px">高い</div>\n```\n\n続きを書いています')
+    // Still being written (the block closed, the reply not): the line's ［大きく見る］ keeps nothing either.
+    const lineButton = page.locator('[data-rich-reply-over]').getByRole('button', { name: '大きく見る' })
+    await expect(lineButton).toBeVisible()
+    await expect(lineButton).toBeDisabled()
+    await lineButton.evaluate(el => (el as HTMLButtonElement).click())
+    await page.waitForTimeout(300)
+    expect(await chat(page, c => c.pagesSaved.length), 'a half-written reply is never kept').toBe(0)
+    await finish(page)
+    await expect(lineButton).toBeEnabled()
+    // Pressed again and again before the first keep answers — the line's button and the top ones alike: one page.
+    await lineButton.evaluate(el => {
+      const top = [...document.querySelectorAll('[role="toolbar"][aria-label="この返事の表示"] button')] as HTMLButtonElement[]
+      ;(el as HTMLButtonElement).click()
+      ;(el as HTMLButtonElement).click()
+      top[0].click()
+      top[1].click()
+    })
+    await expect.poll(() => chat(page, c => c.viewed)).toHaveLength(1)
+    await page.waitForTimeout(300)
+    expect(await chat(page, c => c.pagesSaved.length), 'one page for the one reply').toBe(1)
+  })
+})

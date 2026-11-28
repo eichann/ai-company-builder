@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { backupBeforeOverwrite, backupEdits, createDirectory, readFile, writeFile, saveRefusal } from '../api'
-import { EDITOR_EDITS_REASON, EDITOR_LEFT_UNSAVED_REASON, canAutosave, decideCompareChoice, decideSave, isDirty } from '../../../../shared/editor-disk-state'
+import { EDITOR_EDITS_REASON, EDITOR_LEFT_UNSAVED_REASON, canAutosave, decideCompareChoice, decideSave, isDirty, withExternal } from '../../../../shared/editor-disk-state'
 import { registerUnsavedEditsKeeper, registerUnsavedEditsSaver, registerUnsettledEditsCheck } from '../../../shared/lib/unsavedEdits'
 import type { OpenFile } from './useOpenFiles'
 
@@ -67,9 +67,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       if (decision.action === 'ask') {
         // Show the banner whatever happens next, so the change is never unnoticed.
         updateFile(filePath, f => ({
-          ...f,
-          external: { kind: 'changed', diskContent: decision.diskContent },
-          missing: false,
+          ...withExternal(f, { kind: 'changed', diskContent: decision.diskContent }),
           ...(interactive ? { comparing: true, changedWhileComparing: false } : {}),
         }))
         return false
@@ -109,9 +107,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     if (decision.action === 'already-saved') markSaved(filePath, current.content)
     else {
       updateFile(filePath, f => ({
-        ...f,
-        external: decision.external,
-        missing: decision.external.kind === 'deleted',
+        ...withExternal(f, decision.external),
         comparing: decision.external.kind === 'changed',
         changedWhileComparing: decision.external.kind === 'changed',
       }))

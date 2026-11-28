@@ -57,7 +57,9 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
   shows, `tasks-ui.md` "Working through a list"). `mod` = ⌘ or Ctrl (either one, on every
   platform); `shift` and `alt` must match exactly (⌥⌘P is not ⌘P); `key` is `KeyboardEvent.key`,
   a letter A–Z matched in either case (Windows / Linux report Ctrl+Shift+C as `C`, macOS ⌘⇧C as
-  `c`), any other key exactly. Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
+  `c`), any other key exactly; with `alt`, a digit or letter pressed with ⌘ (not Ctrl) also matches
+  by its physical key (`KeyboardEvent.code` `Digit1` / `KeyS`: a Mac reports ⌥⌘1 as `¡`; Windows'
+  AltGr arrives as Ctrl+Alt and types a character, never a shortcut). Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
   A shortcut runs the command with no
   arguments, so its args must allow `{}`; two commands cannot share a key in one area.
 - `defineCommands` refuses a bad catalog at start-up (duplicate id, missing class, bad id,
@@ -78,6 +80,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `chat.closeRecordConsultations` `{ recordId, pane? }` | local (closes tabs on this computer; the history is kept) | each chat pane (`ChatPanel.tsx`): the open tabs of that record's automatic 「AI の番」 consultations that hold nothing of the member's (`ai-turns.md` "Closing the consultation") | AppShell `recordEnded`: the list's ☑, a task card's 完了にする, a record card's 済んだ / 終わりにする / もう返した (`tasks-ui.md`) |
 | `help.openManual` `{ page?, anchor? }` | view | `src/app/AppShell.tsx`: the middle's 「使い方」 screen tab at that page (the index without one) and heading, opened afresh each time (`files-and-editor.md` "The user manual") | the title bar's 「使い方」 (`TitleBar.tsx`), ⌘K 「使い方」 (`AppDialogs.tsx`); a screen links to its chapter with `{ page }` |
 | `chat.insertText` `{ text, pane? }` | local (replaces the composer's text, sends nothing) | each chat pane | the HTML viewer's band ［AI に直してもらう］ (`features/editor/components/HtmlDocumentPane.tsx`; shown only while a handler exists) |
+| `chat.askToFix` `{ ask, file, passage, before, after, comment?, pane? }` | outbound (sends the passage to the AI) | each chat pane (`ChatPanel.tsx`): the shown tab's consultation gets it as a message the app sends (`inlineFixMessage`), answered `{ ok: true, reply }` when that turn ends or `{ ok: false, reason: busy / failed / stopped }` (`client/shared/inline-fix.ts`); busy while anything of the tab runs or waits; the zod limits refuse a larger passage | the document's ［AI に直してもらう］ and a review comment's ［AI に反映してもらう］ (`src/app/editorSelection.ts`; `files-and-editor.md` "Asking the AI to fix a passage") |
 | `chat.openInWindow` `{ sessionId, pane? }` | view (shows it in a window of its own; one shown elsewhere is focused) | each chat pane (`ChatPanel.tsx`, `useMoveToWindow`) | none yet; the row and header buttons call the same function directly (`chat-ui-and-history.md`) |
 | `chat.openConsultation` `{ sessionId, pane? }` | view (shows that consultation; one another window shows is focused there) | each chat pane (`ChatPanel.tsx`, `openOrFocus`) | a consultation row in a record's 「つながっているもの」 (`src/shared/ui/consultationLinks.tsx`) |
 | `chat.toggleVoiceInput` `{ pane? }` | outbound (recording goes to transcription and the AI tidies it) | the shown tab's composer of each chat pane (`VoiceInputControl.tsx`) | the member's voice key (`features/chat/hooks/useVoiceShortcut.ts`, below) |
@@ -99,6 +102,8 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source, an HTML document's 見る ⇄ 中身; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.viewDocument` `{ path, pane? }` | view | each editor (`TabbedEditorPanel.tsx`): an `.html` / `.htm` tab shown as 中身 goes back to 見る, then `file.open` (doc-frame.md "The chat's ［見る］ (A3)") | the chat's ［見る］ on a 「ファイルに書きました／直しました」 row (`features/chat/components/ToolRows.tsx`; shown only while a handler exists — none in a consultation's own window) |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
+| `editor.toggleBold` ⌘B, `editor.toggleItalic` ⌘I, `editor.toggleStrike` ⌘⇧S, `editor.toggleCode` ⌘E, `editor.editLink` ⌘K, `editor.setBodyText` ⌘⌥0, `editor.setHeadingOne` / `Two` / `Three` ⌘⌥1〜3 `{ pane? }` (editor) | local (changes the document; written back like typing) | the document edited in place (`components/InPlaceMarkdownEditor.tsx`): its selection bubble's operations (`files-and-editor.md` "The selection bubble"); each declines the key unless the focus is in the document (`editLink` also needs a selection) and, on a Mac, a Ctrl+letter (the text's own Ctrl+B / Ctrl+E), so ⌘B / ⌘K reach `layout.toggleLeft` / `find.byName` otherwise; `notInHtmlDocument`: an HTML document keeps these keys | the shortcuts; the bubble's buttons call the same operations directly |
+| `editor.blockMenuNext` ↓, `editor.blockMenuPrevious` ↑ (view), `editor.blockMenuChoose` Enter (local), `editor.blockMenuClose` Esc (view) `{ pane? }` (editor) | view / local (a choice changes the document; written back like typing) | the document edited in place (`components/InPlaceMarkdownEditor.tsx`): its 「/」 list (`files-and-editor.md` "The 「/」 list, line starts and the table bar"); each declines the key unless that list shows in the focused document and no word is being composed (`KeyInput.isComposing`), so the arrows, Enter and Esc stay the text's and another part's otherwise; `notInHtmlDocument` | the keys; the list's rows call the same choice directly |
 
 A chat pane keeps the request until its shown tab can act (history read): the tab then starts a
 new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`
@@ -159,7 +164,7 @@ So the AI works only on the main window's tabs, and only for its own company. Te
   (`docViewShortcutOf` → `shortcutOf(catalog, input, areas)`, `define.ts`) and the viewer runs them
   with `handleKeyAt(area, input)` (the tab's focus chain). A new `app` / `editor` binding is handed
   over by itself; one whose command does nothing on an HTML tab sets `keybinding.notInHtmlDocument`
-  so the document keeps the key (today `editor.find` ⌘F; doc-frame.md "App shortcuts in a
+  so the document keeps the key (today `editor.find` ⌘F and the selection bubble's keys; doc-frame.md "App shortcuts in a
   document").
 - The one window-wide app key: voice input's start / stop (member-configurable, default ⌘⇧M), so
   not a catalog keybinding. `hooks/useVoiceShortcut.ts` holds one `window` capture listener per

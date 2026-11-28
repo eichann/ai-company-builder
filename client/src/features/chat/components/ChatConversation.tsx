@@ -15,6 +15,8 @@ import { REVIEW_CONFIRM_MESSAGE } from '../../../../shared/review-request'
 import { MINUTES_NEEDS_CLAUDE_TEXT } from '../../../../shared/minutes-app'
 import { pendingReviewOf } from '../reviewRequest'
 import { ReviewActionsContext, type ReviewActions } from '../review-context'
+import { ChatFollowContext } from '../chatFollow'
+import { ReplyPagesContext, type ReplyPages } from '../replyPages'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -48,8 +50,9 @@ import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
 import { AppInstructionChip } from './AppInstructionChip'
 import { TopicChip } from './TopicChip'
-import { patchChatSession } from '../api'
+import { patchChatSession, replyPageStillThere, saveReplyPage } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
+import { inlineFixTurnAnswer, type InlineFixReply } from '../../../../shared/inline-fix'
 import { chatErrorText } from '../chatErrorText'
 import { replyAsksTheMember } from '../aiTurns'
 
@@ -108,6 +111,8 @@ export type ChatInputRequest =
     /** The app's first message went out (its id) in this tab's new conversation (「この作業をする」 closes it by itself once done). */
     onSent?: (sent: { tabId: string; conversationId: string; messageId: string }) => void }
   | { kind: 'insertText'; text: string }
+  /** 「AI に直してもらう」: `message` sent into this tab's consultation (kept, `appSent`); `answer` gets the reply when that turn ends. */
+  | { kind: 'inlineFix'; message: string; answer: (reply: InlineFixReply) => void }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
    * record with this tab's conversation id; only when that wins, send the first message.
@@ -198,8 +203,13 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const steering = useSteering({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef })
   const { queuedSends, lastTurnAbortedRef, sendWhileRunning, cancelQueuedSend } = steering
 
+  // A 「AI に直してもらう」 request waiting for its turn to end (its message id once created).
+  const inlineFixRef = useRef<{ messageId: string | null; answer: (reply: InlineFixReply) => void } | null>(null)
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useStreamingChat(transport, ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
     lastTurnAbortedRef.current = isAbort || isDisconnect || isError
+    const fix = inlineFixRef.current
+    const fixAnswer = fix?.messageId ? inlineFixTurnAnswer(fix.messageId, { messageIds: finishedMessages.map(m => m.id), reply: message, isAbort, isError, isDisconnect }) : null
+    if (fix && fixAnswer) { inlineFixRef.current = null; fix.answer(fixAnswer) }
     suggestionTurnFinished(lastTurnAbortedRef.current)
     completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
     // Fetch and store Claude CLI session ID for resume persistence
@@ -259,7 +269,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const unsentAttachmentsRef = useRef(0)
   const handleAttachmentsChange = useCallback((count: number) => { unsentAttachmentsRef.current = count }, [])
 
-  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isShown, isRestoringSession, messages, status })
+  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange, followIfFollowing } = useChatAutoScroll({ isShown, isRestoringSession, messages, status })
 
   const handleInputActivity = useCallback(() => {
     markChatInputActivity()
@@ -271,7 +281,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
   // `appSent`: the app sends it in the member's place (a new consultation's or an AI turn's first message: app-instruction.ts).
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void, appSent?: boolean) => {
+  // `besideComposer`: sent beside what the member is typing (「AI に直してもらう」): their draft is neither cleared nor replaced.
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void, appSent?: boolean, besideComposer?: boolean) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -342,8 +353,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       onCreated?.(message.id)
       // An edit leaves the composer (and its saved draft) alone; a failed save
       // then keeps the conversation as it was and nothing is sent.
-      if (!await saveRef.current([...base, message], true, !editing)) {
-        if (!editing) chatInputApiRef.current?.setValue(text)
+      if (!await saveRef.current([...base, message], true, !editing && !besideComposer)) {
+        if (!editing && !besideComposer) chatInputApiRef.current?.setValue(text)
         if (dropped.length > 0) { pendingRecordIdsRef.current = []; setPendingRecords(dropped) }
         return
       }
@@ -417,6 +428,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
 
   // 「確認をお願いします」 (ReviewRequestCard): the request in the latest reply waits for the member.
   const pendingReviewId = running ? undefined : pendingReviewOf(messages[messages.length - 1])?.id
+  // ［大きく見る］［ページとして残す］ of a rich reply: only with a today folder (none in a consultation's own window). The
+  // page, the company folder and which consultation go to main, which builds the path (replyPage:save).
+  const replyPages = useMemo<ReplyPages | null>(() => (todayFolder ? {
+    scope: () => `${companyIdRef.current ?? ''}|${appSessionIdRef.current ?? ''}`,
+    save: async html => {
+      const root = companyRootRef.current
+      const folder = todayFolderRef.current?.()
+      const companyId = companyIdRef.current
+      const sessionId = appSessionIdRef.current
+      if (!root || !folder || !companyId || !sessionId) return { success: false, error: '今日のフォルダが見つからないため、ページを残せません。' }
+      return saveReplyPage(root, folder, { companyId, sessionId }, html)
+    },
+    stillThere: filePath => replyPageStillThere(filePath).catch(() => false),
+  } : null), [todayFolder, companyIdRef, companyRootRef, todayFolderRef, appSessionIdRef])
   const reviewActions = useMemo<ReviewActions>(() => ({
     pendingId: pendingReviewId,
     confirm: () => { void handleSend(REVIEW_CONFIRM_MESSAGE) },
@@ -427,6 +452,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // chat.insertText: the text goes into the composer. chat.newConsultation (e.g. a skill's 実行):
   // a new conversation, then its message is sent; waits for the history.
   useEffect(() => {
+    // 「AI に直してもらう」: sent into this consultation in the member's place; only while nothing else runs here.
+    if (inputRequest?.kind === 'inlineFix') {
+      if (!isShown || !historyReadyRef.current) return
+      onInputRequestConsumed?.()
+      const { message, answer } = inputRequest
+      if (tabBusy() || inlineFixRef.current) { answer({ ok: false, reason: 'busy' }); return }
+      const waiting = { messageId: null as string | null, answer }
+      inlineFixRef.current = waiting
+      // The turn's end answers it (above); a send that never went out (its save failed) is answered here.
+      void sendTurn(message, undefined, undefined, undefined, undefined, id => { waiting.messageId = id }, true, true)
+        .catch(() => {})
+        .finally(() => { if (inlineFixRef.current === waiting) { inlineFixRef.current = null; answer({ ok: false, reason: 'failed' }) } })
+      return
+    }
     if (isShown && inputRequest?.kind === 'insertText') {
       if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
       return
@@ -559,6 +598,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         </div>
       ) : (
         <ReviewActionsContext.Provider value={reviewActions}>
+          <ReplyPagesContext.Provider value={replyPages}>
+          <ChatFollowContext.Provider value={followIfFollowing}>
           <MessageList
             messages={messages}
             status={status}
@@ -571,6 +612,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             onEditSubmit={handleEditMessage}
             onEditingChange={handleEditingChange}
           />
+          </ChatFollowContext.Provider>
+          </ReplyPagesContext.Provider>
         </ReviewActionsContext.Provider>
       )}
 
