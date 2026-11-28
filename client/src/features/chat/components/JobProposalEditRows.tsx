@@ -128,6 +128,9 @@ export function JobProposalEditRows({ input, skillChangeable, timeZone, disabled
           onChoose={v => set({ deliverable: v === NO_DELIVERABLE ? null : v })} />
         {input.deliverable && <span>の中の、あなただけのフォルダ</span>}
       </Row>
+      {/* Fixed by what is chosen above, as the grant has them (`jobGrantLines`' words): said, not changed here. */}
+      {input.check.kind === 'new_meetings' && <Row label="議事録">確かめで見つかった、あなたが出た会議のものだけ読む</Row>}
+      <Row label="作れるもの">やること（1回に1つ）</Row>
       <Row label="やることや記録">
         <InlineChoice label="やることや記録を読むか" value={input.readRecords ? 'yes' : 'no'} shown={input.readRecords ? '読む' : '読まない'} choices={RECORDS_CHOICES} disabled={disabled}
           onChoose={v => set({ readRecords: v === 'yes' })} />

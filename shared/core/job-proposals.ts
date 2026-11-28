@@ -179,7 +179,7 @@ export function proposalReadPaths(input: JobCandidateInput): string[] {
  */
 export function proposalDefinition(input: JobCandidateInput, pinned: { actingUser: string; procedure: JobProcedure; skillName: string; candidateId: string }): Record<string, unknown> {
   const reads = proposalReadPaths(input)
-  const tools =['records', ...(reads.length > 0 ? ['files_read'] : []), ...(input.deliverable !== null ? ['files_write'] : []), ...(input.mailDrafts ? ['outbound_draft'] : [])]
+  const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(input.deliverable !== null ? ['files_write'] : []), ...(input.mailDrafts ? ['outbound_draft'] : [])]
   const routes = [
     ...(input.readRecords ? JOB_PROPOSAL_RECORD_ROUTES : []),
     ...(input.check.kind === 'new_meetings' ? [JOB_MINUTES_ROUTE] : []),

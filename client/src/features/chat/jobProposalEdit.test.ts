@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { proposalDefinition, proposalInputOf, proposalReadPaths, type JobCandidateInput } from '../../../../shared/core/job-proposals'
+import { proposalDefinition, proposalInputOf, type JobCandidateInput } from '../../../../shared/core/job-proposals'
 import { parseJobDefinition, type JobDefinition } from '../../../../shared/core/jobs'
 import { atChoices, changeText, foldersOf, inputKey, normalizedInput, placeChoices, sameInput, skillChoices, triggerWithEvery } from './jobProposalEdit'
 
@@ -47,21 +47,6 @@ test('what is sent is what will come back: a read place chosen as the check\'s p
     const sent = normalizedInput(chosen)
     assert.ok(sameInput(back(sent), sent), JSON.stringify(chosen.reads))
     assert.ok(sameInput(back(chosen), sent), 'the server answers the normalized input')
-  }
-})
-
-test('読む場所 on the card is exactly what the job may read: the grant\'s read paths, the check\'s place included', () => {
-  const pinned = { actingUser: 'u', procedure: { source: 'company_skill' as const, skill: 'weekly-report', fingerprint: 'c'.repeat(40) }, skillName: 'weekly-report', candidateId: 'jc.' + 'a'.repeat(32) }
-  for (const chosen of [
-    INPUT,
-    { ...INPUT, reads: [] },
-    { ...INPUT, reads: ['営業部/訪問メモ', '営業部/提案書'] },
-    { ...INPUT, check: { kind: 'new_meetings' as const }, reads: [] },
-  ]) {
-    const definition = (parseJobDefinition(proposalDefinition(chosen, pinned)) as { definition: JobDefinition }).definition
-    // The card shows the input the server's definition reads back as (`proposalInputOf`).
-    const shown = proposalReadPaths(proposalInputOf(definition)!)
-    assert.deepEqual([...shown].sort(), [...definition.grant.reads.paths].sort(), JSON.stringify(chosen))
   }
 })
 

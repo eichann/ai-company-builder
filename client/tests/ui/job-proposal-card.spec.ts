@@ -96,6 +96,20 @@ test('読む場所: the places added besides the check\'s can be taken off, the 
   await expect(row.getByRole('button', { name: '「営業部/資料」を外す' })).toHaveCount(0)
 })
 
+test('the card says what the grant adds by itself: the one やること, and the minutes a meeting check reads', async ({ page }) => {
+  await page.goto(`${PAGE}?reads=none`)
+  const card = chatCard(page)
+  const row = (label: string) => card.locator('div', { has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) }).locator('dd')
+  await expect(row('作れるもの')).toHaveText('やること（1回に1つ）')
+  await expect(row('議事録')).toHaveCount(0)
+  await card.getByRole('button', { name: '何で確かめるかを直す' }).click()
+  await card.getByRole('combobox', { name: '何で確かめるか' }).selectOption('new_meetings')
+  await expect(card.getByText(/直した案をサーバーで確かめました/)).toBeVisible()
+  await expect(row('議事録')).toHaveText('確かめで見つかった、あなたが出た会議のものだけ読む')
+  // The files check's place is no longer read: nothing else was.
+  await expect(readsRow(page)).toContainText('なし')
+})
+
 test('a place the server refuses goes back, and the card names no place in its reason', async ({ page }) => {
   await page.goto(PAGE)
   const card = chatCard(page)
