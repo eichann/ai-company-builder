@@ -896,7 +896,7 @@ contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args:
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
 contract.type IpcInvokeChannels.'appCommand:respond' = 'appCommand:respond': { args: [requestId: string, answer: AppCommandAnswer]; result: void }
-contract.type IpcInvokeChannels.'appLink:acceptServer' = 'appLink:acceptServer': { args: []; result: SimpleResult }
+contract.type IpcInvokeChannels.'appLink:acceptServer' = 'appLink:acceptServer': { args: [shown: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'appLink:dismissServer' = 'appLink:dismissServer': { args: []; result: void }
 contract.type IpcInvokeChannels.'appLink:serverOffer' = 'appLink:serverOffer': { args: []; result: { server: string } | null }
 contract.type IpcInvokeChannels.'approvals:approve' = 'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
@@ -1280,7 +1280,7 @@ main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
 main.handle appCommand:respond @ features/app-commands/ipc.ts (requestId: string, answer: AppCommandAnswer)
-main.handle appLink:acceptServer @ features/app-link/ipc.ts ()
+main.handle appLink:acceptServer @ features/app-link/ipc.ts (shown?: unknown)
 main.handle appLink:dismissServer @ features/app-link/ipc.ts ()
 main.handle appLink:serverOffer @ features/app-link/ipc.ts ()
 main.handle approvals:approve @ features/approvals/ipc.ts (companyId, approvalId, hash, reason)
@@ -1592,8 +1592,8 @@ main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
-preload acceptAppLinkServer -> invoke appLink:acceptServer()
-preload acceptAppLinkServer : () => Promise<SimpleResult>
+preload acceptAppLinkServer -> invoke appLink:acceptServer($0)
+preload acceptAppLinkServer : (shown: string) => Promise<SimpleResult>
 preload acceptJob -> invoke jobs:accept($0, $1, $2, $3)
 preload acceptJob : (companyId: string, jobId: string, version: number, fingerprint: string) => Promise<JobActionResult>
 preload actOnTask -> invoke tasks:act($0, $1, $2)

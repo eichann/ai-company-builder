@@ -3,10 +3,12 @@
 // folder up), with the preload API faked. Query:
 //   ?companies=empty|error   the member's company list
 //   ?folder=empty|clone|refuse|upload|offline   what main says the chosen folder is
+//   ?folderAfter=empty|clone|…  what main says from the second look on (the place changed while the screen was open)
+//   ?hold=N                  the Nth look at a folder waits for window.__acbCompany.release() (a slow check) and then refuses it
 //   ?depts=0                 the company has no departments (no picker); ?depts=fail the list cannot be read
 //   ?pick=cancel             the folder dialog is cancelled
 //   ?setup=fail|manual       the download fails / waits for window.__acbCompany.finishSetup()
-//   ?companies=one           the member belongs to one company (it opens by itself)
+//   ?companies=one           the member belongs to one company (its join screen shows without the list)
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
 //   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 //   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
@@ -34,10 +36,13 @@ if (params.get('theme') === 'dark') document.documentElement.classList.add('dark
 const calls: unknown[][] = []
 const progress = emitter<{ repoPath: string; receivedBytes: number }>()
 let finishSetup: (() => void) | null = null
+let releaseHeld: (() => void) | null = null
+let looks = 0
 ;(window as unknown as { __acbCompany: unknown }).__acbCompany = {
   calls,
   progress: (receivedBytes: number) => progress.emit({ repoPath: '', receivedBytes }),
   finishSetup: () => finishSetup?.(),
+  release: () => releaseHeld?.(),
   get listening() { return progress.size },
 }
 
@@ -73,6 +78,7 @@ useAuthStore.setState({
 if (params.get('choose')) useAppStore.setState({ companyToChoose: params.get('choose') })
 
 installElectronAPI({
+  getServerUrl: async () => (MANUAL ? 'https://kensho-a.acb-cloud.example' : 'https://acb.example.com'),
   getCompanies: async () => {
     calls.push(['getCompanies'])
     return params.get('companies') === 'error' ? { success: false, error: '会社の一覧を読めませんでした' } : { success: true, data: companies }
@@ -87,8 +93,14 @@ installElectronAPI({
   },
   gitInspectCompanyFolder: async (path, companyId) => {
     calls.push(['gitInspectCompanyFolder', path, companyId])
-    if (folder === 'offline') return { success: false, error: 'オフラインです' }
-    return { success: true, decision: decisions[folder as keyof typeof decisions] }
+    looks++
+    if (String(looks) === params.get('hold')) {
+      await new Promise<void>(resolve => { releaseHeld = resolve })
+      return { success: true, decision: decisions.refuse }
+    }
+    const answer = looks > 1 && params.get('folderAfter') ? params.get('folderAfter')! : folder
+    if (answer === 'offline') return { success: false, error: 'オフラインです' }
+    return { success: true, decision: decisions[answer as keyof typeof decisions] }
   },
   getDepartments: async companyId => {
     calls.push(['getDepartments', companyId])

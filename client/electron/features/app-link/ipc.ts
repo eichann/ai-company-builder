@@ -5,7 +5,10 @@
 //   - only while the app has no server yet — a link never switches a configured app to
 //     another server (that stays a deliberate change in 設定);
 //   - the renderer never names the address it accepts: `appLink:acceptServer` saves the
-//     one main holds, after that server answered as an ACB server.
+//     one main holds, after that server answered as an ACB server. The renderer passes the
+//     address it showed only as a confirmation: a different (or missing) one is refused, so a
+//     newer link that arrived between the screen's last look and the press is never used
+//     (the press also signs in: the password goes to that address right after).
 //   appLink:serverOffer, appLink:acceptServer, appLink:dismissServer
 
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -28,6 +31,7 @@ export interface AppLinks {
 
 export const APP_LINK_NO_OFFER = '招待のリンクの情報がありません。招待のページの［アプリを開く］をもう一度押してください。'
 export const APP_LINK_ALREADY_SET = 'このアプリには、すでにサーバーが設定されています。'
+export const APP_LINK_CHANGED = '招待のリンクが新しくなりました。画面のつなぎ先を確かめて、もう一度押してください。'
 export const APP_LINK_NOT_ACB = 'このアドレスにつながらないか、AI Company Builder のサーバーではありません。インターネットにつながっているか確かめて、もう一度押してください。'
 
 async function answersAsAcb(origin: string): Promise<boolean> {
@@ -50,9 +54,11 @@ export function registerAppLinkIpc(ipc: IpcRegistrar, deps: AppLinkDeps): AppLin
     return pending ? { server: pending } : null
   })
 
-  ipc.handle('appLink:acceptServer', async () => {
+  ipc.handle('appLink:acceptServer', async (_event, shown?: unknown) => {
     const origin = pending
     if (!origin) return { success: false, error: APP_LINK_NO_OFFER }
+    // Only the address the member saw: the renderer says which one it showed, main never uses it.
+    if (shown !== origin) return { success: false, error: APP_LINK_CHANGED }
     if (currentServer()) {
       pending = null
       return { success: false, error: APP_LINK_ALREADY_SET }

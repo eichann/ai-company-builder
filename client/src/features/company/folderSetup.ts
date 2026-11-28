@@ -5,39 +5,31 @@ import { answeredCompanyFolderKind } from '../../../shared/company-folder'
 import { getDepartments } from '../../shared/ipc/departments'
 import { companyPathExists, getMyDepartments, inspectCompanyFolder, openWorkingFolder, readCompanyFolder } from './api'
 import { planFolderSetup } from './folderPlan'
-import { departmentIdFor, isDepartmentEntry, membershipFolders, pickableDepartments, type PickableDepartment, type SetupKind } from './model'
+import { departmentIdFor, isDepartmentEntry, membershipFolders, pickableDepartments, type PlaceCheck } from './model'
 
 /** Said when the first setup cannot read the company's departments (nothing is downloaded). */
 export const DEPARTMENTS_UNREAD = '部署の一覧を読み込めませんでした。インターネット接続を確かめて、もう一度お試しください。何もダウンロードしていません。'
 
-export type FolderNextStep =
-  | { kind: 'pick'; departments: PickableDepartment[] }
-  /** First setup with the member's 所属: download these without asking. */
-  | { kind: 'mine'; folders: string[] }
-  | { kind: 'error'; message: string }
-  | { kind: SetupKind }
-
 /**
- * Asks main what the folder is (folderPlan.ts). A folder with nothing
- * downloaded yet downloads the departments the member belongs to (所属), or
- * asks which ones when none is known (when the company has any); an existing clone opens as before; a folder that cannot be used is
- * refused before anything in it changes.
+ * What a place is for this company, asked before the join screen shows it (read-only: main
+ * inspects the folder, folderPlan.ts). A folder with nothing downloaded yet comes with the
+ * company's departments and the member's 所属 (the picker asks when none is known); an existing
+ * clone opens as before; a folder that cannot be used is refused before anything in it changes.
+ * A company without the shared folder is not inspected: main checks its working folder when
+ * ［始める］ is pressed (`openCompanyWithoutFolder`).
  */
-export async function prepareCompanyFolder(companyPath: string, companyId: string): Promise<FolderNextStep> {
-  const inspected = await inspectCompanyFolder(companyPath, companyId).catch(() => null)
+export async function checkCompanyPlace(company: Pick<CompanyInfo, 'id' | 'folderKind'>, companyPath: string): Promise<PlaceCheck> {
+  if (opensWithoutSharedFolder(company)) return { kind: 'working' }
+  const inspected = await inspectCompanyFolder(companyPath, company.id).catch(() => null)
   const plan = planFolderSetup(inspected)
-  if (plan.kind === 'firstSetup') {
-    const result = await getDepartments(companyId).catch(() => null)
-    // The list could not be read: say so rather than download every department unasked.
-    if (!result?.success) return { kind: 'error', message: DEPARTMENTS_UNREAD }
-    const departments = pickableDepartments(result?.success && result.data ? result.data : [])
-    if (departments.length > 0) {
-      const mine = await Promise.resolve().then(() => getMyDepartments(companyId)).catch(() => null)
-      const folders = membershipFolders(departments, mine?.success ? mine.departmentIds : null)
-      return folders.length > 0 ? { kind: 'mine', folders } : { kind: 'pick', departments }
-    }
-  }
-  return plan
+  if (plan.kind !== 'firstSetup') return plan
+  const result = await getDepartments(company.id).catch(() => null)
+  // The list could not be read: say so rather than download every department unasked.
+  if (!result?.success) return { kind: 'error', message: DEPARTMENTS_UNREAD }
+  const departments = pickableDepartments(result.data ?? [])
+  if (departments.length === 0) return { kind: 'firstSetup', departments, mine: [] }
+  const mine = await Promise.resolve().then(() => getMyDepartments(company.id)).catch(() => null)
+  return { kind: 'firstSetup', departments, mine: membershipFolders(departments, mine?.success ? mine.departmentIds : null) }
 }
 
 /** The departments in a set-up company folder (cloned from the server, or empty). */

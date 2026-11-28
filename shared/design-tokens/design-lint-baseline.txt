@@ -96,8 +96,6 @@ client/src/app/ChatWindowApp.tsx palette-color=10 shadow-scale=1 type-scale=2 wh
 client/src/app/FileSidePanel.tsx arbitrary-value=1 palette-color=13 white-black=1
 client/src/app/TitleBar.tsx palette-color=16 radius-scale=1 shadow-scale=1 type-scale=3 white-black=2 z-index=1
 client/src/features/absences/components/AbsenceSection.tsx palette-color=23 white-black=4
-client/src/features/auth/components/LoginScreen.tsx type-scale=6
-client/src/features/auth/components/ServerSetupScreen.tsx type-scale=11
 client/src/features/chat/components/AgentInteractionCard.tsx arbitrary-value=1 palette-color=2 type-scale=6 white-black=2
 client/src/features/chat/components/AgentLogNotice.tsx palette-color=8 shadow-scale=1 white-black=2 z-index=1
 client/src/features/chat/components/AiTurnNotice.tsx palette-color=10 radius-scale=1 type-scale=1
@@ -140,7 +138,6 @@ client/src/features/company/components/CompanySelector.tsx type-scale=2
 client/src/features/company/components/CompanySwitcher.tsx radius-scale=1 type-scale=4
 client/src/features/company/components/CreateCompanyForm.tsx type-scale=1
 client/src/features/company/components/DepartmentPicker.tsx type-scale=2
-client/src/features/company/components/FolderChoice.tsx type-scale=3
 client/src/features/company/components/SelectorParts.tsx type-scale=3
 client/src/features/company/components/SetupProgress.tsx palette-color=4 type-scale=3 white-black=2
 client/src/features/doc-review/components/CommentPopover.tsx opacity-scale=1 palette-color=30 shadow-scale=1 type-scale=3 white-black=2 z-index=1

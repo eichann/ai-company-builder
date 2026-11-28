@@ -870,7 +870,7 @@ export interface IpcInvokeChannels {
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
   // The server address from an invitation's 「アプリを開く」 link (features/app-link): offered, shown, accepted by the member
   'appLink:serverOffer': { args: []; result: { server: string } | null }
-  'appLink:acceptServer': { args: []; result: SimpleResult }
+  'appLink:acceptServer': { args: [shown: string]; result: SimpleResult }
   'appLink:dismissServer': { args: []; result: void }
   // Extra environment variable names passed to AI processes (agents/agent-env.ts), this computer only
   'config:getAgentEnvPassthrough': { args: []; result: string[] }
