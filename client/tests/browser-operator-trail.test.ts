@@ -189,7 +189,7 @@ test('a preview the app ended because the operator never answered in its form (a
   const view = wiring.previewCard('u-1', COMPANY, RUN)
   assert.ok(view)
   assert.match(view.card.headline, /決まった形で答えられませんでした/)
-  assert.deepEqual(view.trail, [{ phase: 'preview', steps: [], more: 0, end: null, notes: null, problem: 'not-json' }])
+  assert.deepEqual(view.trail, [{ phase: 'preview', steps: [], more: 0, end: null, notes: null, problem: 'not-json', toolset: 'current' }])
   assert.ok(!JSON.stringify(view).includes('still not json'), 'never the operator\'s own text')
 })
 

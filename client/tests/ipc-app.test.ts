@@ -62,6 +62,10 @@ test('settings: 「ブラウザ操作」\'s operator tool set is today\'s by def
   assert.equal(await h.invoke('config:setBrowserOperatorToolset', 'compact'), true)
   assert.equal(await h.invoke('config:getBrowserOperatorToolset'), 'compact')
   assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf-8')).browserOperatorToolset, 'compact')
+  for (const set of ['playwright', 'openai', 'anthropic'] as const) {
+    assert.equal(await h.invoke('config:setBrowserOperatorToolset', set), true)
+    assert.equal(await h.invoke('config:getBrowserOperatorToolset'), set)
+  }
   assert.equal(await h.invoke('config:setBrowserOperatorToolset', 'current'), true)
 })
 

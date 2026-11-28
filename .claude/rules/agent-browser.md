@@ -3238,7 +3238,7 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
 - **The operator** is the closed start of "The operator and the preview", unchanged — `--tools ""`, no MCP, no settings,
   `--max-turns 1`, every init check — with only its system prompt chosen from fixed ones (`browserOperatorArgs(model,
   'browse', toolset)`, a closed choice: nothing else can be passed). It has **no tool**: its "window tools" are its answer, exactly
-  one JSON object per step — in today's tool set (the compact set's words are read into these: "The operator's tool sets") `click` / `type` / `select` (an element `ref` of the page it was just shown, of a fitting role:
+  one JSON object per step — in today's tool set (every other tool set's words are read into these: "The operator's tool sets") `click` / `type` / `select` (an element `ref` of the page it was just shown, of a fitting role:
   typing only into a text field, never a password field; an option the select showed; since "Pressing by position" also a
   press at a point of the screen image and typing into the focused field), `go` (a path of the domain: starts
   with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
@@ -5003,55 +5003,86 @@ the promise: nothing asked, matched), `model/browser-plan/check` (FramesLife R19
 LedgerLife R20), the permission matrix and `CROSS` rows, `jobs-schema.test.ts`, the IPC inventory. Each guard
 mutation-checked.
 
-## The operator's tool sets (owner 2026-11-28: try a compact set on the real app, chosen per PC)
+## The operator's tool sets (owner 2026-11-28: compare forms on the real app, chosen per PC)
 
 The operator (no tool: one JSON action a step) is told its actions and reads back in one **tool set**. The owner wants to
-compare forms on the real app (「どうせ私しか使わない」); after an outside review, two first: `current` (today's — `click`,
-`type`, `select`, `go`, `back`, `wait`) and `compact` (`click`; **`set`** puts a value — typing into a field or a choice of
-a select, the element decides; **`go`** takes a path of the site or `back`; `wait`). The ends (`done`, `stop`, `plan`) are
-every set's. Playwright-MCP-like and both computer-use-like sets come after the two are compared.
+compare forms on the real app (「どうせ私しか使わない」): `current` (today's — `click`, `type`, `select`, `go`, `back`, `wait`),
+`compact` (`click`; **`set`** puts a value — typing into a field or a choice of a select, the element decides; **`go`**
+takes a path of the site or `back`; `wait`), and three that **imitate a known tool set's words and shapes only** (checked
+against their public documentation; sources in the PR that added them):
+- `playwright` (Playwright MCP): `browser_click` (`target` = the ref, `element` a description, dropped),
+  `browser_mouse_click_xy` (`x`, `y`: its vision tool), `browser_type` (`target`, `element`, `text`; **without `target`:
+  the field pressed just before**, so a field with no ref can be typed into as today), `browser_select_option`
+  (`values`: exactly one), `browser_navigate` (`url`: an `https` address of the run's domain on its default port — or a
+  path —, never another host; no user, no `#`), `browser_navigate_back`, `browser_wait_for` (`time`).
+- `openai` (OpenAI computer use's action objects): `{"type":"click","button":"left","x","y"}` (only `left`),
+  `{"type":"type","text"}`, `{"type":"wait"}` (no duration of its own: `OPENAI_WAIT_SECONDS` = 2).
+- `anthropic` (Anthropic computer use, the `computer_20251124` input shape; the 2026-08 toolset's member tools carry the
+  same names): `{"action":"left_click","coordinate":[x,y]}`, `{"action":"type","text"}`, `{"action":"wait","duration"}`.
+- The two computer-use sets add **the app's own `do` words** for what a screen alone cannot reach in this app (it has no
+  scroll or keys): `click` by `ref` (an element off the screen is scrolled into view, as today), `select`, `go`, `back`.
+  Not offered in any set (the app cannot do them; an answer naming one is an unknown word, its options extra keys):
+  double / right / middle / triple clicks, keys, scrolling, dragging, moving or holding the mouse, hovering, screenshots
+  and zoom (the screen is sent every step), Playwright's `submit` / `slowly` / `modifiers` / `text` waits, files, tabs,
+  scripts.
+- **Typing without an element** (computer use's `type`, Playwright's `browser_type` without `target`): only when the last
+  action other than a typing or a wait was a press that reached a text field (`pressedField`: `pressed.role` `textbox` —
+  a password field has its own role); else the answer is refused (`focus`, asked again once in a write run), never
+  guessed. Today's and the compact set keep their own rule (no ref = the focused field). The window still checks the
+  focused element before typing, in every set.
 
-- **One place** (`client/shared/browser-operator-toolsets.ts`, pure, no site word): the sets, each set's action and
-  screen lines (only those differ: `browseOperatorPrompt`, `workPreviewOperatorPrompt`, `workOperatorPrompt` build every
-  prompt from them; the current set's prompts are the constants as before), `readToolsetAnswer` (a set's answer →
-  today's words, before the one parser), `toolsetHistory` (the history the operator is shown, in its set's words), the
-  member's words `BROWSER_TOOLSET_WORDS`. `browserOperatorArgs(model, prompt, toolset)` picks the set's fixed prompt (a
-  closed choice; the preview of declared reads has one prompt for every set).
+- **One place** (`client/shared/browser-operator-toolsets.ts`, pure, no site word; the list, the setting's reading and the
+  member's words in the leaf `browser-operator-toolset-choice.ts`, so the card and the settings share them without a
+  cycle): each set's action lines and first screen line (only those differ: `browseOperatorPrompt`,
+  `workPreviewOperatorPrompt`, `workOperatorPrompt` build every prompt; the current set's prompts are the constants as
+  before), `readToolsetAnswer(set, text, { page, history, host })` (a set's answer → today's words, before the one
+  parser), `toolsetHistory` (the history the operator is shown as its set would say it: the set's word under its key —
+  `do`, `type`, `action` —, a ref as `target` in the Playwright set, a compact back as `go` + `path: "back"`).
+  `browserOperatorArgs(model, prompt, toolset)` picks the set's fixed prompt (a closed choice; the preview of declared
+  reads has one prompt for every set).
 - **What a set changes, and only that** (owner: できることは同じ、守りも同じ): what the operator is told and how its answer is
   read. Every answer becomes one of today's `BrowserBrowseAction`s and goes through `parseBrowseAnswer` /
-  `parseWorkAnswer` unchanged: a compact `set` on a select's `ref` is a `select` (`value` → `option`), any other `set` a
-  `type` (`value` → `text`, without a ref the focused field), `go` with `path: "back"` a `back`; so a password field, a
-  wrong role, an option not offered, a long text, another site, an extra key are refused exactly as today. A key the
-  reading would write that is already there (`text`, `option`) is refused (`keys`), never overwritten; a word the set
-  does not have is an unknown `do` (`shape`, re-asked once in a write run as any slip). Everything after the parser —
-  the window's checks before acting, the `ai` gate, each page write held and sent once within the frames, the permits,
-  the run's promise, the wait for a press's write, the read-back — is the same code for both sets. **The run log keeps
-  today's words** (`browseLogStep` on the action as read; the server's `BROWSER_RUN_ACTIONS` unchanged; the set used
-  is not stored — compared by the harness below, not by the log).
+  `parseWorkAnswer` unchanged, so a password field, a wrong role, an option not offered, a long text, another site, a
+  point off the image are refused exactly as today. Renaming is strict: a key the set does not have is refused (`keys`),
+  never dropped or carried under another name (a key the reading would write that is already there included); a word
+  the set does not have is an unknown word (`shape`, re-asked once in a write run as any slip). Everything after the
+  parser — the window's checks before acting, the `ai` gate, each page write held and sent once within the frames, the
+  permits, the run's promise, the wait for a press's write, the read-back — is the same code for every set. **The run log
+  keeps today's words** (`browseLogStep` on the action as read; the server's `BROWSER_RUN_ACTIONS` unchanged).
+- **Which set ran is this PC's only** (never the server's run log): the card's trail carries it (`BrowserTrailRun.toolset`,
+  shown in the memo as 「係の道具：…」) and each operator run ends with a local log line
+  (`[browser] operator run <id> (<phase>): tool set <set>, <outcome> (<reason>)`).
+- **Said in the set's words**: a refused answer's re-ask and the card's 「アプリが止めました」 name the keys the set taught
+  (`answerProblemWords(problem, toolset)`, `client/shared/browser-operator-trail.ts`; e.g. compact `set の value`,
+  Playwright `target` / `values` / `browser_navigate の url`, OpenAI `button が "left"`, Anthropic `coordinate` /
+  `duration`); a problem a set does not reword keeps today's words.
 - **The setting** (this PC only, `config.json` `browserOperatorToolset`, default `current`; `config:get|setBrowserOperatorToolset`,
   a value not of the list refused and never stored, an unknown stored value read as `current`): Settings → ブラウザ操作 →
-  「係の道具」 (`BrowserToolsetSection`, shown with a site): 「いまの形」／「まとめた形」, saying that what the AI may do and the
-  app's guards are the same and only how it is told changes. Read **once per request** (`toolset` dep of
-  `wireBrowserBrowse` / `wireBrowserWork`, from main): a write task's preview and work use the same set.
-- **Measured**: the compact prompts are 45 characters shorter each (read 853 → 808, write preview 1356 → 1311, write
-  1331 → 1286; the action lines 250 → 205). The compact history shows a back as the answer it wrote (`go`, `path:
-  "back"`). The completion regression runs in both sets on the real window and prints
-  each set's operator steps, work steps and stops (`t.diagnostic`); a scripted operator takes the same number of steps
-  in both (it measures that the sets behave alike, not a model's choices — those are the owner's trial on the real app).
-- **Said**: the retry words (`BROWSER_ANSWER_PROBLEM_WORDS`) still name today's keys (`option`, `text`) when a compact
-  `set` is refused for them.
+  「係の道具」 (`BrowserToolsetSection`, shown with a site): 「いまの形」／「まとめた形」／「Playwright 風」／「OpenAI 風」／
+  「Anthropic 風」, saying that what the AI may do and the app's guards are the same and only how it is told changes. Read
+  **once per request** (`toolset` dep of `wireBrowserBrowse` / `wireBrowserWork`, from main): a write task's preview and
+  work use the same set.
+- **Measured** (characters of the read / write preview / write prompts): current 853 / 1356 / 1331, compact 808 / 1311 /
+  1286, playwright 1059 / 1562 / 1537, openai 835 / 1338 / 1313, anthropic 861 / 1364 / 1339. The completion regression
+  runs in every set on the real window and prints each set's operator steps, work steps and stops (`t.diagnostic`); a
+  scripted operator measures that the sets behave alike (a computer-use set takes one more step per typing: it presses
+  the field first), not a model's choices — those are the owner's trial on the real app.
 
-Tests: `client/tests/browser-operator-toolsets.test.ts` (a compact answer read as exactly today's action with its memo
-keys; the one parser refuses a password field, a wrong role, an option not offered, a long text, a missing value, a key
-it would overwrite; each set refuses the other's words, also in a write run; the history in the set's words; the compact
-prompts shorter, teaching only `set`, every other line today's; the operator started with the set's prompt only, an
-unknown value today's), `browser-browse.test.ts` (both sets: the same actions in the window and the same log; the same
-answers refused, the other set's words included), `browser-frame-writes.test.ts` (both sets: the same actions and the
-one write within the frame, a write outside the frames refused, the other set's word asked again), `browser-window-electron.test.ts`
-(the completion regression in both sets: the two writes once each, the promise, all ✓, no stop), `browser-core-words.test.ts`
-(every set's prompts name no site), `ipc-app.test.ts` (default, only a known set stored, an unknown value refused),
-`ui/browser-settings.spec.ts` (「係の道具」: the default, a choice saved, a failed save). Mutation-checked: the select / type
-split, the `back` reading, the overwrite refusal, the other set's words, the history words, the set handed to each step.
+Tests: `client/tests/browser-operator-toolsets.test.ts` (every set's answer read as exactly today's action with its memo
+keys; the one parser refuses a password field, a wrong role, an option not offered, a long text, another site — another
+host, http, a port, a user, a fragment —, a point off the image, a key it would overwrite, a `__proto__` key; each set
+refuses the other sets' words and the official actions and options the app cannot do; typing without an element only
+after a press on a text field; the history in each set's words and keys; each set's prompts teach only its words and
+keep every other line of today's; the operator started with the set's prompt only, an unknown value today's; the re-ask
+in the set's words), `browser-browse.test.ts` (all five: the same actions in the window and the same log; the same
+answers refused with nothing done; typing without an element after a button, a password field or nothing refused, after
+a text field — also past a wait — typed), `browser-frame-writes.test.ts` (all five: the same actions and the one write
+within the frame, a write outside the frames refused, each slip asked again once in the set's words), `browser-window-electron.test.ts`
+(the completion regression in all five: the two writes once each, the promise, all ✓, no stop; the computer-use sets type
+into the field they pressed on the real window), `OperatorTrail.test.ts` (the memo names the set and the broken rule in its
+words), `browser-core-words.test.ts` (every set's prompts name no site), `ipc-app.test.ts` (default, every known set
+stored, an unknown value refused), `ui/browser-settings.spec.ts` (「係の道具」: five choices, the default, a choice saved, a
+failed save).
 
 ## Not yet (later PRs)
 

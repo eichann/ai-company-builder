@@ -87,6 +87,8 @@ export interface BrowserWorkDeps {
    * and its work use the same); absent: `current`.
    */
   toolset?: () => BrowserOperatorToolset
+  /** This PC's log (which tool set each operator run used; agent-browser.md "The operator's tool sets"); absent: the console. */
+  log?: Pick<Console, 'info'>
 }
 
 export interface BrowserWorkInput {
@@ -367,13 +369,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       if (!step.ok) return { kind: 'end', reason: 'operator-failed', end: stopped('operator') }
-      const read = readToolsetAnswer(o.toolset, step.text, page)
+      const read = readToolsetAnswer(o.toolset, step.text, { page, history, host: o.host })
       const parsed = 'problem' in read ? read : parseWorkAnswer(read.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
       if ('problem' in parsed) {
         // Out of form: asked again once (the next of the run's steps, the same page, the rule it broke in fixed words);
         // a second slip in a row ends the run, the card's trail naming the rule.
         const problem = answerProblemOf(parsed.problem)
-        if (retry === null && round < o.budget.steps) { retry = workRetrySentence(problem); continue }
+        if (retry === null && round < o.budget.steps) { retry = workRetrySentence(problem, o.toolset); continue }
         o.trail.problem(problem)
         return { kind: 'end', reason: 'bad-answer', end: stopped('operator') }
       }
@@ -655,8 +657,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const neverReadFits = (pq: string) => neverRead.some(p => browserNeverReadFits(p, pq))
 
       // The operator's trails (the preview's, the work's): on the member's card only (agent-browser.md "The operator's trail on the card").
-      const previewTrail = createOperatorTrail('preview')
-      const workTrail = createOperatorTrail('work')
+      const previewTrail = createOperatorTrail('preview', toolset)
+      const workTrail = createOperatorTrail('work', toolset)
       // The preview (read only): unless a pre-approved Skill version whose text nobody changed since.
       let plan: Extract<WorkAnswer, { do: 'plan' }> | null = null
       if (!frameRun || frameRun.needsApproval) {
@@ -1050,6 +1052,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       // Not heard (the network): kept and sent again until its lease is surely over — the lock goes with it, and a run past
       // its lease counts as ended on the server anyway (agent-browser.md "Letting a domain go").
+      // This PC's own record of which tool set the run used (agent-browser.md "The operator's tool sets"); never the server's.
+      ;(deps.log ?? console).info(`[browser] operator run ${browseRunId} (${o.phase}): tool set ${o.toolset}, ${outcome}${reason ? ` (${reason})` : ''}`)
       const finished = await sendEnd(deps.pendingEnds, { runId: browseRunId, userId: o.userId, companyId: o.companyId, until: now() + BROWSER_RUN_LIMITS.leaseMs }, finishAll)
       if (o.finished) o.finished.ok = finished.kind === 'ok'
     }

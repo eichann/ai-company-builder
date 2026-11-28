@@ -36,7 +36,7 @@ import { wireBrowserWork } from '../../electron/features/browser/work'
 import { createBrowserContext } from '../../electron/features/browser/context'
 import type { PreviewOperator } from '../../electron/features/browser/preview'
 import type { BrowserLinesAnswer } from '../../electron/features/browser/lines-api'
-import type { BrowserOperatorToolset } from '../../shared/browser-operator-toolsets'
+import { BROWSER_OPERATOR_TOOLSETS, type BrowserOperatorToolset } from '../../shared/browser-operator-toolsets'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
@@ -208,10 +208,13 @@ async function run() {
   result.browse = await browseScenarios(win, sites)
   result.work = await workScenarios(win, sites)
   result.workPress = await workPressScenario(win, sites)
-  result.workFlow = await workFlowScenario(win, sites, 'current')
-  // The same regression in the compact tool set (agent-browser.md "The operator's tool sets"): the site starts afresh.
-  sites.flow.length = 0
-  result.workFlowCompact = await workFlowScenario(win, sites, 'compact')
+  // The same regression in every tool set (agent-browser.md "The operator's tool sets"): the site starts afresh for each.
+  const flows: Record<string, unknown> = {}
+  for (const toolset of BROWSER_OPERATOR_TOOLSETS) {
+    sites.flow.length = 0
+    flows[toolset] = await workFlowScenario(win, sites, toolset)
+  }
+  result.workFlows = flows
   result.verify = await verifyScenarios(win)
 
   // The login: a cookie and storage of the site, then cleared.
@@ -863,12 +866,28 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites, toolset: 
   const out: Record<string, unknown> = { toolset }
   const toolsets: Array<string | null> = []
   let stops = 0
-  // Today's action in the set's words (the compact set puts a value with `set`, whatever the element).
+  // A computer-use set types into the field pressed just before: its typing is a press of the field, then the text.
+  let typeNext: string | null = null
+  // Today's action in the set's words.
   const inSet = (o: Record<string, unknown>): Record<string, unknown> => {
-    if (toolset !== 'compact') return o
-    if (o.do === 'type') return { do: 'set', ref: o.ref, value: o.text }
-    if (o.do === 'select') return { do: 'set', ref: o.ref, value: o.option }
-    return o
+    switch (toolset) {
+      case 'current': return o
+      case 'compact':
+        if (o.do === 'type') return { do: 'set', ref: o.ref, value: o.text }
+        if (o.do === 'select') return { do: 'set', ref: o.ref, value: o.option }
+        return o
+      case 'playwright':
+        if (o.do === 'click') return { do: 'browser_click', target: o.ref, element: '部品' }
+        if (o.do === 'type') return { do: 'browser_type', target: o.ref, element: '入力欄', text: o.text }
+        if (o.do === 'select') return { do: 'browser_select_option', target: o.ref, element: '設定', values: [o.option] }
+        if (o.do === 'wait') return { do: 'browser_wait_for', time: o.seconds }
+        return o
+      case 'openai':
+      case 'anthropic':
+        if (o.do === 'type') { typeNext = o.text as string; return { do: 'click', ref: o.ref } }
+        if (o.do === 'wait') return toolset === 'openai' ? { type: 'wait' } : { action: 'wait', duration: o.seconds }
+        return o
+    }
   }
   await win.webContents.loadURL('https://op.test/flow')
   await wait(300)
@@ -928,6 +947,12 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites, toolset: 
       }
       if (job.prompt === 'work-preview') {
         return answer({ do: 'plan', summary: '秋の回をコピーして登録します', affects: 'なし', values: [{ label: 'コピー元', value: '秋の回' }], unread: [] })
+      }
+      // The text after its field was pressed (a computer-use set's own `type`, into the field pressed just before).
+      if (typeNext !== null) {
+        const text = typeNext
+        typeNext = null
+        return { ok: true as const, text: JSON.stringify(toolset === 'openai' ? { type: 'type', text } : { action: 'type', text }) }
       }
       const el = (name: string) => m.page.elements.find(e => e.name.outside === name)
       const value = (label: string) => m.person.values.find(v => v.label === label)?.value ?? ''

@@ -14,6 +14,7 @@
  */
 import { BROWSER_RUN_ACTIONS, type BrowserRunAction, type BrowserRunLogStep } from '../../shared/core/browser-run-log'
 import { cleanLabel } from './browser-page'
+import { BROWSER_OPERATOR_TOOLSETS, type BrowserOperatorToolset } from './browser-operator-toolset-choice'
 
 export const BROWSER_TRAIL_LIMITS = Object.freeze({
   /** The operator's reason for one step, and for stopping (one line). */
@@ -51,7 +52,7 @@ export interface BrowserTrailStep {
  * words are the app's, never the operator's.
  */
 export const BROWSER_ANSWER_PROBLEMS = [
-  'not-json', 'shape', 'keys', 'notes', 'reason', 'unlisted', 'ref', 'point', 'text', 'option', 'path', 'seconds', 'done', 'stop',
+  'not-json', 'shape', 'keys', 'notes', 'reason', 'unlisted', 'ref', 'point', 'text', 'option', 'path', 'seconds', 'focus', 'done', 'stop',
   'plan', 'plan-keys', 'plan-summary', 'plan-affects', 'plan-unread', 'plan-values', 'plan-value', 'plan-writes',
 ] as const
 export type BrowserAnswerProblem = typeof BROWSER_ANSWER_PROBLEMS[number]
@@ -68,6 +69,7 @@ export const BROWSER_ANSWER_PROBLEM_WORDS: Readonly<Record<BrowserAnswerProblem,
   option: 'option が、その select の options にありませんでした',
   path: 'go の path が、このサイトのアドレスの形ではありませんでした',
   seconds: 'wait の seconds が 1〜5 ではありませんでした',
+  focus: '入力欄を指さずに入れる前に押したものが、入力欄ではありませんでした（先に入力欄を押す）',
   done: 'done の形が決まりに合いませんでした',
   stop: 'stop の形が決まりに合いませんでした（why は決まった言葉のどれか）',
   plan: 'plan は、いまの段階では出せません',
@@ -79,6 +81,46 @@ export const BROWSER_ANSWER_PROBLEM_WORDS: Readonly<Record<BrowserAnswerProblem,
   'plan-value': 'plan の values の1つが {"label":"…","value":"…"} の形ではありませんでした',
   'plan-writes': 'plan の writes が決まりに合いませんでした',
 }
+/**
+ * The same rules in a tool set's own words (agent-browser.md "The operator's tool sets"): the re-ask and the card name the
+ * keys the operator was taught. A problem a set does not reword keeps the words above.
+ */
+const SET_PROBLEM_WORDS: Readonly<Record<BrowserOperatorToolset, Partial<Record<BrowserAnswerProblem, string>>>> = {
+  current: {},
+  compact: {
+    text: 'set の value の文字が長すぎるか、使えない文字がありました',
+    option: 'set の value が、その select の options にありませんでした',
+    path: 'go の path が、このサイトのアドレスの形か back ではありませんでした',
+  },
+  playwright: {
+    shape: '答えに "do" がないか、知らない道具でした',
+    ref: 'target が画面にない要素か、その道具に合わない要素でした',
+    point: 'browser_mouse_click_xy の x, y が画像の中の位置（画素の整数）ではありませんでした',
+    text: 'browser_type の text が長すぎるか、使えない文字がありました',
+    option: 'browser_select_option の values が、その select の options のどれか1つだけではありませんでした',
+    path: 'browser_navigate の url が、このサイトの https のアドレスではありませんでした',
+    seconds: 'browser_wait_for の time が 1〜5 の整数ではありませんでした',
+    focus: 'target のない browser_type の前に押したものが、入力欄ではありませんでした（先に入力欄を押す）',
+  },
+  openai: {
+    shape: '答えに "type" も "do" もないか、知らない形でした',
+    point: 'click の x, y が画像の中の位置（画素の整数）ではないか、button が "left" ではありませんでした',
+    text: 'type の text が長すぎるか、使えない文字がありました',
+    focus: 'type の前に押したものが、入力欄ではありませんでした（先に入力欄を押す）',
+  },
+  anthropic: {
+    shape: '答えに "action" も "do" もないか、知らない形でした',
+    point: 'left_click の coordinate が画像の中の位置 [x, y]（画素の整数）ではありませんでした',
+    text: 'type の text が長すぎるか、使えない文字がありました',
+    seconds: 'wait の duration が 1〜5 の整数ではありませんでした',
+    focus: 'type の前に押したものが、入力欄ではありませんでした（先に入力欄を押す）',
+  },
+}
+
+/** A problem's fixed words in the words of the tool set the operator answered in (absent: today's). */
+export const answerProblemWords = (problem: BrowserAnswerProblem, toolset?: BrowserOperatorToolset): string =>
+  (toolset ? SET_PROBLEM_WORDS[toolset][problem] : undefined) ?? BROWSER_ANSWER_PROBLEM_WORDS[problem]
+
 /** A parser's problem as one of the fixed codes (anything else: `shape`). */
 export const answerProblemOf = (problem: string): BrowserAnswerProblem =>
   ((BROWSER_ANSWER_PROBLEMS as readonly string[]).includes(problem) ? problem as BrowserAnswerProblem : 'shape')
@@ -99,6 +141,8 @@ export interface BrowserTrailRun {
    * one line); absent when it said none. The card shows it under `BROWSER_TRAIL_WORDS.unlisted`.
    */
   unlisted?: string
+  /** The tool set the operator answered in (agent-browser.md "The operator's tool sets"): shown on the card; never at the server. */
+  toolset?: BrowserOperatorToolset
 }
 
 export type BrowserOperatorTrail = BrowserTrailRun[]
@@ -118,6 +162,7 @@ export const BROWSER_TRAIL_WORDS = {
   noSteps: '操作はしていません。',
   problem: (words: string) => `アプリが止めました：係の AI の答えの形が決まりに合いませんでした（${words}）。`,
   unlisted: '画面にはあるが押せる部品として拾えなかった（係の AI の言葉）',
+  toolset: '係の道具',
 } as const
 
 // eslint-disable-next-line no-control-regex
@@ -141,7 +186,7 @@ export function trailNotes(v: unknown): string | null {
  * One run's trail as the loop goes (memory only): each action with its kept-form log step and the operator's reason, how
  * the operator ended, its last notes. `view()` is a copy for the card.
  */
-export function createOperatorTrail(phase: BrowserTrailPhase) {
+export function createOperatorTrail(phase: BrowserTrailPhase, toolset?: BrowserOperatorToolset) {
   const steps: BrowserTrailStep[] = []
   let more = 0
   let end: BrowserTrailRun['end'] = null
@@ -164,7 +209,7 @@ export function createOperatorTrail(phase: BrowserTrailPhase) {
     view(): BrowserTrailRun {
       return {
         phase, steps: steps.map(s => ({ ...s })), more, end: end ? { ...end } : null, notes, ...(problem ? { problem } : {}),
-        ...(unlisted !== null ? { unlisted } : {}),
+        ...(unlisted !== null ? { unlisted } : {}), ...(toolset ? { toolset } : {}),
       }
     },
   }
@@ -204,9 +249,11 @@ export function readBrowserOperatorTrail(v: unknown): BrowserOperatorTrail | nul
     if (!(r.notes === null || (typeof r.notes === 'string' && trailNotes(r.notes) === r.notes))) return null
     if (r.problem !== undefined && !(BROWSER_ANSWER_PROBLEMS as readonly unknown[]).includes(r.problem)) return null
     if (r.unlisted !== undefined && !(typeof r.unlisted === 'string' && lineOrNull(r.unlisted, L.reason))) return null
+    if (r.toolset !== undefined && !(BROWSER_OPERATOR_TOOLSETS as readonly unknown[]).includes(r.toolset)) return null
     runs.push({
       phase: r.phase as BrowserTrailPhase, steps, more: r.more as number, end, notes: r.notes, ...(r.problem !== undefined ? { problem: r.problem as BrowserAnswerProblem } : {}),
       ...(r.unlisted !== undefined ? { unlisted: r.unlisted as string } : {}),
+      ...(r.toolset !== undefined ? { toolset: r.toolset as BrowserOperatorToolset } : {}),
     })
   }
   return runs

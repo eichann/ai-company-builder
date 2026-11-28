@@ -31,7 +31,7 @@ import { browserRunLogProblem } from '../../shared/core/browser-run-log'
 import { readBrowserCard } from '../shared/browser-inspection'
 import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
 import { BROWSER_WORDS, type BrowserRunWindow } from '../shared/browser-operation'
-import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
+import { BROWSER_OPERATOR_TOOLSETS, pressedField, type BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
 
 const HOST = 'shop.example.test'
 const COMPANY = 'company-1'
@@ -411,56 +411,152 @@ test('answers that would act outside what is offered act on nothing', async () =
   }
 })
 
-// The tool sets (agent-browser.md "The operator's tool sets"): the compact set's words reach the window as today's
-// actions, so the window, the log and every refusal are the same in both sets.
+// The tool sets (agent-browser.md "The operator's tool sets"): every set's words reach the window as today's actions, so the
+// window, the log and every refusal are the same in all five. The run presses a field by position, types into it without
+// naming it, chooses, presses by ref, goes, goes back and waits — each set saying it in its own words.
+const URL_OF = (path: string) => `https://${HOST}${path}`
 const SAME_RUN: Record<BrowserOperatorToolset, string[]> = {
   current: [
-    '{"do":"type","ref":0,"text":"山田花子"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"click","ref":1}',
-    '{"do":"go","path":"/events?page=3"}', '{"do":"back"}', '{"do":"wait","seconds":1}', done('済み'),
+    '{"do":"click","x":100,"y":50}', '{"do":"type","text":"山田花子"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"back"}', '{"do":"wait","seconds":2}', done('済み'),
   ],
   compact: [
-    '{"do":"set","ref":0,"value":"山田花子"}', '{"do":"set","ref":4,"value":"古い順"}', '{"do":"click","ref":1}',
-    '{"do":"go","path":"/events?page=3"}', '{"do":"go","path":"back"}', '{"do":"wait","seconds":1}', done('済み'),
+    '{"do":"click","x":100,"y":50}', '{"do":"set","value":"山田花子"}', '{"do":"set","ref":4,"value":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"go","path":"back"}', '{"do":"wait","seconds":2}', done('済み'),
+  ],
+  playwright: [
+    '{"do":"browser_mouse_click_xy","x":100,"y":50}', '{"do":"browser_type","text":"山田花子"}',
+    '{"do":"browser_select_option","target":4,"element":"並び順","values":["古い順"]}', '{"do":"browser_click","target":"1","element":"検索する"}',
+    JSON.stringify({ do: 'browser_navigate', url: URL_OF('/events?page=3') }), '{"do":"browser_navigate_back"}', '{"do":"browser_wait_for","time":2}', done('済み'),
+  ],
+  openai: [
+    '{"type":"click","button":"left","x":100,"y":50}', '{"type":"type","text":"山田花子"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"back"}', '{"type":"wait"}', done('済み'),
+  ],
+  anthropic: [
+    '{"action":"left_click","coordinate":[100,50]}', '{"action":"type","text":"山田花子"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"click","ref":1}',
+    '{"do":"go","path":"/events?page=3"}', '{"do":"back"}', '{"action":"wait","duration":2}', done('済み'),
   ],
 }
 
-test('both tool sets: the same run does the same actions in the window and logs them in today\'s words; the operator is started with its set and shown its history in its own words', async () => {
-  const runs = await Promise.all((['current', 'compact'] as const).map(async toolset => {
-    const { w, run, toolsets, materials } = world({ toolset, answers: SAME_RUN[toolset] })
+/** The point world (an image and a viewport), whose press by position reaches the search field. */
+function fieldWorld(toolset: BrowserOperatorToolset, answers: string[]) {
+  const t = pointWorld(async () => ({ ok: true, role: 'textbox', logLabel: '検索' }), answers, { toolset })
+  const s = t.w.window as BrowserBrowseSurface
+  s.act = async action => {
+    t.w.acted.push(action)
+    return action.do === 'click' && !('ref' in action) ? { outcome: 'ok', pressed: { role: 'textbox', name: '検索' } } : { outcome: 'ok' }
+  }
+  return t
+}
+
+test('all five tool sets: the same run does the same actions in the window and logs them in today\'s words; each operator is started with its set and shown its history in its own words', async () => {
+  const shownAs: Record<BrowserOperatorToolset, unknown[]> = {
+    current: ['click', 'type', 'select', 'click', 'go', 'back', 'wait'],
+    compact: ['click', 'set', 'set', 'click', 'go', 'go', 'wait'],
+    playwright: ['browser_mouse_click_xy', 'browser_type', 'browser_select_option', 'browser_click', 'browser_navigate', 'browser_navigate_back', 'browser_wait_for'],
+    openai: ['type:click', 'type:type', 'select', 'click', 'go', 'back', 'type:wait'],
+    anthropic: ['action:left_click', 'action:type', 'select', 'click', 'go', 'back', 'action:wait'],
+  }
+  const runs = []
+  for (const toolset of BROWSER_OPERATOR_TOOLSETS) {
+    const { w, run, toolsets, materials } = fieldWorld(toolset, SAME_RUN[toolset])
     const r = await run()
     assert.equal(r.kind, 'card', toolset)
-    assert.deepEqual(toolsets, Array(7).fill(toolset))
-    const history = (materials.at(-1) as { history: Array<{ do: string }> }).history.map(h => h.do)
-    return { acted: w.acted, steps: w.finished[0].steps, history }
-  }))
-  assert.deepEqual(runs[1].acted, runs[0].acted)
-  assert.deepEqual(runs[1].steps, runs[0].steps)
-  assert.deepEqual(runs[0].history, ['type', 'select', 'click', 'go', 'back', 'wait'])
-  assert.deepEqual(runs[1].history, ['set', 'set', 'click', 'go', 'go', 'wait'])
+    assert.deepEqual(toolsets, Array(8).fill(toolset), toolset)
+    const history = (materials.at(-1) as { history: Array<{ do?: string; type?: string; action?: string }> }).history
+      .map(h => h.do ?? (h.type !== undefined ? `type:${h.type}` : `action:${h.action}`))
+    assert.deepEqual(history, shownAs[toolset], toolset)
+    runs.push({ acted: w.acted, steps: w.finished[0].steps })
+  }
+  for (const r of runs.slice(1)) assert.deepEqual(r, runs[0])
+  assert.deepEqual(runs[0].acted, [
+    { do: 'click', x: 201, y: 101 }, { do: 'type', text: '山田花子' }, { do: 'select', ref: 4, option: '古い順' }, { do: 'click', ref: 1 },
+    { do: 'go', path: '/events?page=3' }, { do: 'back' }, { do: 'wait', seconds: 2 },
+  ])
 })
 
-test('both tool sets refuse the same answers: outside what is offered, a password field, an option not offered, another site, extra keys — and each set refuses the other\'s words', async () => {
+test('all five tool sets refuse the same answers with nothing done: a password field, a wrong role, an option not offered, another site, extra keys, typing with no field pressed — and each refuses the other sets\' words and the actions the app cannot do', async () => {
   const bad: Record<BrowserOperatorToolset, string[]> = {
     current: [
       '{"do":"type","ref":3,"text":"x"}', '{"do":"type","ref":1,"text":"x"}', '{"do":"select","ref":4,"option":"ほかの順"}',
       '{"do":"go","path":"//evil.example/x"}', '{"do":"click","ref":1,"extra":1}', '{"do":"back","path":"/x"}',
-      '{"do":"set","ref":0,"value":"x"}',
+      '{"do":"set","ref":0,"value":"x"}', '{"do":"browser_click","target":1}', '{"type":"click","x":1,"y":1}',
     ],
     compact: [
       '{"do":"set","ref":3,"value":"x"}', '{"do":"set","ref":1,"value":"x"}', '{"do":"set","ref":4,"value":"ほかの順"}',
       '{"do":"go","path":"//evil.example/x"}', '{"do":"click","ref":1,"extra":1}', '{"do":"go","path":"back","extra":1}',
       '{"do":"type","ref":0,"text":"x"}', '{"do":"select","ref":4,"option":"古い順"}', '{"do":"back"}',
-      '{"do":"set","ref":0,"value":"x","text":"y"}', '{"do":"set","ref":0}',
+      '{"do":"set","ref":0,"value":"x","text":"y"}', '{"do":"set","ref":0}', '{"do":"browser_navigate_back"}',
+    ],
+    playwright: [
+      '{"do":"browser_type","target":3,"text":"x"}', '{"do":"browser_type","target":1,"text":"x"}',
+      '{"do":"browser_select_option","target":4,"values":["ほかの順"]}', '{"do":"browser_select_option","target":4,"values":["新しい順","古い順"]}',
+      '{"do":"browser_navigate","url":"https://evil.example/x"}', '{"do":"browser_navigate","url":"http://shop.example.test/x"}',
+      '{"do":"browser_click","target":1,"doubleClick":true}', '{"do":"browser_click","target":"e1"}', '{"do":"browser_type","target":0,"text":"x","submit":true}',
+      '{"do":"browser_wait_for","text":"完了"}', '{"do":"browser_type","text":"x"}', '{"do":"browser_press_key","key":"Enter"}',
+      '{"do":"browser_hover","target":1}', '{"do":"click","ref":1}', '{"do":"browser_click","ref":1}',
+    ],
+    openai: [
+      '{"type":"click","button":"right","x":100,"y":50}', '{"type":"click","button":"left","x":100,"y":50,"keys":["CTRL"]}', '{"type":"type","text":"x"}',
+      '{"type":"double_click","x":100,"y":50}', '{"type":"scroll","x":1,"y":1,"scroll_x":0,"scroll_y":300}', '{"type":"keypress","keys":["ENTER"]}',
+      '{"type":"drag","path":[{"x":1,"y":1},{"x":2,"y":2}]}', '{"type":"move","x":1,"y":1}', '{"type":"screenshot"}', '{"type":"wait","ms":1000}',
+      '{"do":"select","ref":4,"option":"ほかの順"}', '{"do":"go","path":"//evil.example/x"}', '{"do":"click","x":1,"y":1}', '{"do":"type","ref":0,"text":"x"}',
+      '{"do":"wait","seconds":1}', '{"action":"left_click","coordinate":[1,1]}', '{"text":"x"}',
+    ],
+    anthropic: [
+      '{"action":"left_click","coordinate":[100,50],"text":"shift"}', '{"action":"left_click","coordinate":[100]}', '{"action":"left_click"}',
+      '{"action":"type","text":"x"}', '{"action":"wait","duration":30}', '{"action":"right_click","coordinate":[1,1]}', '{"action":"double_click","coordinate":[1,1]}',
+      '{"action":"key","text":"Return"}', '{"action":"scroll","coordinate":[1,1],"scroll_direction":"down","scroll_amount":3}', '{"action":"mouse_move","coordinate":[1,1]}',
+      '{"action":"left_click_drag","start_coordinate":[1,1],"coordinate":[2,2]}', '{"action":"screenshot"}', '{"action":"zoom","region":[0,0,1,1]}',
+      '{"do":"select","ref":4,"option":"ほかの順"}', '{"do":"click","x":1,"y":1}', '{"type":"click","button":"left","x":1,"y":1}',
     ],
   }
-  for (const toolset of ['current', 'compact'] as const) {
+  for (const toolset of BROWSER_OPERATOR_TOOLSETS) {
     for (const answer of bad[toolset]) {
-      const { w, run } = world({ toolset, answers: [answer] })
+      const { w, run } = fieldWorld(toolset, [answer])
       assert.deepEqual(await run(), { kind: 'refused', words: W.failed }, `${toolset} ${answer}`)
       assert.equal(w.acted.length, 0, `${toolset} ${answer}`)
       assert.deepEqual(w.finished.map(f => f.reason), ['bad-answer'], `${toolset} ${answer}`)
     }
   }
+})
+
+test('typing without naming a field (computer use\'s type, Playwright\'s browser_type without a target) goes only into a text field the operator just pressed; anything else is asked again, never guessed', async () => {
+  const typing: Record<'playwright' | 'openai' | 'anthropic', { press: string; type: string }> = {
+    playwright: { press: '{"do":"browser_click","target":1}', type: '{"do":"browser_type","text":"山田"}' },
+    openai: { press: '{"do":"click","ref":1}', type: '{"type":"type","text":"山田"}' },
+    anthropic: { press: '{"do":"click","ref":1}', type: '{"action":"type","text":"山田"}' },
+  }
+  for (const [toolset, t] of Object.entries(typing) as Array<[keyof typeof typing, { press: string; type: string }]>) {
+    // A press that reached a button (not a text field): the typing is refused, nothing typed.
+    const { w, run } = fieldWorld(toolset, [t.press, t.type])
+    ;(w.window as BrowserBrowseSurface).act = async action => { w.acted.push(action); return { outcome: 'ok', pressed: { role: 'button', name: '検索する' } } }
+    assert.deepEqual(await run(), { kind: 'refused', words: W.failed }, toolset)
+    assert.deepEqual(w.acted, [{ do: 'click', ref: 1 }], toolset)
+    // A press that reached a password field: refused too (its role is its own).
+    const pw = fieldWorld(toolset, [t.press, t.type])
+    ;(pw.w.window as BrowserBrowseSurface).act = async action => { pw.w.acted.push(action); return { outcome: 'ok', pressed: { role: 'password', name: 'パスワード' } } }
+    assert.deepEqual(await pw.run(), { kind: 'refused', words: W.failed }, toolset)
+    // A text field pressed, then a wait and a typing: each typing goes into it (typing and waits do not move the focus).
+    const ok = fieldWorld(toolset, [t.press, t.type, toolset === 'openai' ? '{"type":"wait"}' : toolset === 'anthropic' ? '{"action":"wait","duration":1}' : '{"do":"browser_wait_for","time":1}', t.type, done('済み')])
+    ;(ok.w.window as BrowserBrowseSurface).act = async action => {
+      ok.w.acted.push(action)
+      return action.do === 'click' ? { outcome: 'ok', pressed: { role: 'textbox', name: '検索' } } : { outcome: 'ok' }
+    }
+    assert.equal((await ok.run()).kind, 'card', toolset)
+    assert.deepEqual(ok.w.acted.filter(a => a.do === 'type'), [{ do: 'type', text: '山田' }, { do: 'type', text: '山田' }], toolset)
+  }
+  // The pure rule: the last action other than a typing or a wait must be a press that reached a text field.
+  const press = (role: 'textbox' | 'button', outcome: 'ok' | 'refused' = 'ok') => ({ do: 'click' as const, outcome, pressed: { role, name: { outside: 'x' } } }) as never
+  assert.equal(pressedField([]), false)
+  assert.equal(pressedField([press('textbox')]), true)
+  assert.equal(pressedField([press('textbox'), { do: 'type', outcome: 'ok' }, { do: 'wait', outcome: 'ok' }]), true)
+  assert.equal(pressedField([press('textbox'), { do: 'select', ref: 4, outcome: 'ok' }]), false)
+  assert.equal(pressedField([press('textbox'), { do: 'go', outcome: 'ok' }]), false)
+  assert.equal(pressedField([press('button')]), false)
+  assert.equal(pressedField([press('textbox', 'refused')]), false)
+  assert.equal(pressedField([{ do: 'click', outcome: 'ok', pressed: 'click-unknown' }]), false)
 })
 
 test('one run per window at a time', async () => {
@@ -554,8 +650,8 @@ test('a press by position is given in the screen image\'s pixels and mapped onto
   assert.deepEqual(parseBrowseAnswer(`{"do":"type","text":"${'あ'.repeat(201)}"}`, ctx), { problem: 'text' })
 })
 
-function pointWorld(aim: BrowserBrowseSurface['aim'], answers: string[]) {
-  const t = world({ answers })
+function pointWorld(aim: BrowserBrowseSurface['aim'], answers: string[], over: Partial<World> = {}) {
+  const t = world({ answers, ...over })
   const s = t.w.window as BrowserBrowseSurface
   s.snapshot = async () => viewed()
   s.screenshot = async () => shot()

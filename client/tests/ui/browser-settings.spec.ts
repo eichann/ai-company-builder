@@ -111,6 +111,11 @@ test('係の道具: いまの形 by default, まとめた形 saved for this PC w
   const section = toolsetSection(page)
   await expect(section.getByRole('radio', { name: /いまの形/ })).toBeChecked()
   await expect(section.getByText(/AI ができることと、アプリの守りは同じです/)).toBeVisible()
+  // One choice of five: no other setting.
+  await expect(section.getByRole('radio')).toHaveCount(5)
+  for (const name of [/まとめた形/, /Playwright 風/, /OpenAI 風/, /Anthropic 風/]) await expect(section.getByRole('radio', { name })).not.toBeChecked()
+  await section.getByRole('radio', { name: /Anthropic 風/ }).check()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { browserToolset?: string }).browserToolset)).toBe('anthropic')
   await section.getByRole('radio', { name: /まとめた形/ }).check()
   await expect.poll(() => page.evaluate(() => (window as unknown as { browserToolset?: string }).browserToolset)).toBe('compact')
   await expect(section.getByRole('radio', { name: /まとめた形/ })).toBeChecked()
