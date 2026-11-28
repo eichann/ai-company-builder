@@ -28,6 +28,9 @@ export const DOCUMENT_IMAGE_WORDS = {
   type: '入れられるのは PNG・JPEG・GIF・WebP の画像だけです',
   size: `画像が${DROP_WORDS.size}`,
   folder: '文書の横の「images」が画像を置けるフォルダではないため、入れられません',
+  // A root folder of the company folder is a department: `images/` there would be a new one for everyone.
+  topLevel: '会社フォルダのいちばん上にある文書には画像を入れられません。部署などのフォルダの文書に入れてください',
+  failed: '画像を保存できませんでした。もう一度試してください',
 } as const
 
 /** The kind of image these bytes are (their first bytes), or null. */

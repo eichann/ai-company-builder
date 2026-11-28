@@ -698,7 +698,7 @@ const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><s
 test('editor:saveImage keeps a pasted image in images/ beside the document, named by the date and time, never replacing a file', async () => {
   const company = h.companyDir('images-co')
   await h.invoke('fs:registerAllowedRoot', company)
-  writeFiles(company, { '営業部/提案.md': '# 提案\n', '営業部/images/20261129-143005-2.png': 'already here', 'メモ.txt': 'not markdown' })
+  writeFiles(company, { '営業部/提案.md': '# 提案\n', '営業部/images/20261129-143005-2.png': 'already here', '営業部/メモ.txt': 'not markdown' })
   const doc = path.join(company, '営業部', '提案.md')
   mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 29, 14, 30, 5) })
   try {
@@ -720,7 +720,7 @@ test('editor:saveImage keeps a pasted image in images/ beside the document, name
   const big = new Uint8Array(20 * 1024 * 1024 + 1)
   big.set(new Uint8Array(PNG))
   assert.deepEqual(await h.invoke('editor:saveImage', doc, big.buffer), { success: false, error: '画像が20MBを超えています' }, 'as a Finder drop: 20 MB')
-  assert.equal((await h.invoke<{ success: boolean }>('editor:saveImage', path.join(company, 'メモ.txt'), PNG)).success, false, 'only beside a Markdown document')
+  assert.equal((await h.invoke<{ success: boolean }>('editor:saveImage', path.join(company, '営業部', 'メモ.txt'), PNG)).success, false, 'only beside a Markdown document')
   assert.equal(fs.existsSync(path.join(company, 'images')), false)
   assert.deepEqual(fs.readdirSync(path.join(company, '営業部/images')).sort(), ['20261129-143005-2.png', '20261129-143005-3.png', '20261129-143005.jpg', '20261129-143005.png'])
 })
@@ -758,6 +758,26 @@ test('editor:saveImage writes nowhere a file operation may not: an images link (
   assert.equal(fs.readFileSync(path.join(company, 'c', 'images'), 'utf-8'), 'a file')
   assert.equal(fs.existsSync(path.join(company, '資料', 'images')), false)
   assert.equal(fs.existsSync(path.join(company, '評価メモ', 'images')), false)
+
+  // A document at the top of the company folder: `images/` there would be a new department for everyone.
+  writeFiles(company, { 'README.md': 'top', 'sub/folder.md/x.txt': 'a folder named like a document', 'inside/real.md': 'real' })
+  assert.match(String(await refusal('README.md')), /いちばん上にある文書/)
+  assert.equal(fs.existsSync(path.join(company, 'images')), false)
+  // The document itself must be a file: not a folder named `.md`, not a link (even one pointing inside).
+  fs.symlinkSync(path.join(company, 'inside', 'real.md'), path.join(company, 'sub', 'a-link.md'))
+  for (const doc of ['sub/folder.md', 'sub/a-link.md']) assert.ok(await refusal(doc), doc)
+  assert.equal(fs.existsSync(path.join(company, 'sub', 'images')), false)
+  assert.equal(fs.existsSync(path.join(company, 'sub', 'folder.md', 'images')), false)
+  assert.equal(fs.existsSync(path.join(company, 'inside', 'images')), false)
+  // A disk error is said in a plain sentence, not Node's text.
+  writeFiles(company, { 'd/doc.md': 'd' })
+  const writeFile = fs.promises.writeFile
+  fs.promises.writeFile = (async () => { throw Object.assign(new Error("EACCES: permission denied, open '/x'"), { code: 'EACCES' }) }) as typeof fs.promises.writeFile
+  try {
+    assert.equal(await refusal('d/doc.md'), '画像を保存できませんでした。もう一度試してください')
+  } finally {
+    fs.promises.writeFile = writeFile
+  }
 
   // A skill's document: the images would be skill files, which this member may not change.
   const skills = h.companyDir('images-skills')

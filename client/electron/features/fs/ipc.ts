@@ -19,6 +19,7 @@ import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-
 import { createCompanyWatchers } from './watchers'
 import { isVideoFileName } from '../../../shared/video-files'
 import { DROP_WORDS, dropRefusal } from '../../../shared/file-drop'
+import { LINK_ESCAPE_MESSAGE, OUTSIDE_ROOTS_MESSAGE } from '../../allowed-roots'
 import { DOCUMENT_IMAGE_FOLDER, DOCUMENT_IMAGE_WORDS, documentImageAddress, documentImageKind, documentImageName, documentImageRefusal } from '../../../shared/document-images'
 
 export interface FsDeps {
@@ -215,12 +216,14 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
   ipc.handle('editor:saveImage', async (_, documentPath: string, bytes: unknown) => {
     try {
       const doc = paths.validate(documentPath)
-      if (!/\.(md|markdown)$/i.test(doc) || !(await fs.promises.lstat(doc)).isFile()) return { success: false, error: 'Not a Markdown document' }
+      if (!/\.(md|markdown)$/i.test(doc) || !(await fs.promises.lstat(doc)).isFile()) return { success: false, error: DOCUMENT_IMAGE_WORDS.failed }
       const data = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : null
       if (!data) return { success: false, error: DOCUMENT_IMAGE_WORDS.type }
       const kind = documentImageKind(data)
       const notAnImage = documentImageRefusal(data)
       if (notAnImage || !kind) return { success: false, error: notAnImage ?? DOCUMENT_IMAGE_WORDS.type }
+      const root = paths.rootOf(doc)
+      if (root && await fs.promises.realpath(root) === await fs.promises.realpath(path.dirname(doc))) return { success: false, error: DOCUMENT_IMAGE_WORDS.topLevel }
       const folder = paths.validate(path.join(path.dirname(doc), DOCUMENT_IMAGE_FOLDER))
       const at = now()
       const first = path.join(folder, documentImageName(at, kind))
@@ -241,7 +244,9 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       }
       return { success: false, error: NAME_TAKEN_MESSAGE }
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+      // The allowed roots' refusals as they are; a disk error (EACCES, ENOSPC) in a plain sentence, not Node's text.
+      const message = error instanceof Error ? error.message : ''
+      return { success: false, error: message === LINK_ESCAPE_MESSAGE || message === OUTSIDE_ROOTS_MESSAGE ? message : DOCUMENT_IMAGE_WORDS.failed }
     }
   })
 
