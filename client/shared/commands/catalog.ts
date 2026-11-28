@@ -150,6 +150,31 @@ export const COMMANDS = defineCommands([
     id: 'layout.toggleBottom', title: '下のパネルを開く・閉じる', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+j', area: 'app' },
   },
+  // Working through a list one item after another (tasks-ui.md "Working through a list"): the やること list, a 案件's
+  // やること, later the inbox. Keys reach only the list the focus is in (its rows or the item it shows); `list`
+  // names it (`tasks`, `bundle:<id>`), the focused one when left out.
+  {
+    id: 'list.next', title: '一覧の次の件を見る', class: 'view',
+    args: z.object({ list: z.string().optional().describe('The list; the focused one when left out') }),
+    target: { arg: 'list', area: 'list' }, keybinding: { key: 'ArrowDown', alsoKey: 'j', area: 'list' },
+  },
+  {
+    id: 'list.previous', title: '一覧の前の件を見る', class: 'view',
+    args: z.object({ list: z.string().optional().describe('The list; the focused one when left out') }),
+    target: { arg: 'list', area: 'list' }, keybinding: { key: 'ArrowUp', alsoKey: 'k', area: 'list' },
+  },
+  {
+    // From a row: shows its item and moves the focus into it (its buttons are then a Tab away).
+    id: 'list.show', title: '選んだ件の中身へ移る', class: 'view',
+    args: z.object({ list: z.string().optional().describe('The list; the focused one when left out') }),
+    target: { arg: 'list', area: 'list' }, keybinding: { key: 'Enter', area: 'list' },
+  },
+  {
+    // From the item shown: the focus goes back to its row in the list (where the member was).
+    id: 'list.back', title: '一覧へ戻る', class: 'view',
+    args: z.object({ list: z.string().optional().describe('The list; the focused one when left out') }),
+    target: { arg: 'list', area: 'list' }, keybinding: { key: 'Escape', area: 'list' },
+  },
   {
     // 探す ⌘K: open anything by its name (やること, 案件, ファイル…) — the same window as ⌘P.
     id: 'find.byName', title: '名前で探して開く', class: 'view',

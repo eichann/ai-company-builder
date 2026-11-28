@@ -6,7 +6,7 @@
  * Rules: .claude/rules/commands.md.
  */
 import type { z } from 'zod'
-import { matchesKey, parseKey, type CommandArea, type CommandCatalog, type CommandDefinition, type KeyInput } from './define'
+import { keysOf, matchesKey, parseKey, type CommandArea, type CommandCatalog, type CommandDefinition, type KeyInput } from './define'
 
 export type CommandId<C extends CommandCatalog> = keyof C & string
 /** What a caller passes (defaults not yet applied). */
@@ -90,7 +90,7 @@ export function createCommandRegistry<C extends CommandCatalog>(
 
   const shortcuts = Object.values(catalog as Record<string, CommandDefinition>)
     .filter(def => def.keybinding)
-    .map(def => ({ def, area: def.keybinding!.area, key: parseKey(def.keybinding!.key)! }))
+    .flatMap(def => keysOf(def.keybinding!).map(k => ({ def, area: def.keybinding!.area, key: parseKey(k)! })))
 
   /** The handler a call reaches: the asked-for target, else the one used last, else the first registered. */
   function resolve(def: CommandDefinition, requested: string | undefined): [string, Entry] | undefined {

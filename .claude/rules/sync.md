@@ -229,7 +229,9 @@ one sync keeps local. Tests: `client/tests/sync/large-files.test.ts`.
 - `.backups/` (gitignored, local only): `<ts>/` conflict copies + `_metadata.json`
   (`conflictFiles`, `deletedConflictFiles`); `<ts>_protected/`, `_write_denied/`,
   `_outside_checkout/` (`folders`, `files`, `serverFiles`), `_reserved_path/` (+ `reasons`),
-  `_editor_overwrite/` (disk version an editor tab overwrote), `_before_restore/` (what a
+  `_editor_overwrite/` (disk version an editor tab overwrote), `_editor_edits/` (an editor tab's
+  unsaved edits, kept before ［届いた版を採用］ dropped them), `_editor_left_unsaved/` (edits that could
+  not be saved, kept before ［保存せずに進む］ on sign-out / closing the window), `_before_restore/` (what a
   復元 replaced), `_before_revert/` (the member's version 「元に戻す」 removed or replaced), `_nested_repo/` (reason
   `nested_repo_overwrite`, `repos`, `files`: this computer's version of files in a locally
   excluded nested repo that a teammate shared at the same path), `_large_file/` (reason
@@ -256,7 +258,7 @@ one sync keeps local. Tests: `client/tests/sync/large-files.test.ts`.
   failure half-way only those that moved); `plugins.md` "The Skill shelf in the app". The backup
   list labels both (`BackupHistorySlideOver`), though a working folder has no backups panel today.
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
-  `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
+  `_write_denied`, `_editor_overwrite`, `_editor_edits`, `_editor_left_unsaved`, `_made_public`, `_private_folder_existing`,
   `_outside_checkout`, `_before_recovery`, `_private_excluded` (never pruned by age): the ignored files of a left-out private
   folder's clone, moved there before the clone is removed), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days

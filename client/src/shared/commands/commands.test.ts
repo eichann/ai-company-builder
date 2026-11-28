@@ -181,3 +181,23 @@ test('the focus chain lists the marked areas around the focus, innermost first, 
   assert.deepEqual(focusChainOf(root), [{ area: 'app' }])
   assert.deepEqual(focusChainOf(null), [{ area: 'app' }])
 })
+
+// A list's ↓ and j are one command (tasks-ui.md "Working through a list"): the second key runs it in the
+// same area only, and no other command may take it there.
+test('a shortcut\'s second key runs the same command, only in its area, and cannot be shared', async () => {
+  const lists = defineCommands([
+    { id: 'list.next', title: '次', class: 'view', args: z.object({ list: z.string().optional() }), target: { arg: 'list', area: 'list' }, keybinding: { key: 'ArrowDown', alsoKey: 'j', area: 'list' } },
+  ])
+  const registry = createCommandRegistry(lists)
+  const runs: unknown[] = []
+  registry.register('list.next', args => { runs.push(args) }, { target: 'tasks' })
+  assert.equal(registry.handleKey(key({ key: 'j' }), [{ area: 'list', target: 'tasks' }, { area: 'app' }]), true)
+  assert.equal(registry.handleKey(key({ key: 'ArrowDown' }), [{ area: 'list', target: 'tasks' }, { area: 'app' }]), true)
+  assert.equal(registry.handleKey(key({ key: 'j' }), [{ area: 'app' }]), false)
+  assert.equal(registry.handleKey(key({ key: 'j', mod: true }), [{ area: 'list', target: 'tasks' }, { area: 'app' }]), false)
+  assert.deepEqual(runs, [{ list: 'tasks' }, { list: 'tasks' }])
+  assert.throws(() => defineCommands([
+    { id: 'list.next', title: '次', class: 'view', args: z.object({}), keybinding: { key: 'ArrowDown', alsoKey: 'j', area: 'list' } },
+    { id: 'list.jump', title: '飛ぶ', class: 'view', args: z.object({}), keybinding: { key: 'j', area: 'list' } },
+  ]), /share the shortcut j in list/)
+})

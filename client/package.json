@@ -1,6 +1,6 @@
 {
   "name": "@ai-company-builder/client",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "AI Company Builder Desktop Client",
   "author": "AI Company Builder",
   "type": "module",

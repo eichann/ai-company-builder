@@ -15,7 +15,11 @@
  * - an owner-only task never waits;
  * - another company's departments and settings decide nothing here, and its
  *   record id is a record that does not exist;
- * - still waiting a business day later → the requester is told once.
+ * - still waiting a business day later → the requester is told once;
+ * - a correction of words (件名・目的を直す, `isCorrection`; owner decision
+ *   2026-11-28) by the assignee or their delegate is not accepting: still
+ *   引き受け待ち, no `accepted_by`, the same `next_actor`, no notice — while
+ *   any other action of theirs (期限を変える, 完了) still accepts.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -195,6 +199,83 @@ describe('who may accept', () => {
     expect(d.record).toMatchObject({ state: 'declined', fields: { next_actor: 'u-alice' } })
     const again = ok(await engine.act(m('u-alice'), HUMAN, t.id, 'reopen', { expectedVersion: 2 }))
     expect(again.record).toMatchObject({ state: 'awaiting_acceptance', fields: { next_actor: 'u-dan' } })
+  })
+})
+
+describe('correcting the words is not accepting (owner decision 2026-11-28)', () => {
+  const still = (r: { state: string | null; fields: Record<string, unknown> }) => {
+    expect(r.state).toBe('awaiting_acceptance')
+    expect(r.fields.accepted_by ?? null).toBeNull()
+    expect(r.fields.next_actor).toBe('u-dan')
+  }
+
+  it('the assignee correcting 件名 and 目的 leaves it 引き受け待ち, in their turn, and tells the requester nothing; 引き受ける afterwards still does', async () => {
+    const t = ask('u-alice', 'u-dan')
+    const a = ok(await engine.act(m('u-dan'), HUMAN, t.id, 'retitle', { expectedVersion: 1, args: { title: '請求書を確かめる（3月分）' } }))
+    still(a.record)
+    expect(a.record.title).toBe('請求書を確かめる（3月分）')
+    expect(a.entry).toMatchObject({ fromState: 'awaiting_acceptance', toState: 'awaiting_acceptance' })
+    expect(a.entry!.changes.map(c => c.field)).toEqual(['record.title'])
+    const b = ok(await engine.act(m('u-dan'), HUMAN, t.id, 'set_purpose', { expectedVersion: 2, args: { purpose: '月末の締めに間に合わせる' } }))
+    still(b.record)
+    expect(b.entry!.changes.map(c => c.field)).toEqual(['purpose'])
+    expect(noticesOf('u-alice')).toEqual([])
+    expect(turnOf('u-dan')).toContain(t.id)
+    // Taking back a correction does not accept either.
+    const u = ok(engine.undo(m('u-dan'), HUMAN, t.id, { version: 2, expectedVersion: 3 }))
+    still(u.record)
+    expect(u.record.title).toBe(t.title)
+    // Accepting is still the assignee's own press, and the requester hears it then.
+    const r = ok(await engine.act(m('u-dan'), HUMAN, t.id, 'accept', { expectedVersion: 4 }))
+    expect(r.record).toMatchObject({ state: 'todo', fields: { accepted_by: 'u-dan', next_actor: 'u-dan' } })
+    expect(noticesOf('u-alice')).toContainEqual({ kind: 'request_accepted', recordId: t.id })
+  })
+
+  it('the delegate correcting the words during the absence does not accept for the assignee', async () => {
+    const t = ask('u-alice', 'u-dan')
+    ok(absences.create(m('u-dan'), { userId: 'u-dan', from: '2026-11-09', until: '2026-11-09', delegateId: 'u-bob' }))
+    nowMs = Date.parse('2026-11-09T01:00:00.000Z')
+    const a = ok(await engine.act(m('u-bob'), HUMAN, t.id, 'retitle', { expectedVersion: 1, args: { title: '代わりに直した件名' } }))
+    expect(a.entry).toMatchObject({ actorId: 'u-bob', onBehalfOf: 'u-dan' })
+    still(a.record)
+    const b = ok(await engine.act(m('u-bob'), HUMAN, t.id, 'set_purpose', { expectedVersion: 2, args: { purpose: '代わりに書いた目的' } }))
+    still(b.record)
+    // Still waiting (the business-day reminder may come), never 「引き受けました」.
+    expect(noticesOf('u-alice').map(n => n.kind)).not.toContain('request_accepted')
+  })
+
+  it('any other action of the assignee still accepts, as before: 期限を変える, and 完了 straight from 引き受け待ち; undoing it asks again', async () => {
+    const t = ask('u-alice', 'u-dan')
+    ok(await engine.act(m('u-dan'), HUMAN, t.id, 'retitle', { expectedVersion: 1, args: { title: '直してから期限も' } }))
+    const d = ok(await engine.act(m('u-dan'), HUMAN, t.id, 'set_due', { expectedVersion: 2, args: { due: '2026-11-20' } }))
+    expect(d.record).toMatchObject({ state: 'todo', fields: { accepted_by: 'u-dan', next_actor: 'u-dan' } })
+    expect(noticesOf('u-alice')).toContainEqual({ kind: 'request_accepted', recordId: t.id })
+    const back = ok(engine.undo(m('u-dan'), HUMAN, t.id, { version: 3, expectedVersion: 3 }))
+    still(back.record)
+
+    const c = ask('u-alice', 'u-dan')
+    ok(await engine.act(m('u-dan'), HUMAN, c.id, 'set_purpose', { expectedVersion: 1, args: { purpose: '目的だけ先に' } }))
+    const done = ok(await engine.act(m('u-dan'), HUMAN, c.id, 'complete', { expectedVersion: 2 }))
+    expect(done.record).toMatchObject({ state: 'done', fields: { accepted_by: 'u-dan' } })
+  })
+
+  it('the requester correcting the words after the company setting changed does not accept it by the setting either', async () => {
+    setAcceptance('a', { sameDepartment: false })
+    const t = ask('u-alice', 'u-bob')
+    expect(t.state).toBe('awaiting_acceptance')
+    setAcceptance('a', { sameDepartment: true })
+    const a = ok(await engine.act(m('u-alice'), HUMAN, t.id, 'retitle', { expectedVersion: 1, args: { title: '頼んだ人が直した' } }))
+    expect(a.record.state).toBe('awaiting_acceptance')
+    expect(a.record.fields.accepted_by ?? null).toBeNull()
+    expect(a.record.fields.next_actor).toBe('u-bob')
+  })
+
+  it('a correction on a request already accepted changes nothing but the words', async () => {
+    const t = ask('u-alice', 'u-dan')
+    ok(await engine.act(m('u-dan'), HUMAN, t.id, 'accept', { expectedVersion: 1 }))
+    const a = ok(await engine.act(m('u-alice'), HUMAN, t.id, 'retitle', { expectedVersion: 2, args: { title: '頼んだ人が直した' } }))
+    expect(a.record).toMatchObject({ state: 'todo', fields: { accepted_by: 'u-dan', next_actor: 'u-dan' } })
+    expect(a.entry!.changes.map(c => c.field)).toEqual(['record.title'])
   })
 })
 

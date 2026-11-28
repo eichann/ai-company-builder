@@ -656,10 +656,11 @@ two actions, one generic piece of definition syntax, no new route.
   empty one clears it), each from every open state (todo, in_progress, review, waiting, preparing, declined,
   awaiting_acceptance, proposed), `who: [requested_by, assignee]` (their delegate during an absence too, as for any
   person field), `note: optional`, nobody told. **Two actions, not one**: a released app shows each in 「…」 as one
-  field it can fill (an action's args are all required), so it keeps working. Acting as the assignee on a request still
-  in 引き受け待ち accepts it, as every action of the assignee does ("Acceptance"); the card's form says so before the
-  press (「保存すると、このやることを引き受けたことになります。」) — chosen over a narrower `from` for the assignee,
-  which the definition format cannot say per person.
+  field it can fill (an action's args are all required), so it keeps working. **Correcting the words never accepts**
+  (owner decision 2026-11-28, replacing 「acting as the assignee accepts, said under the field」): the assignee (or
+  their delegate) correcting 件名・目的 of a request still 引き受け待ち leaves it there — no `accepted_by`, the same
+  `next_actor`, no `request_accepted` ("Acceptance"). Released apps still say 「保存すると、このやることを引き受けた
+  ことになります。」 under the field until updated: wrong toward caution, harmless.
 - **Their AI only in a turn the member started** (`ai_on_request: [requested_by, assignee]`, "The AI at the member's
   request": the member themself in that field, a token with `memberTurn`, never one bound to a run — so never 「AI の番」,
   a plugin step's or a job's run; `via` is the default, so never a plugin's screen either). **No member setting**:
@@ -1125,8 +1126,12 @@ under version 6 keep it and never wait (`since: 7`).
   them in their turn, for an action that moves the state (引き受ける, 完了: `askedByMember`, `acceptance.ts`; task 17,
   "The AI at the member's request"; owner decision 2026-11-27, the member's setting required): so an asked 完了 from
   引き受け待ち records `accepted_by` too, and the requester's 「引き受けました」 notice (`request_accepted`) is sent as for
-  the member's own press — an undo takes the acceptance back, never the notice. A correction of words at their request
-  does not accept. Entering
+  the member's own press — an undo takes the acceptance back, never the notice. **A correction of words
+  (`isCorrection`: 件名・目的を直す, read from the definition) is no part of acceptance, whoever runs it** — the
+  assignee, their delegate, their AI or the requester (owner decision 2026-11-28, 「言葉を直すだけでは引き受けたことに
+  しない」; the requester is not told): `act.ts` does not run `applyAcceptance` for it, so the state, `accepted_by` and
+  `next_actor` stay as they were and no `request_accepted` is sent; every other action of the assignee accepts as
+  before (期限を変える, 完了…). Entering
   `declined` forgets `accepted_by` (a `reopen` asks again); an `assign` from `declined` asks the
   new assignee like a new request (to `todo` or 引き受け待ち — before version 7 it stayed `declined`).
 - `accepted_by` is the engine's: a create naming it → 400 `BAD_VALUE`; no action has it as an
@@ -1140,7 +1145,8 @@ under version 6 keep it and never wait (`since: 7`).
   (`tasks-ui.md`).
 - Test: `server/tests/unit/record-task-acceptance.test.ts` (only the assignee — or their delegate
   only during the absence — accepts, never the requester or any AI; the AI's hand-over is not an
-  acceptance; each automatic case follows its setting and is off when it is off; reassigning asks
+  acceptance; correcting 件名・目的 by the assignee or the delegate is not one (still 引き受け待ち, no
+  `accepted_by`, no notice, undone without accepting) while 期限を変える and 完了 still are; each automatic case follows its setting and is off when it is off; reassigning asks
   by the reassigner's departments; `accepted_by` on create refused; own and owner-only tasks never
   wait; another company's departments, settings and ids decide nothing; the business-day
   reminder once — mutation-checked; the owner-only branch is also covered by "the asker is the

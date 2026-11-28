@@ -420,6 +420,39 @@ test('editor:backupBeforeOverwrite: the disk version, byte for byte, in .backups
   assert.deepEqual(await h.invoke('editor:backupBeforeOverwrite', company, path.join(company, '.backups', 'x', 'y.md')), { success: true, skipped: 'internal' })
 })
 
+test('editor:backupEdits: the tab\'s edits (never on disk) kept as a version of the file, in .backups or (private folder) in .git; the file itself untouched', async () => {
+  const company = h.companyDir('edits-co')
+  await h.invoke('fs:registerAllowedRoot', company)
+  writeFiles(company, {
+    '.git/acb-private-scopes.json': JSON.stringify({
+      companyId: 'co-3', version: '1', fetchedAt: '',
+      scopes: [{ scopeId: 's1', path: '人事/評価', cloneUrl: 'x', clonePath: 'x', canWrite: true }],
+    }),
+    '営業/提案書.md': '届いた版',
+    '人事/評価/b.md': '届いた版',
+  })
+  type Backup = { success: boolean; backupPath?: string; skipped?: string }
+  const pub = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), '# 私の編集\n')
+  assert.equal(pub.success, true)
+  assert.match(path.relative(company, pub.backupPath!), /^\.backups[/\\]\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}_editor_edits$/)
+  assert.equal(fs.readFileSync(path.join(pub.backupPath!, '営業', '提案書.md'), 'utf-8'), '# 私の編集\n')
+  const metadata = JSON.parse(fs.readFileSync(path.join(pub.backupPath!, '_metadata.json'), 'utf-8'))
+  assert.deepEqual({ ...metadata, timestamp: typeof metadata.timestamp }, { timestamp: 'string', reason: 'editor_edits', files: ['営業/提案書.md'], privateFolder: false })
+  assert.equal(fs.readFileSync(path.join(company, '営業', '提案書.md'), 'utf-8'), '届いた版')
+
+  const priv = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '人事', '評価', 'b.md'), '私の編集')
+  assert.match(path.relative(company, priv.backupPath!).split(path.sep).join('/'), /^\.git\/acb-private-backups\/.*_editor_edits$/)
+  assert.equal(fs.readFileSync(path.join(priv.backupPath!, '人事', '評価', 'b.md'), 'utf-8'), '私の編集')
+  // A file already deleted on disk: its edits are still kept.
+  const gone = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '営業', 'gone.md'), '消える前の編集')
+  assert.equal(fs.readFileSync(path.join(gone.backupPath!, '営業', 'gone.md'), 'utf-8'), '消える前の編集')
+  // ［保存せずに進む］ names its own reason (the backup list's label); an unknown reason keeps nothing.
+  const left = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), '進む前の編集', 'editor_left_unsaved')
+  assert.match(path.relative(company, left.backupPath!), /_editor_left_unsaved$/)
+  assert.equal(fs.readFileSync(path.join(left.backupPath!, '営業', '提案書.md'), 'utf-8'), '進む前の編集')
+  assert.deepEqual(await h.invoke('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), 'x', 'before_restore'), { success: false, error: 'Unknown reason' })
+})
+
 // Fake values only: what the test proves is that none of them reach the renderer.
 const FAKE_ENV = {
   OPENAI_API_KEY: 'sk-FAKE-openai-value-9f3c',

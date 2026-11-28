@@ -329,7 +329,7 @@ fine), `color-opacity` (`bg-warning/10`).
   | the task row's `not-allowed` 「AI では始められません」 (`TaskRow` `AI_STOP`, `STOP_ICON`) | amber | the member starts it or hands it on |
   | 「会社の設定で止まっています（使いたいときは、管理者に相談してください）」 (`MySwitchesSection`, `data-company-off`; only the switch's words fade) and the server's `WORK_SWITCH_COMPANY_OFF` refusal (a `warning` callout, not `danger`) | amber | an admin can turn it back on |
   | the sync button while automatic sync waits (`syncWaitsForMember`, `TitleBar` `syncWaitsForYou`: icon + mark, name 「…（自動同期は止まっています）」) | amber | the member syncs by hand to resume |
-  | `ExternalChangeBanner` 「自動保存は止めています」 (already the warning set) | amber | the member saves or reloads |
+  | `ExternalChangeBanner` 「自動保存は止めています」 (already the warning set) | amber | the member compares and picks a version |
   | 「AI を止めています」 band, Slack / Google / connected services / google-relay operator stop, plugin `stopped` | grey | the operator / an admin stopped it on purpose |
   | plugin `key-stopped` 「選んだ鍵が止められています」 | grey | a key someone stopped on purpose; its page says where to resume (an owner question if it should be amber) |
   | jobs paused by an admin or the responsible person, 「すべて止めています」 | grey | stopped on purpose, known |

@@ -35,7 +35,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //   ?limits=ok|warn|rejected|unknown   which usage snapshot the server reports
 //   ?agent=codex  Codex instead of Claude Code
 //   ?history=long  two restored tabs with a 240-message conversation (windowed
-//                  rendering, 「以前のメッセージを表示」, code highlighting)
+//                  rendering, 「以前のメッセージを表示」, code highlighting); with ?rich=1 every reply
+//                  holds an ```acb-html block (drawn in its closed frame: only those near the screen)
 //   ?history=edit  one restored conversation whose first message references
 //                  files (editing and resending a message)
 //   ?turn=manual   the reply streams only what window.__acbChat sends (the
@@ -61,6 +62,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
+// The app's theme as the chat reads it (a rich reply's frame follows it).
+useAppStore.setState({ theme: params.get('theme') === 'dark' ? 'dark' : 'light' })
 const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
 // ?storage=keep: a reload keeps what the page remembered (a new Playwright page starts empty anyway).
@@ -68,6 +71,7 @@ if (params.get('storage') !== 'keep') { try { localStorage.clear() } catch { /* 
 // The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('preview-user')
 const longHistory = params.get('history') === 'long'
+const richHistory = params.get('rich') === '1'
 const editHistory = params.get('history') === 'edit'
 // Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
 const manyHistory = params.get('history') === 'many'
@@ -117,7 +121,9 @@ function longSession() {
     const [lang, code] = CODE_SAMPLES[i % CODE_SAMPLES.length]
     messages.push({ id: `u${i}`, role: 'user', content: `質問${i + 1}: ${lang} の例を見せてください`, timestamp: new Date(now - (240 - i * 2) * 60_000).toISOString() })
     messages.push({ id: `a${i}`, role: 'assistant', timestamp: new Date(now - (239 - i * 2) * 60_000).toISOString(),
-      content: `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
+      content: richHistory
+        ? `## 回答 ${i + 1}\n\n見積もりの比べです。\n\n\`\`\`acb-html\n<div class="acb-key"><strong>要点</strong> 回答 ${i + 1} では B社が安くなります。</div>\n<table class="acb-compare"><thead><tr><th>項目</th><th>A社</th><th class="best">B社</th></tr></thead><tbody><tr><td>保守</td><td>12,000円</td><td class="best">9,000円</td></tr><tr><td>初期費用</td><td>0円</td><td class="best">5万円</td></tr></tbody></table>\n\`\`\`\n\n以上です。`
+        : `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
   }
   return { id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messages, createdAt: new Date(now - 300 * 60_000).toISOString(), updatedAt: new Date(now).toISOString(), revision: 1 }
 }
@@ -336,6 +342,8 @@ const control = {
   steerStatus: 'delivered' as SteerStatus,
   suggestion: null as string | null,
   open: () => current !== null,
+  /** The member switches light / dark (the title bar's 表示). */
+  toggleTheme: () => useAppStore.getState().toggleTheme(),
   send(chunk: unknown) { current?.enqueue(sse(chunk)) },
   text(id: string, delta: string) { control.send({ type: 'text-delta', id, delta }) },
   finish() {

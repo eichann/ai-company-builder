@@ -314,3 +314,146 @@ test('ending a プロジェクト with its card’s ［終える］ closes its t
   expect(acts).toEqual([['demo', 'project-aaaaaa1', { action: 'finish', expectedVersion: 2 }]])
   expectNoPageErrors(state)
 })
+
+// UX 点検 14 (owner decision 2026-11-28, 案A; tasks-ui.md "Working through a list"): the list stays beside the item it
+// shows. ↑ ↓ (j k) show the neighbour in the same preview tab with 「n / N」, Enter moves into the item, Esc goes back to
+// its row. Catches keys that do nothing, a count that does not follow, the focus lost on the way in or out.
+const calls = (page: Page, name: string) => page.evaluate(n => (window as unknown as { __acbLayout: { calls: Array<{ name: string; args: unknown[] }> } }).__acbLayout.calls.filter(c => c.name === n).map(c => c.args), name)
+const focusedAttr = (page: Page, attr: string) => page.evaluate(a => document.activeElement?.getAttribute(a) ?? null, attr)
+
+test('working through the list: ↓ j k show the neighbour with 「n / N」; Enter moves into the item, Esc back to its row', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', check: '1' })
+  await leftTab(page, /^やること/).click()
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await list.locator('[data-work-row="task-aaaaaa1"]').click()
+  const bar = page.getByRole('group', { name: '一覧の何件目か' })
+  await expect(bar).toContainText('1 / 3')
+
+  await page.keyboard.press('ArrowDown')
+  await expect(middleTabs(page).getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(bar).toContainText('2 / 3')
+  expect(await focusedAttr(page, 'data-work-row')).toBe('task-row001')
+  await page.keyboard.press('k')
+  await expect(bar).toContainText('1 / 3')
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await expect(bar).toContainText('3 / 3')
+  // At the end it stays.
+  await page.keyboard.press('j')
+  await expect(bar).toContainText('3 / 3')
+  // The preview tab is replaced, not one tab per item.
+  await expect(middleTabs(page).getByRole('tab', { name: /やること/ })).toHaveCount(1)
+
+  await page.keyboard.press('Enter')
+  await expect.poll(() => focusedAttr(page, 'data-work-card')).toBe('tasks')
+  // From the item itself ↑ shows the one before and keeps the focus there.
+  await page.keyboard.press('ArrowUp')
+  await expect(bar).toContainText('2 / 3')
+  await expect.poll(() => focusedAttr(page, 'data-work-card')).toBe('tasks')
+  await page.keyboard.press('Escape')
+  expect(await focusedAttr(page, 'data-work-row')).toBe('task-row001')
+
+  // The bar's buttons do the same.
+  await bar.getByRole('button', { name: '次の件' }).click()
+  await expect(bar).toContainText('3 / 3')
+  await expect(bar.getByRole('button', { name: '次の件' })).toBeDisabled()
+  expectNoPageErrors(state)
+})
+
+// Finishing the item shown — the card's ［完了にする］ or the list's ☑ — shows the next one in its place, and 取り消す takes
+// the press back (the entry the press made) and shows that item again. Catches the old close-and-look-for-it, a wrong
+// entry undone, and an undo that leaves the member elsewhere.
+test('finishing the item shown brings up the next one; 取り消す takes it back and shows it again', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', check: '1' })
+  await leftTab(page, /^やること/).click()
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  const tabs = middleTabs(page)
+  await list.locator('[data-work-row="task-row001"]').click()
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+
+  await page.getByTestId('task-card').getByRole('button', { name: '完了にする', exact: true }).click()
+  await expect(tabs.getByRole('tab', { name: /やること 3/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveCount(0)
+  const notice = list.locator('[data-work-notice]')
+  await expect(notice).toContainText('「やること 2」を片づけました。次の件です')
+  expect(await calls(page, 'actOnTask')).toEqual([['demo', 'task-row001', { action: 'complete', expectedVersion: 1 }]])
+
+  await notice.getByRole('button', { name: '取り消す' }).click()
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(notice).toContainText('「やること 2」を元に戻しました')
+  expect(await calls(page, 'undoTaskAction')).toEqual([['demo', 'task-row001', 2, 2]])
+
+  // The list's ☑ on the item shown does the same; its 取り消す undoes that press's entry.
+  await list.locator('[data-work-row="task-aaaaaa1"]').click()
+  await list.getByRole('button', { name: '「A社 提案書を仕上げる」を完了にする' }).click()
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  await notice.getByRole('button', { name: '取り消す' }).click()
+  await expect(tabs.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveAttribute('aria-selected', 'true')
+  expect((await calls(page, 'undoTaskAction')).at(-1)).toEqual(['demo', 'task-aaaaaa1', 3, 3])
+  expectNoPageErrors(state)
+})
+
+test('the last item of the list finished: its tab closes and the list says it was the last', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', check: '1', rows: '1' })
+  await leftTab(page, /^やること/).click()
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await list.locator('[data-work-row="task-aaaaaa1"]').click()
+  await page.getByTestId('task-card').getByRole('button', { name: '完了にする', exact: true }).click()
+  await expect(middleTabs(page).getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveCount(0)
+  await expect(list.locator('[data-work-notice]')).toContainText('この一覧の件は、これで最後です')
+  expectNoPageErrors(state)
+})
+
+// The place is where the member last was — also when they got there with the mouse (Codex review): back from a file,
+// ↓ shows that item again rather than the first. Catches a click that does not remember.
+test('back from another tab, ↓ in the list shows the item last opened by a click, not the first', async ({ page }) => {
+  const README = '/Users/demo/会社/README.md'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: [README], activeFilePath: README, leftTab: 'tasks' }),
+  }) })
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  const tabs = middleTabs(page)
+  await list.locator('[data-work-row="task-row002"]').click()
+  await expect(tabs.getByRole('tab', { name: /やること 3/ })).toHaveAttribute('aria-selected', 'true')
+  await tabs.getByRole('tab', { name: /README\.md/ }).click()
+  await list.locator('[data-work-row="task-aaaaaa1"]').focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(tabs.getByRole('tab', { name: /やること 3/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('group', { name: '一覧の何件目か' })).toContainText('3 / 3')
+  expectNoPageErrors(state)
+})
+
+// 案件の中のやること (the same promises): a row shows its やること beside the 案件 with 「n / N」, ↓ moves, the place is
+// remembered when the 案件's tab is shown again, and finishing the last one listed shows the one before. Catches the
+// row opening a tab of its own, the place forgotten, and 終わったこと counted.
+test('a 案件’s やること: shown beside it, ↓ moves, the place comes back with the tab, finishing goes on to the next', async ({ page }) => {
+  const PROJECT = 'acb-record:project-aaaaaa1'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', work: '1', check: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: ['/Users/demo/会社/README.md', PROJECT], activeFilePath: PROJECT, leftTab: 'files', records: {
+      'project-aaaaaa1': { title: '新人研修の見直し', type: 'project' },
+    } }),
+  }) })
+  const tabs = middleTabs(page)
+  const card = page.getByTestId('record-card')
+  await card.locator('[data-work-row="task-row001"]').click()
+  const side = page.getByRole('region', { name: '選んだやること' })
+  await expect(side.getByTestId('task-card')).toContainText('やること 2')
+  await expect(side.getByRole('group', { name: '一覧の何件目か' })).toContainText('2 / 3')
+  await expect(tabs.getByRole('tab')).toHaveCount(2)
+  await page.keyboard.press('ArrowDown')
+  await expect(side.getByTestId('task-card')).toContainText('やること 3')
+  await expect(side.getByRole('group', { name: '一覧の何件目か' })).toContainText('3 / 3')
+
+  // Another tab, then back: the same やること beside it, its row marked.
+  await tabs.getByRole('tab', { name: /README\.md/ }).click()
+  await tabs.getByRole('tab', { name: /新人研修の見直し/ }).click()
+  await expect(side.getByTestId('task-card')).toContainText('やること 3')
+  await expect(card.locator('[data-work-row="task-row002"]')).toHaveAttribute('aria-current', 'true')
+
+  // The last one listed finished (終わったこと does not count): the one before takes its place; the 案件 tab stays.
+  await side.getByTestId('task-card').getByRole('button', { name: '完了にする', exact: true }).click()
+  await expect(side.getByTestId('task-card')).toContainText('やること 2')
+  await expect(card.locator('[data-work-notice]')).toContainText('「やること 3」を片づけました。次の件です')
+  await expect(tabs.getByRole('tab', { name: /新人研修の見直し/ })).toHaveAttribute('aria-selected', 'true')
+  expectNoPageErrors(state)
+})

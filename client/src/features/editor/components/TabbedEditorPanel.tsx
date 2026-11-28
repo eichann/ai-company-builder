@@ -3,7 +3,6 @@ import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { FileText, Code, Eye } from '@phosphor-icons/react'
 import { CodeEditor } from '../../../shared/ui/CodeEditor'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
-import { MarkdownDiffView } from '../../doc-review/components/MarkdownDiffView'
 import { useWriteAccess } from '../../../shared/hooks/useWriteAccess'
 import { useAppStore } from '../../../stores/appStore'
 import { fileNameOf, isHtmlFile, isImageFile, isMarkdownFile, isPdfFile, isVideoFile } from '../fileKinds'
@@ -16,6 +15,7 @@ import { EditorTabBar } from './EditorTabBar'
 import type { TabArrangement } from '../hooks/useTabArrangement'
 import { fileTabsOf, recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
+import { ExternalCompareView } from './ExternalCompareView'
 import { LocalImage, PdfPreview, VideoPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
 import { HtmlDocumentPane } from './HtmlDocumentPane'
@@ -89,8 +89,6 @@ export function TabbedEditorPanel({
   const { isReadOnly } = useWriteAccess()
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  // The tab whose 「差分を見る」 view (disk version vs. the tab's edits) is open.
-  const [externalDiffPath, setExternalDiffPath] = useState<string | null>(null)
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   // Another company is another document view (its Drive videos play with that company's session).
   const companyId = useAppStore(s => s.currentCompany?.id ?? null)
@@ -121,6 +119,7 @@ export function TabbedEditorPanel({
     rootPath,
     setError,
     setNotice,
+    showFile: path => onSelectFile(path),
   })
 
   // Wrap onSelectFile to save scroll before switching
@@ -253,11 +252,8 @@ export function TabbedEditorPanel({
       {activeFile && activeFilePath && activeFile.external && (
         <ExternalChangeBanner
           file={{ ...activeFile, external: activeFile.external }}
-          diffOpen={externalDiffPath === activeFilePath}
           onSave={() => { void saving.handleSave() }}
-          onLoadDisk={() => { void saving.loadDiskVersion(activeFilePath).then(loaded => { if (loaded) setExternalDiffPath(null) }) }}
-          onToggleDiff={() => setExternalDiffPath(p => (p === activeFilePath ? null : activeFilePath))}
-          onKeepMine={() => { setExternalDiffPath(null); files.updateFile(activeFilePath, f => ({ ...f, keepMine: true })) }}
+          onToggleCompare={() => files.updateFile(activeFilePath, f => ({ ...f, comparing: !f.comparing, changedWhileComparing: false }))}
         />
       )}
 
@@ -269,20 +265,14 @@ export function TabbedEditorPanel({
       {/* Editor / Image Preview, and beside it the file's links and earlier versions */}
       <div className="flex-1 min-h-0 flex min-w-0">
       <div className="flex-1 overflow-hidden min-w-0">
-        {activeFile && activeFilePath && externalDiffPath === activeFilePath && activeFile.external?.kind === 'changed' ? (
-          <div className="h-full flex flex-col">
-            <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 text-caption font-normal text-gray-500 dark:text-zinc-400">
-              <span className="text-red-600 dark:text-red-400">−</span> ディスクの内容（外部の変更）／
-              <span className="text-green-700 dark:text-green-400">＋</span> あなたの編集（未保存）
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <MarkdownDiffView
-                snapshot={activeFile.external.diskContent}
-                current={activeFile.content}
-                noChangesMessage="ディスクの内容とあなたの編集に違いはありません"
-              />
-            </div>
-          </div>
+        {activeFile && activeFilePath && activeFile.comparing && activeFile.external?.kind === 'changed' ? (
+          <ExternalCompareView
+            arrived={activeFile.external.diskContent}
+            mine={activeFile.content}
+            changedAgain={!!activeFile.changedWhileComparing}
+            onSaveMine={compared => saving.saveMine(activeFilePath, compared)}
+            onTakeArrived={compared => saving.takeArrived(activeFilePath, compared)}
+          />
         ) : activeFile && activeFilePath && isHtmlFile(activeFilePath) && !htmlSources.has(activeFilePath) ? (
           // One view per file and per showing: another tab or 中身 closes it (its scripts stop).
           <HtmlDocumentPane
