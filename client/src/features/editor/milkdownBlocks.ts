@@ -14,7 +14,9 @@ import { wrapInTaskListInputRule } from '@milkdown/preset-gfm'
 import { matchBlockChoices, type InPlaceBlock } from './blockChoices'
 import type { InPlaceBlockMenu, InPlaceTable, TableEdit } from './inPlaceEditing'
 
-const menuKey = new PluginKey<{ dismissed: string | null }>('acb-block-menu')
+/** The 「/」 line the list is open for: where 「/」 was typed onto an empty line (null: none, or closed with Esc). */
+interface MenuState { openAt: number | null }
+const menuKey = new PluginKey<MenuState>('acb-block-menu')
 
 /** The line the 「/」 list is about: a top-level paragraph holding only 「/」 and a few letters, the caret at its end. */
 function slashLine(state: EditorState): { at: number; text: string; query: string } | null {
@@ -28,18 +30,20 @@ function slashLine(state: EditorState): { at: number; text: string; query: strin
   return { at: $from.before(), text, query: m[1] }
 }
 
-/** The 「/」 list as it is shown now, or null (no 「/」 line, nothing found, or closed with Esc for this text). */
+/**
+ * The 「/」 list as it is shown now, or null: no 「/」 line, nothing found, or not opened by typing 「/」
+ * there (a line the file already held as 「/todo」 is text: its Enter stays a new line), or closed with Esc.
+ */
 export function blockMenuOf(state: EditorState): { query: string; choices: InPlaceBlock[] } | null {
   const line = slashLine(state)
-  if (!line || menuKey.getState(state)?.dismissed === `${line.at}:${line.text}`) return null
+  if (!line || menuKey.getState(state)?.openAt !== line.at) return null
   const choices = matchBlockChoices(line.query)
   return choices.length ? { query: line.query, choices } : null
 }
 
-/** Esc: the list closes for this 「/」 text (typing on opens it again); the 「/」 stays as written. */
+/** Esc: the list closes; the 「/」 stays as typed (typing 「/」 on an empty line opens it again). */
 export function closeBlockMenu(view: EditorView) {
-  const line = slashLine(view.state)
-  if (line) view.dispatch(view.state.tr.setMeta(menuKey, `${line.at}:${line.text}`).setMeta('addToHistory', false))
+  if (menuKey.getState(view.state)?.openAt != null) view.dispatch(view.state.tr.setMeta(menuKey, 'close').setMeta('addToHistory', false))
 }
 
 export function blockMenuReport(view: EditorView): InPlaceBlockMenu | null {
@@ -56,13 +60,18 @@ const MENU_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter'])
  * commands while the list shows (editor.blockMenu*): the editor only leaves them alone then (no caret
  * move, no new line). Esc is never held here: closing is the command's, and with no list it is another's.
  */
-export const blockMenuPlugin = $prose(() => new Plugin<{ dismissed: string | null }>({
+export const blockMenuPlugin = $prose(() => new Plugin<MenuState>({
   key: menuKey,
   state: {
-    init: () => ({ dismissed: null }),
-    apply: (tr, v) => {
-      const meta = tr.getMeta(menuKey) as string | undefined
-      return meta !== undefined ? { dismissed: meta } : v
+    init: () => ({ openAt: null }),
+    apply: (tr, v, before, after) => {
+      if (tr.getMeta(menuKey) === 'close') return { openAt: null }
+      // 「/」 typed onto an empty top-level line opens the list for that line.
+      const line = tr.docChanged ? slashLine(after) : null
+      if (line && line.text === '/' && before.doc.nodeAt(tr.mapping.invert().map(line.at))?.content.size === 0) return { openAt: line.at }
+      if (v.openAt === null) return v
+      const mapped = tr.mapping.mapResult(v.openAt)
+      return { openAt: mapped.deleted ? null : mapped.pos }
     },
   },
   props: {
@@ -110,10 +119,13 @@ function wrapIn(tr: Transaction, inside: number, type: NodeType | undefined): bo
   return true
 }
 
-/** The paragraph holding `start` has nothing but the line start typed so far (no words after the caret). */
+/**
+ * A top-level paragraph holding nothing but the line start typed so far: in a list item or a quote a
+ * code block or a divider cannot stand as made there (the characters stay as typed).
+ */
 function onlyLineStart(state: EditorState, start: number, end: number): boolean {
   const $s = state.doc.resolve(start)
-  return $s.parent.type.name === 'paragraph' && $s.parent.content.size === end - start
+  return $s.depth === 1 && $s.parent.type.name === 'paragraph' && $s.parent.content.size === end - start
 }
 
 /** A divider in place of the paragraph at `at`, and an empty line after it for the caret (not written while empty). */
@@ -271,8 +283,12 @@ function addColumn(state: EditorState, dispatch?: (tr: Transaction) => void): bo
 const TABLE_EDITS: Record<TableEdit, (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean> = {
   addRow,
   addColumn,
-  // The header row stays: a Markdown table cannot be without it.
-  deleteRow: (state, dispatch) => !tableAround(state)?.inHeader && deleteRow(state, dispatch),
+  // The header row stays (a Markdown table cannot be without it), and so does the last row under it
+  // (the editor would only empty it).
+  deleteRow: (state, dispatch) => {
+    const around = tableAround(state)
+    return !!around && !around.inHeader && around.node.childCount > 2 && deleteRow(state, dispatch)
+  },
   deleteColumn,
 }
 

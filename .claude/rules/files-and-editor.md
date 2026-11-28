@@ -495,7 +495,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
 
 ## The 「/」 list, line starts and the table bar (UX check 9 PR3, owner decision 2026-11-28)
 
-- **「/」 list**: 「/」 on a top-level line of its own (the caret at its end, up to 16 letters after it) shows
+- **「/」 list**: 「/」 typed onto an empty top-level line opens it for that line (the caret at its end, up to 16
+  letters after it; a 「/todo」 line the file already holds is text — its Enter stays a new line) and shows
   `components/BlockTools.tsx` `BlockMenu` (`role="listbox"` 「形を選ぶ」): 見出し1〜3・箇条書き・番号つきの箇条書き・
   チェックリスト・引用・コード・区切り線・表 (3×3), the one list in `blockChoices.ts` (names, the line start shown
   beside each, the words typed after 「/」 that find it — `matchBlockChoices`). Nothing found → no list. The choice
@@ -507,18 +508,19 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   the focused document and no word is being composed (`KeyInput.isComposing`); the editor's own plugin only
   leaves ↓ ↑ Enter alone while the list shows (`blockMenuPlugin` `handleKeyDown`: no caret move, no new line),
   never Esc — so Esc with no list reaches another part (a list worked through, 「延ばす」). Esc closes the list for
-  that text (typing on opens it again), the 「/」 stays.
+  that line (typing 「/」 on an empty line opens it again), the 「/」 stays.
 - **Line starts** (`lineStartRules`, replacing the editor's rules for the same starts — `REPLACED_LINE_START_RULES`):
   「- 」「* 」「+ 」 a list, 「1. 」 a numbered list (its number kept), 「[] 」「[ ] 」 a checklist (in a list item, that
   item; anywhere else a new checklist), 「```」 code at once, 「---」 a divider with the caret on the line after it;
-  「# 」〜 and 「> 」 are the editor's own. 「```」 / 「---」 only on a line with nothing else. Lists are made as the
+  「# 」〜 and 「> 」 are the editor's own. 「```」 / 「---」 only on a top-level line with nothing else (in a list item
+  or a quote they stay characters: the editor cannot hold a code block or divider made there). Lists are made as the
   reader makes them (`spread: false`, the item's kind): the editor's own made loose lists that were never written.
 - **Empty line hint**: the empty top-level line holding the caret gets `acb-empty-line` (a decoration, not the
   document); `index.css` shows 「「/」で形を選べます」 there while the document has the focus.
 - **Table bar** (`TableBar`, `role="toolbar"` 「表の操作」, over the table's top right while the caret is in it and
   no words are selected): ［行を足す］ (under the caret's row, each cell its column's alignment, the caret into it),
   ［列を足す］ (right of the caret's column, no alignment `---`, the caret into it), ［行を消す］ (never the header
-  row), ［列を消す］ (never the last column) — disabled where they do not apply (`InPlaceTable.can`).
+  row, nor the last row under it: the editor would only empty it), ［列を消す］ (never the last column) — disabled where they do not apply (`InPlaceTable.can`).
 - **Written back** (measured, as the demo): a 「/」 choice or a line start → the lines made only (a heading
   `## 議題`, a checklist `- [ ] …`, a table's four lines); a row → 1 line; a column → one cell on every line of
   the table (accepted, owner); words typed into a new cell → that cell (`| 商談 |  |`). How
@@ -531,12 +533,15 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   candidate, so a `-` list right above a `-` list is written `*` (two lists, as on screen).
 - Not built (owner): typeface, colour, a handle to drag lines (⋮⋮).
 - Tests: `markdownSplice.test.ts` (each 「/」 choice and line start written exactly, the file's bullet and divider,
-  the list beside a `-` list, a checklist item in a list, 「---」 before words; the list narrowed, closed by Esc;
-  the table bar's row / column / delete and words in the right cell; the header row and last column kept; a `----`
+  the list beside a `-` list, a checklist item in a list, 「---」 before words, 「```」 / 「---」 in a list item stay
+  characters; the list opened only by typing 「/」 (not on the file's 「/todo」), narrowed, closed by Esc;
+  the table bar's row / column / delete and words in the right cell; the header row, the last row and column kept; a `----`
   heading kept), `tests/ui/editor-block-tools.spec.ts` (real keys: the list, ↓ Enter, Esc then `list.back` and Enter
   a new line, every line start, the hint, the table bar) — mutation-checked: empty cells kept, the table patch
-  first, tight lists, the file's style, the region kept beside new blocks, the header row, the editor holding Enter,
-  the keys only while the list shows. `doc-frame-protocol.test.ts`: the list's keys stay an HTML document's.
+  first, tight lists, the file's style (and only on new lines), the region kept beside new blocks, the header row,
+  the last row, top-level 「```」 / 「---」, the list opened by typing, the editor holding Enter, the keys only while
+  the list shows. Known: inside a quote a new list / divider is written `*` / `***` (the file's way is not applied
+  after `>`; it reads back right). `doc-frame-protocol.test.ts`: the list's keys stay an HTML document's.
 - Bundle: the list and bar (~5 KB) are in the app's JS; the rest in the Milkdown chunk (372 KB of 430).
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)

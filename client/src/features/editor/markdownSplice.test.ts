@@ -567,23 +567,39 @@ test('a 「/」 choice is written as what was made: the new lines only, in the f
   }
 })
 
-test('the 「/」 list: narrowed by what is typed, closed by Esc for that text, only on a top-level line of its own', () => {
-  const { view } = open('# 題\n\n- 項目\n')
+test('the 「/」 list: opened by typing 「/」 on an empty line, narrowed, closed by Esc; a 「/todo」 line the file holds is text', () => {
+  const { view } = open('# 題\n\n/todo\n\n- 項目\n')
   newLine(view, '題')
   typeKeys(view, '/みだし')
   assert.deepEqual(blockMenuOf(view.state)?.choices, ['heading1', 'heading2', 'heading3'])
   typeKeys(view, 'x')
   assert.equal(blockMenuOf(view.state), null, 'nothing found: no list (Enter is a new line again)')
   view.dispatch(view.state.tr.delete(view.state.selection.from - 1, view.state.selection.from))
-  assert.ok(blockMenuOf(view.state))
+  assert.ok(blockMenuOf(view.state), 'a letter taken back: found again')
   closeBlockMenu(view)
   assert.equal(blockMenuOf(view.state), null, 'closed with Esc')
   view.dispatch(view.state.tr.delete(view.state.selection.from - 1, view.state.selection.from))
-  assert.deepEqual(blockMenuOf(view.state)?.choices, ['heading1', 'heading2', 'heading3'], 'typing on (here: a letter taken back) opens it again')
+  assert.equal(blockMenuOf(view.state), null, 'stays closed for that line')
+  // The file's own 「/todo」 line: the caret at its end opens nothing (its Enter is a new line, its words stay).
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, posAfter(view.state.doc, '/todo'))))
+  assert.equal(blockMenuOf(view.state), null, 'a 「/」 line not typed now')
   const item = posAfter(view.state.doc, '項目')
   view.dispatch(view.state.tr.insertText('/', item))
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, item + 1)))
   assert.equal(blockMenuOf(view.state), null, 'not after words, nor in a list item')
+})
+
+test('「```」 and 「---」 in a list item stay the characters typed (no code or divider where they cannot stand)', () => {
+  for (const start of ['```', '---']) {
+    const text = '- a\n- b\n'
+    const { spliced, view } = open(text)
+    const at = enterAfter(view, 'b')
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)))
+    typeKeys(view, `${start}NEW`)
+    assert.equal(view.state.doc.textContent, `ab${start}NEW`, start)
+    const written = saved(spliced, view, start)
+    assert.ok(written.startsWith('- a\n- b\n- ') && written.includes('NEW'), written)
+  }
 })
 
 test('the line starts become their block and write what was typed; a list next to a `-` list stays its own (`*`)', () => {
@@ -651,6 +667,7 @@ test('the table bar: a row is one line, a column one cell on each line, words ty
   {
     const { spliced, view } = open(MEETING)
     caretIn(view, '10月')
+    assert.equal(editTable(view, 'deleteRow'), false, 'the header row, even with rows under it')
     assert.ok(editTable(view, 'addColumn'))
     const text = saved(spliced, view)
     const rows = MEETING.split('\n').filter(l => l.startsWith('|')).length
@@ -662,11 +679,14 @@ test('the table bar: a row is one line, a column one cell on each line, words ty
     assert.equal(saved(spliced, view), MEETING)
   }
   {
-    // The header row is never deleted (a Markdown table needs it); the last column is not either.
+    // The header row is never deleted (a Markdown table needs it), nor the last row under it (the editor
+    // would only empty it), nor the last column.
     const { spliced, view } = open('| 一 |\n|---|\n| 二 |\n')
     caretIn(view, '一')
     assert.equal(editTable(view, 'deleteRow'), false)
     assert.equal(editTable(view, 'deleteColumn'), false)
+    caretIn(view, '二')
+    assert.equal(editTable(view, 'deleteRow'), false)
     assert.equal(saved(spliced, view), '| 一 |\n|---|\n| 二 |\n')
   }
 })
