@@ -56,7 +56,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `jobs.md` "The 4b-4 screens (PR6-A)"),
   `records-table` (recordsTable:page: 「記録の一覧」, one page of one kind through `/records/query`;
   `tasks-ui.md` "The records table (B4)"),
-  `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
+  `notifications` (notifications:watch / state / refresh / markRead / settings / setSetting and the event
   `notifications:changed`: the inbox and the title bar's ［受け箱］, `notifications.md`), `absences`
   (absences:get / add / remove: the member's own absences and delegate, with the session;
   `records.md` "Absence and the delegate"), `browser` (browser:sites / open / clearLogin and the event

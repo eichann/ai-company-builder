@@ -534,6 +534,27 @@ pressing each record's own action.
   (`useContacts`' `again`, from `useInboxSlot`) — only the failed ones are read, never on a timer, never per draw
   (`contactPress.test.ts` 「a first read that failed…」, `contact-card.spec.ts` 「…back online…」). No new count, kind or
   server call per list beyond these reads.
+- **A contact gone is no row at all** (Codex review after #940): the server already leaves a record the member can no
+  longer read out of `/me/notifications` (`notifications.md` "Read access is checked when read"), but the notices on
+  screen were read before — they still name its records with the title the server showed then. So a notice whose record
+  the store holds as `gone` (`rowContact` → `'gone'`, `inboxView`'s `ContactsOfRows`) makes **no row of any kind**:
+  not the contact's, and not the plain notice row it would fall back to (no 「見られなくなりました」 row either; only the
+  card that was open says 「この連絡は見つからないか、見られなくなりました。」 without a title). It counts nowhere and
+  「すべて確認した」 does not mark it; nothing is marked read for it. The store's `onGone` then asks main to read the
+  notices again now (IPC `notifications:refresh` → the watcher's `refreshNow`: the company on screen only; it answers the
+  state of a look **started after the ask** — a look already on its way runs once more first — and `NO_NOTICES` when no
+  such look got an answer: offline, an older server, signed out, another company). **What that read still names is the
+  server's to show** (independent review: a 返事のお願い the member still reads must not vanish for the session): each id
+  of the gone group that the answer lists is forgotten (`lift`; its notice's own row comes back with the server's title for
+  it — never through the contact's view), unless a newer read wrote that id since or the era or company changed; the ids it
+  does not list stay `gone`. A read that got no answer (`NO_NOTICES`: offline…) is asked once more at the store's next `want` (back
+  online, the panel shown again, a new notice; never on a timer). Nothing is read again for a lifted id (no loop: a new
+  notice about it reads it as usual).
+  Tests: `contactStore.test.ts` 「a contact gone after the notices were read…」, 「…asks for the notices again…」, 「the notices
+  read again after the 404…」, 「a read of the notices that did not happen…」, 「an older read of the notices landing after a second 404…」, 「the notices not read
+  again (offline) are asked once more…」; `client/tests/notifications.test.ts` 「「read
+  again now」…」 (only a look started after the ask, never what was kept, never another company); `contact-card.spec.ts`
+  「taken off the contact's 「この人たちだけ」…」 (新着 and 確認したもの, `#refreshes`) — mutation-checked.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
   one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
   and a read answered after a company change show nothing; the newest read wins), `contactStore.test.ts` (one id's 404 takes the whole contact's

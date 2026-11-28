@@ -229,6 +229,7 @@ contract.invoke minutes:skip
 contract.invoke minutes:skipReading
 contract.invoke minutes:watch
 contract.invoke notifications:markRead
+contract.invoke notifications:refresh
 contract.invoke notifications:setSetting
 contract.invoke notifications:settings
 contract.invoke notifications:state
@@ -654,6 +655,7 @@ contract.type ElectronAPI.reconcileJobOccurrence = reconcileJobOccurrence: Invok
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
 contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
+contract.type ElectronAPI.refreshNotifications = refreshNotifications: Invoke<'notifications:refresh'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
 contract.type ElectronAPI.registerBrowserPc = registerBrowserPc: Invoke<'browserDevice:register'>
 contract.type ElectronAPI.reloadDocView = reloadDocView: Invoke<'docView:reload'>
@@ -1083,6 +1085,7 @@ contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [compan
 contract.type IpcInvokeChannels.'minutes:skipReading' = 'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'notifications:markRead' = 'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+contract.type IpcInvokeChannels.'notifications:refresh' = 'notifications:refresh': { args: [companyId: string]; result: NoticesState }
 contract.type IpcInvokeChannels.'notifications:setSetting' = 'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
 contract.type IpcInvokeChannels.'notifications:settings' = 'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
 contract.type IpcInvokeChannels.'notifications:state' = 'notifications:state': { args: [companyId: string]; result: NoticesState }
@@ -1466,6 +1469,7 @@ main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:skipReading @ features/minutes/ipc.ts (companyId, meetingId, expectedVersion)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
 main.handle notifications:markRead @ features/notifications/ipc.ts (companyId, ids)
+main.handle notifications:refresh @ features/notifications/ipc.ts (companyId)
 main.handle notifications:setSetting @ features/notifications/ipc.ts (companyId, kind, on)
 main.handle notifications:settings @ features/notifications/ipc.ts (companyId)
 main.handle notifications:state @ features/notifications/ipc.ts (companyId)
@@ -2048,6 +2052,8 @@ preload reconcileTaskRun -> invoke tasks:reconcile($0, $1, $2, $3)
 preload reconcileTaskRun : (companyId: string, runId: string, key: string, done: boolean) => Promise<TaskWriteResult>
 preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, $3, $4)
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
+preload refreshNotifications -> invoke notifications:refresh($0)
+preload refreshNotifications : (companyId: string) => Promise<NoticesState>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
 preload registerBrowserPc -> invoke browserDevice:register($0, $1)

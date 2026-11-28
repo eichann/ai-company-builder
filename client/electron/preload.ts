@@ -262,6 +262,7 @@ const api: ElectronAPI = {
   retryAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:retry', companyId, recordId),
   watchNotifications: (companyId: string | null) => invoke('notifications:watch', companyId),
   getNotificationsState: (companyId: string) => invoke('notifications:state', companyId),
+  refreshNotifications: (companyId: string) => invoke('notifications:refresh', companyId),
   markNotificationsRead: (companyId: string, ids: string[] | 'all') => invoke('notifications:markRead', companyId, ids),
   getNotificationSettings: (companyId: string) => invoke('notifications:settings', companyId),
   setNotificationSetting: (companyId: string, kind: string, on: boolean) => invoke('notifications:setSetting', companyId, kind, on),
