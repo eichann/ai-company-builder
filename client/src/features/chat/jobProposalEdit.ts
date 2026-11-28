@@ -67,6 +67,18 @@ export function skillChoices(entries: ReadonlyArray<{ name: string; isDirectory:
   return [...new Set([current, ...entries.filter(e => e.isDirectory && isValidSkillName(e.name)).map(e => e.name)])].sort()
 }
 
+/**
+ * The input as the server will hold it (`proposalInputOf(proposalDefinition(i))`): the check's place joins the read places,
+ * and is left out of them again when it comes last — so the card sends, compares and words exactly what will come back
+ * (independent review of UX 段3 #13: choosing a read place as the check's place, or adding the check's place as a read one).
+ */
+export function normalizedInput(i: JobCandidateInput): JobCandidateInput {
+  const checkPath = i.check.kind === 'new_files' ? i.check.path : null
+  const paths = [...new Set([...i.reads, ...(checkPath ? [checkPath] : [])])]
+  const reads = checkPath && paths[paths.length - 1] === checkPath ? paths.slice(0, -1) : paths
+  return { ...i, reads }
+}
+
 /** One order of every field, so two inputs compare whatever order their keys came in. */
 export function inputKey(i: JobCandidateInput): string {
   const t = i.trigger

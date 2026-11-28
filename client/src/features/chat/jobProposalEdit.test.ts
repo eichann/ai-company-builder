@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { proposalDefinition, proposalInputOf, type JobCandidateInput } from '../../../../shared/core/job-proposals'
 import { parseJobDefinition, type JobDefinition } from '../../../../shared/core/jobs'
-import { atChoices, changeText, foldersOf, inputKey, placeChoices, sameInput, skillChoices, triggerWithEvery } from './jobProposalEdit'
+import { atChoices, changeText, foldersOf, inputKey, normalizedInput, placeChoices, sameInput, skillChoices, triggerWithEvery } from './jobProposalEdit'
 
 const INPUT: JobCandidateInput = {
   skill: 'weekly-report', trigger: { every: 'week', weekday: 'mon', at: '09:00', businessDaysBefore: 0 },
@@ -33,6 +33,21 @@ test('the input the card sends back is the one the server built the definition f
   const reordered: JobCandidateInput = { missed: { expiresAfterMinutes: missed.expiresAfterMinutes, policy: missed.policy }, ...rest }
   assert.equal(inputKey(reordered), inputKey(INPUT))
   assert.notEqual(inputKey({ ...INPUT, mailDrafts: true }), inputKey(INPUT))
+})
+
+test('what is sent is what will come back: a read place chosen as the check\'s place, or the check\'s place added as a read one', () => {
+  const pinned = { actingUser: 'u', procedure: { source: 'company_skill' as const, skill: 'weekly-report', fingerprint: 'c'.repeat(40) }, skillName: 'weekly-report', candidateId: 'jc.' + 'a'.repeat(32) }
+  const back = (i: JobCandidateInput) => proposalInputOf((parseJobDefinition(proposalDefinition(i, pinned)) as { definition: JobDefinition }).definition)!
+  for (const chosen of [
+    { ...INPUT, check: { kind: 'new_files' as const, path: '営業部/提案書' } },
+    { ...INPUT, reads: [...INPUT.reads, '営業部/訪問メモ'] },
+    { ...INPUT, reads: ['営業部/訪問メモ', '営業部/提案書'] },
+    INPUT,
+  ]) {
+    const sent = normalizedInput(chosen)
+    assert.ok(sameInput(back(sent), sent), JSON.stringify(chosen.reads))
+    assert.ok(sameInput(back(chosen), sent), 'the server answers the normalized input')
+  }
 })
 
 test('another 「毎日／毎週／毎月」 keeps the time and gives a shape the parser takes', () => {

@@ -2318,7 +2318,12 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     sender window is not checked, as for every `jobProposals:*` handler: only the app's own windows have the preload, and
     the card shows in the main window and in a consultation's own window alike. While the server checks: the chosen value
     shows, 「直した案をサーバーで確かめています…」 (`role="status"`, the card `aria-busy`), and **nothing else is offered**
-    (every press and value disabled — no 出す on content the server has not answered). Then the store takes the
+    (every press and value disabled — no 出す on content the server has not answered) **in any card of the candidate**: the
+    change in flight and the input sent are kept per candidate, not per card (`src/features/chat/jobProposalRevising.ts`,
+    `hooks/useJobProposalRevising.ts`; Codex review), so the chat's card and the tab's wait together. What is sent is
+    normalised first (`normalizedInput`: the check's place joins the read places and is left out again when last, exactly
+    as `proposalInputOf(proposalDefinition(…))` gives it back; independent review), so the words and the comparison are of
+    what will come back; ＋足す does not offer the check's own place. Then the store takes the
     server's rebuilt candidate as the member's act (`putJobProposal`: a read on its way never puts the old one back) and
     the card says 「直した案をサーバーで確かめました。出すのはこの案です（曜日：月曜 → 火曜）」 (`changeText`). **Refused** →
     the card shows the server's content again (the change goes back) and says why in the app's fixed words
@@ -2327,7 +2332,7 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     must not be added by the screen) —, `JOB_SKILL_MISSING`, `JOB_SKILL_NOT_HERE`, `JOB_VERSION_FINGERPRINT` (changed
     elsewhere: read again, choose again), `JOB_CANDIDATE_NOT_REVISABLE`; `JOB_REVISE_READ_AGAIN_CODES` read the candidate
     again. An answer that never came: the card reads the candidate again by itself (the unknown-answer path above) and
-    judges by whether it now holds what was sent (`sameInput`). **What is offered** (never sent; the server decides):
+    judges by whether it now holds what was sent (`sameInput` against the input kept per candidate, so a card shown again or the tab judges the same). **What is offered** (never sent; the server decides):
     the departments (`api:getDepartments`) and, in a company with the shared folder, the folders on this computer three
     levels deep (`readDirectoryTree`; not downloaded ones are not there) and the company Skills' folder names
     (`.claude/skills/*`, `isValidSkillName`), read once when the member first opens a place or Skill list; every place
@@ -2352,7 +2357,7 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     candidate not taken, no place in a refusal), `tests/job-proposal-tools.test.ts` (only the session module names the route
     and registers the IPC, only the card calls it), `tests/ui/job-proposal-card.spec.ts` (`job-proposal-card-ui.html`:
     changed in place and 出す sends the new fingerprint; while checking nothing can be pressed; a refused place goes back
-    and names no place; 出す on content changed elsewhere is refused and read again; the folded notes; the tab).
+    and names no place; 出す on content changed elsewhere is refused and read again; the folded notes; the tab; a change from the chat's card holds the tab's card too; a lost answer judged by reading the candidate). `jobProposalEdit.test.ts` also: what is sent is what comes back (`normalizedInput`).
   - **The submit is the member's press only**: the handler (`client/electron/features/jobs/proposals.ts`, session cookies) is
     registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
     card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it — and, since 4b-4 PR6b, 「定期の仕事」's

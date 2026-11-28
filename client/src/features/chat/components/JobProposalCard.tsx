@@ -11,8 +11,10 @@ import {
   jobProposalCardState, jobProposalStateLine, jobProposalStateWord, type JobCandidateResult, type JobProposalCardRef,
 } from '../../../../shared/job-proposals'
 import { discardJobCandidate, reviseJobCandidate, submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
-import { changeText, sameInput } from '../jobProposalEdit'
+import { changeText, normalizedInput, sameInput } from '../jobProposalEdit'
 import { useJobProposalChoices } from '../hooks/useJobProposalChoices'
+import { useJobProposalRevising } from '../hooks/useJobProposalRevising'
+import { revisingOf, revisionAnswered, startRevision } from '../jobProposalRevising'
 import { JobProposalEditRows } from './JobProposalEditRows'
 import { putJobProposal, readJobCandidateNow, reloadJobCandidate } from '../../../shared/lib/jobProposalStore'
 import { useJobProposal } from '../hooks/useJobProposal'
@@ -55,10 +57,9 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port, onOpe
   const [busy, setBusy] = useState(false)
   const [declined, setDeclined] = useState(false)
   const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
-  // A change sent and not answered yet: shown in place while the server checks it; nothing else is offered meanwhile.
-  const [checking, setChecking] = useState<JobCandidateInput | null>(null)
-  // The last change sent: what a read after an answer that never came is compared with.
-  const [sentChange, setSentChange] = useState<JobCandidateInput | null>(null)
+  // A change sent and not answered yet, from this card or another of the candidate (the tab): shown in place while the
+  // server checks it, and no card offers anything meanwhile.
+  const { checking } = useJobProposalRevising(key)
   const { choices, load: loadChoices } = useJobProposalChoices(card.companyId)
   const callbacks = useLatestRef({ onOpenLarge })
   const state = jobProposalCardState(result)
@@ -77,7 +78,8 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port, onOpe
     if (!r || !r.success) return null
     if (kind !== 'revise') return PRESS_DONE[kind](r) ? 'done' : 'not-done'
     const now = r.candidate ? proposalInputOf(r.candidate.definition) : null
-    return now && sentChange && sameInput(now, sentChange) ? 'done' : 'not-done'
+    const sent = revisingOf(key).sent
+    return now && sent && sameInput(now, sent) ? 'done' : 'not-done'
   }
   /** After an unknown answer: read again by itself; done → the card shows the state, not done → press again. */
   const settle = async (kind: PressKind, how: 'start' | 'checkNow') => {
@@ -91,11 +93,11 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port, onOpe
    * 「その場で直す」: the whole input with the fingerprint shown; the server rebuilds and checks it (the same id). Refused → the
    * card shows the server's content again (the change goes back) and says why in fixed words naming no place.
    */
-  const revise = async (next: JobCandidateInput) => {
+  const revise = async (chosen: JobCandidateInput) => {
+    const next = normalizedInput(chosen)
     if (locked || state.kind !== 'candidate' || !shownInput || sameInput(shownInput, next)) return
     const before = shownInput
-    setChecking(next)
-    setSentChange(next)
+    if (!startRevision(key, next)) return
     setMessage(null)
     try {
       const r = await (port ? reviseJobCandidate(card.companyId, state.candidate.id, state.candidate.fingerprint, next, port)
@@ -109,7 +111,8 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port, onOpe
       setMessage({ tone: 'warn', text: r.error })
       if (r.code && JOB_REVISE_READ_AGAIN_CODES.includes(r.code)) readAgain()
     } finally {
-      setChecking(null)
+      // An unknown answer is judged by reading the candidate: the unknown-answer lock (per candidate) holds the cards meanwhile.
+      revisionAnswered(key)
     }
   }
 

@@ -42,6 +42,30 @@ test('while the server checks a change, it shows so and nothing can be sent', as
   await expect(card.getByRole('button', { name: 'これで管理者に出す' })).toBeEnabled()
 })
 
+test('while a change from the chat\'s card is checked, the tab\'s card of the same candidate offers nothing either', async ({ page }) => {
+  await page.goto(`${PAGE}?hold=1`)
+  await chatCard(page).getByRole('button', { name: '大きく開く（タブ）' }).click()
+  const tabCard = page.getByRole('region', { name: 'タブ' }).getByRole('group', { name: '定期の仕事の案' })
+  await expect(tabCard.getByRole('button', { name: 'これで管理者に出す' })).toBeEnabled()
+  await chatCard(page).getByRole('button', { name: '曜日を直す' }).click()
+  await chatCard(page).getByRole('combobox', { name: '曜日' }).selectOption({ label: '水曜' })
+  await expect(tabCard.getByRole('button', { name: 'これで管理者に出す' })).toBeDisabled()
+  await expect(tabCard.getByRole('button', { name: '曜日を直す' })).toHaveText('水曜')
+  await page.evaluate(() => (window as unknown as { __acbRelease: () => void }).__acbRelease())
+  await expect(tabCard.getByText('定期の仕事の案：weekly-report（毎週水曜 09:00）')).toBeVisible()
+  await expect(tabCard.getByRole('button', { name: 'これで管理者に出す' })).toBeEnabled()
+})
+
+test('a change whose answer was lost is judged by reading the candidate: made → said so, never 「まだ直っていません」', async ({ page }) => {
+  await page.goto(`${PAGE}?lost=1`)
+  const card = chatCard(page)
+  await card.getByRole('button', { name: '曜日を直す' }).click()
+  await card.getByRole('combobox', { name: '曜日' }).selectOption({ label: '木曜' })
+  await expect(card.getByText('定期の仕事の案：weekly-report（毎週木曜 09:00）')).toBeVisible()
+  await expect(card.getByText('直した案をサーバーで確かめました。出すのはこの案です。')).toBeVisible()
+  await expect(card.getByText(/まだ直っていません/)).toHaveCount(0)
+})
+
 test('a place the server refuses goes back, and the card names no place in its reason', async ({ page }) => {
   await page.goto(PAGE)
   const card = chatCard(page)

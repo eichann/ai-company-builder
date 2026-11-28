@@ -3,6 +3,7 @@
 // the real AssistantMessageParts with a `data-job-proposal` reference, the preload API faked as the server would answer.
 // Fictional data only. What the page offers the spec:
 //   ?hold=1                     a change's answer waits until `window.__acbRelease()` (the 「確かめています」 state)
+//   ?lost=1                     a change is made on the server, its answer lost
 //   window.__acbChangeElsewhere()  the server's candidate is changed by someone else's card (the card still shows the old one)
 //   `#revised`                  every change sent (its fingerprint and the input), `#submitted` every 出す's fingerprint
 //   `#tab`                      ［大きく開く（タブ）］ opens the same card here, as AppShell's tab does
@@ -57,6 +58,8 @@ installElectronAPI({
     const places = [...input.reads, ...(input.check.kind === 'new_files' ? [input.check.path] : []), ...(input.deliverable ? [input.deliverable] : [])]
     if (places.includes(REFUSED_PLACE)) return { success: false, offline: false, code: 'JOB_CANDIDATE_PLACE', error: jobReviseRefusalText('JOB_CANDIDATE_PLACE') }
     server = { definition: build(input), fingerprint: fingerprintOf(++serial) }
+    // `?lost=1`: the change is made on the server but its answer never arrives (offline / a 5xx).
+    if (params.get('lost') === '1') return { success: false, offline: true, code: null, error: 'サーバーに接続できません。' }
     return { success: true, candidate: view() }
   },
   submitJobProposal: async (_company, _id, fingerprint) => {

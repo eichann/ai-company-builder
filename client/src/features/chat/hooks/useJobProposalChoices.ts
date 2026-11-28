@@ -18,9 +18,10 @@ export function useJobProposalChoices(companyId: string) {
   const asked = useRef(false)
   const load = useCallback(() => {
     if (asked.current) return
-    asked.current = true
-    setChoices('loading')
     const root = company?.id === companyId ? company.rootPath : null
+    // Not known yet (the window's company not loaded): asked again at the next opening.
+    asked.current = root !== null
+    setChoices('loading')
     const shared = root !== null && companyHasSharedFolder(company)
     void Promise.all([
       getDepartments(companyId).then(r => (r.success && r.data ? r.data.filter(d => d.isActive).map(d => d.folder) : [])).catch(() => [] as string[]),

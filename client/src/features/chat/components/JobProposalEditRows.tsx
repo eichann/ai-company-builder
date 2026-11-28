@@ -113,7 +113,7 @@ export function JobProposalEditRows({ input, skillChangeable, timeZone, disabled
         {input.reads.length === 0 && <span className="text-text-muted">なし</span>}
         {input.reads.length < 10 && (
           <InlineChoice label="足す読む場所" value="" shown={<span className="inline-flex items-center gap-0.5 font-normal text-link"><Plus size={11} aria-hidden />足す</span>} {...common}
-            choices={(() => { const p = places(null); return p === 'loading' ? p : [{ value: '', label: '選んでください' }, ...p.filter(c => !input.reads.includes(c.value))] })()}
+            choices={(() => { const p = places(null); return p === 'loading' ? p : [{ value: '', label: '選んでください' }, ...p.filter(c => !input.reads.includes(c.value) && !(input.check.kind === 'new_files' && input.check.path === c.value))] })()}
             onChoose={v => { if (v) set({ reads: [...input.reads, v] }) }} />
         )}
       </Row>
