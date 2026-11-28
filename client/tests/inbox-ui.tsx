@@ -5,6 +5,7 @@
 // the request through `getApproval`). What was opened shows in `#opened`, the ids marked read in
 // `#read`, an approval or a send that reached main in `#acted` (a row must never get there by itself).
 // `window.__acbInbox.approvedElsewhere()`: another PC approved the request — main reads again without it.
+// `window.__acbInbox.leaveCompany()`: the company era ends (another company opened), as appStore does.
 // `?theme=dark` for dark mode; `?offline=1`: marking read cannot reach the server. Synthetic data only.
 // `?plans=1`: 「ブラウザ操作」 is switched on — the slot gets the plans' list and the real plan card (a draft and a
 // run nobody knows the result of); `?plans=off`: switched off (no list handed in, as AppShell does). Every
@@ -35,6 +36,7 @@ import type { ApprovalView } from '../../shared/types/approvals'
 import type { ContactFinishAnswer, ContactFinishRequest, ContactUndoAnswer, ContactUndoRequest, ContactView } from '../shared/contact-card'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { useKeybindings } from '../src/shared/commands/commands'
+import { endCompanyEra } from '../src/shared/lib/companyEra'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -301,6 +303,10 @@ Object.assign(window, {
       approved = true
       state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total - 1, items: state.myTurn.items.filter(i => i.type !== 'approval') } }
       changed.emit({ companyId: 'co-preview' })
+    },
+    /** Another company opened (or a sign-out): what was started before answers into an era that has ended. */
+    leaveCompany() {
+      endCompanyEra()
     },
     /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
     planApprovedElsewhere() {

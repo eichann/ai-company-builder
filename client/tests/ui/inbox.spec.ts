@@ -327,6 +327,20 @@ test('a press answered after the member opened another card changes nothing on s
   await expect(page.locator('[data-work-notice]')).toHaveCount(0)
 })
 
+test('an approval answered after the company changed moves nothing: no next row, no line (the card answers into its own era)', async ({ page }) => {
+  await openPreview(page, 'inbox', { approvals: '2', slow: '1' })
+  await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
+  const card = beside(page, '承認のお願い')
+  await card.getByRole('button', { name: '承認する', exact: true }).click()
+  await page.evaluate(() => (window as unknown as { __acbInbox: { leaveCompany: () => void } }).__acbInbox.leaveCompany())
+  await expect(page.locator('#acted')).toHaveText('approve approval-more0001')
+  // The answer has come (the card shows that request's answer) — and the list did not move on in the next company's era.
+  await expect(card.getByRole('group', { name: '承認のお願い' })).toHaveAttribute('data-state', 'approved')
+  await expect(card).not.toContainText('値引きの承認 2')
+  await expect(page.locator('[data-work-notice]')).toHaveCount(0)
+  await expect(page.locator('[data-inbox-row="record:approval-more0002"]')).not.toHaveAttribute('data-inbox-current', '')
+})
+
 test('an approval whose outside write failed stays on its card (never 「片づけました」): the member reads what happened', async ({ page }) => {
   await openPreview(page, 'inbox', { approvals: '2', failed: '1' })
   await page.locator('[data-inbox-row="record:approval-more0001"]').getByRole('button', { name: '承認する…' }).click()
