@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
+import { EDITOR_SELECTION } from '../src/app/editorSelection'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { useKeybindings } from '../src/shared/commands/commands'
@@ -74,7 +75,7 @@ export function Preview() {
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="bg-amber-50 px-4 py-2 text-xs text-amber-900">表示確認用の人工データです。</div>
       <div style={{ height: 'calc(100vh - 32px)', width: '100%' }}>
-        <TabbedEditorPanel openFiles={[DOC]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} />
+        <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={[DOC]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} />
       </div>
     </main>
   )

@@ -322,10 +322,8 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
   'editor -> doc-review/components/CompletedReviewBanner.tsx': PREVIEW_REVIEW,
   'editor -> doc-review/components/ReviewHistoryDropdown.tsx': PREVIEW_REVIEW,
   'editor -> doc-review/components/ReviewSidePanel.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/CommentPopover.tsx': PREVIEW_REVIEW,
   'editor -> doc-review/components/MarkdownDiffView.tsx': 'the preview and the editor\'s 「差分を見る」 show the snapshot diff of a reviewed document',
   'editor -> doc-review/hooks/useMarkdownReview.ts': `${PREVIEW_REVIEW} (useEditorReview)`,
-  'editor -> doc-review/hooks/useTextSelection.ts': 'a comment starts from the text selected in the preview (useEditorReview)',
   'editor -> doc-review/model.ts': 'the open document\'s review is marked seen (markReviewSeen, a pure function)',
   'files -> doc-review/model.ts':
     'the tree hides review sidecars and marks documents with reviews (pure functions: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',

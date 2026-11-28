@@ -1,10 +1,23 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Callout, Button } from '../../../shared/ui/primitives'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import { useCommandHandler } from '../../../shared/commands/commands'
+import { isMacControlKey, type KeyInput } from '../../../../shared/commands/define'
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
 import { previewFrontmatter } from '../markdownFrontmatter'
-import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceRefusal, type InPlaceSurface } from '../inPlaceEditing'
+import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceMark, type InPlaceRefusal, type InPlaceSelection, type InPlaceSurface, type TextSize } from '../inPlaceEditing'
+import type { CommentBoxProps } from '../selectionSlot'
+import type { CommentSeverity } from '../../doc-review/model'
 import { FrontmatterNote, MarkdownPreview, PreviewSearchBar } from './MarkdownPreview'
+import { SelectionBubble, type BubbleMode } from './SelectionBubble'
+
+const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
+
+/** ［コメント］ on the selected words: the review's comment box (from app/) and where the comment goes (the editor's review). */
+export interface InPlaceComment {
+  box: (props: CommentBoxProps) => ReactNode
+  add: (selectedText: string, body: string, severity: CommentSeverity) => Promise<boolean>
+}
 
 interface Props {
   paneId: string
@@ -15,6 +28,7 @@ interface Props {
   onShowSource: () => void
   previewRef: React.MutableRefObject<HTMLDivElement | null>
   initialScrollRatio: number | undefined
+  comment?: InPlaceComment
 }
 
 /**
@@ -34,7 +48,7 @@ export function InPlaceMarkdownEditor(props: Props) {
   return <Surface key={held.opening} {...props} onChange={changed} />
 }
 
-function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef, initialScrollRatio }: Props) {
+function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef, initialScrollRatio, comment }: Props) {
   const [state, setState] = useState<'opening' | 'open' | InPlaceRefusal>('opening')
   const [takenBack, setTakenBack] = useState(false)
   // Opened once with the text of its first render; a later outside change mounts a new Surface.
@@ -42,6 +56,14 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   const latestChange = useLatestRef(onChange)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const surfaceRef = useRef<InPlaceSurface | null>(null)
+  // Stops an editor still loading when its host goes.
+  const cancelRef = useRef(() => {})
+  // The bubble: the words selected and what it shows. A box that takes the focus (the link's address,
+  // the comment) keeps the words it was opened for while the document has no selection.
+  const [bubble, setBubble] = useState<{ selection: InPlaceSelection; mode: BubbleMode } | null>(null)
+  const onSelection = useCallback((selection: InPlaceSelection | null) => {
+    setBubble(b => (selection ? { selection, mode: b?.mode === 'size' ? 'size' : 'tools' } : b && (b.mode === 'link' || b.mode === 'comment') ? b : null))
+  }, [])
   const folder = filePath.substring(0, filePath.lastIndexOf('/'))
   // Read when the editor is made: the host callback must stay the same, or the editor is made again.
   const startAt = useLatestRef({ folder, initialScrollRatio })
@@ -49,14 +71,15 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
 
   // The editor is a widget outside React: made when its host appears, destroyed when it goes.
   const host = useCallback((el: HTMLDivElement | null) => {
-    if (!el) { surfaceRef.current?.destroy(); surfaceRef.current = null; return }
+    if (!el) { cancelRef.current(); surfaceRef.current?.destroy(); surfaceRef.current = null; return }
     let gone = false
-    surfaceRef.current = { destroy: () => { gone = true }, focus: () => {} }
+    cancelRef.current = () => { gone = true }
     void loadInPlaceEngine()
       .then(engine => engine.open(el, opened, {
         folder: startAt.current.folder,
         onChange: text => latestChange.current(text),
         onChangeTakenBack: () => setTakenBack(true),
+        onSelection,
       }))
       .then(result => {
         if (gone) { if (result.ok) result.surface.destroy(); return }
@@ -70,7 +93,31 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         }
       })
       .catch(() => { if (!gone) setState('unavailable') })
-  }, [opened, latestChange, startAt])
+  }, [opened, latestChange, startAt, onSelection])
+
+  // The bubble's keys (command catalog, editor area): only while the focus is in this document, else
+  // the key is the app's (⌘B the left column, ⌘K 探す).
+  // On a Mac, Ctrl+letter is the text's own movement (Ctrl+B back, Ctrl+E line end): only ⌘ is the shortcut.
+  const inDocument = (input: KeyInput) => !!surfaceRef.current?.hasFocus() && !isMacControlKey(input, IS_MAC)
+  const withSelection = (input: KeyInput) => inDocument(input) && bubble !== null
+  const mark = (m: InPlaceMark) => () => surfaceRef.current?.toggleMark(m)
+  const size = (z: TextSize) => () => surfaceRef.current?.setSize(z)
+  const keys = { target: paneId, acceptsKey: inDocument }
+  useCommandHandler('editor.toggleBold', mark('strong'), keys)
+  useCommandHandler('editor.toggleItalic', mark('emphasis'), keys)
+  useCommandHandler('editor.toggleStrike', mark('strike'), keys)
+  useCommandHandler('editor.toggleCode', mark('code'), keys)
+  useCommandHandler('editor.editLink', () => {
+    if (!bubble) return
+    if (bubble.selection.link) surfaceRef.current?.setLink(null)
+    else setBubble({ ...bubble, mode: 'link' })
+  }, { target: paneId, acceptsKey: withSelection })
+  useCommandHandler('editor.setBodyText', size(0), keys)
+  useCommandHandler('editor.setHeadingOne', size(1), keys)
+  useCommandHandler('editor.setHeadingTwo', size(2), keys)
+  useCommandHandler('editor.setHeadingThree', size(3), keys)
+
+  const closeBox = () => { setBubble(null); surfaceRef.current?.focus() }
 
   // ⌘F reads the file's information box and the editor's text (only highlights: nothing is put into
   // the editor's DOM); it lives only while the document is edited here (a refusal's reading view has its own).
@@ -85,8 +132,10 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
     return (
       <div className="h-full flex flex-col">
         <div className="px-8 pt-4">
-          <Callout tone="info" action={<Button size="sm" onClick={onShowSource}>もとの書き方で直す</Button>}>
-            {IN_PLACE_REFUSAL_TEXT[state]}
+          {/* Buttons under the words: beside them a narrow column left the words one character wide. */}
+          <Callout tone="info">
+            <p>{IN_PLACE_REFUSAL_TEXT[state]}</p>
+            <div className="mt-2"><Button size="sm" onClick={onShowSource}>もとの書き方で直す</Button></div>
           </Callout>
         </div>
         <div className="flex-1 min-h-0">
@@ -100,12 +149,12 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
       <InPlaceFind scrollRef={scrollRef} bodyRef={bodyRef} content={content} paneId={paneId} />
       {takenBack && (
         <div className="max-w-3xl mx-auto mb-4">
-          <Callout
-            tone="warning"
-            role="status"
-            action={<div className="flex gap-2"><Button size="sm" onClick={onShowSource}>もとの書き方で直す</Button><Button size="sm" variant="ghost" onClick={() => setTakenBack(false)}>閉じる</Button></div>}
-          >
-            いまの直しは、ファイルにそのまま書き戻せないため元に戻しました。この直しは［もとの書き方で直す］でしてください。
+          <Callout tone="warning" role="status">
+            <p>いまの直しは、ファイルにそのまま書き戻せないため元に戻しました。この直しは［もとの書き方で直す］でしてください。</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" onClick={onShowSource}>もとの書き方で直す</Button>
+              <Button size="sm" variant="ghost" onClick={() => setTakenBack(false)}>閉じる</Button>
+            </div>
           </Callout>
         </div>
       )}
@@ -113,6 +162,26 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         <FrontmatterNote info={front.info} />
         <div ref={host} className={state === 'opening' ? 'invisible' : undefined} aria-label="文章（その場で直せます）" />
       </div>
+      {bubble && state === 'open' && (bubble.mode === 'comment' && comment ? comment.box({
+        position: { x: Math.min(bubble.selection.box.left, window.innerWidth - 300), y: bubble.selection.box.bottom },
+        selectedText: bubble.selection.text.trim(),
+        onSubmit: async (body, severity) => {
+          const saved = await comment.add(bubble.selection.text.trim(), body, severity)
+          if (saved) closeBox()
+          return saved
+        },
+        onClose: closeBox,
+      }) : (
+        <SelectionBubble
+          selection={bubble.selection}
+          mode={bubble.mode}
+          onMode={m => { setBubble(b => b && { ...b, mode: m }); if (m === 'tools') surfaceRef.current?.focus() }}
+          onMark={m => surfaceRef.current?.toggleMark(m)}
+          onSize={z => surfaceRef.current?.setSize(z)}
+          onLink={href => surfaceRef.current?.setLink(href)}
+          canComment={!!comment}
+        />
+      ))}
     </div>
   )
 }

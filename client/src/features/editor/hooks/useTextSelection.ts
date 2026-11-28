@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { findTextInMarkdown, type CommentSeverity } from '../model'
+import { findTextInMarkdown, type CommentSeverity } from '../../doc-review/model'
 
 export function useTextSelection(
   isReviewing: boolean,

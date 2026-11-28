@@ -14,7 +14,11 @@ import type { EditorView } from '@milkdown/prose/view'
 import { localFileUrl } from '../../../shared/local-file-url'
 import { fileVersions } from '../../shared/lib/fileVersions'
 import { SplicedDocument, type MarkdownCodec, type SourceBlock } from './markdownSplice'
+import { strongKeymap, emphasisKeymap, inlineCodeKeymap, headingKeymap, paragraphKeymap } from '@milkdown/preset-commonmark'
+import { strikethroughKeymap } from '@milkdown/preset-gfm'
+import { TextSelection } from '@milkdown/prose/state'
 import type { InPlaceEngine, InPlaceOptions, InPlaceRefusal } from './inPlaceEditing'
+import { selectionOf, setInPlaceLink, setInPlaceSize, toggleInPlaceMark } from './milkdownFormat'
 
 interface MdNode { type: string; value?: unknown; alt?: unknown; children?: MdNode[]; position?: { start: { offset?: number }; end: { offset?: number } } }
 
@@ -100,10 +104,22 @@ export const milkdownEngine: InPlaceEngine = {
     let shownDoc: PMNode | null = null
     let lastText = text
     let destroyed = false
+    // The selection as last shown: a box for a link's address takes the focus, the change still applies to it.
+    let lastRange: { from: number; to: number } | null = null
+    let lastReported: string | null = null
+    const reportSelection = (view: EditorView) => {
+      const shown = view.hasFocus() ? selectionOf(view) : null
+      if (shown) lastRange = { from: view.state.selection.from, to: view.state.selection.to }
+      const key = JSON.stringify(shown)
+      if (key === lastReported) return
+      lastReported = key
+      options.onSelection(shown)
+    }
     const tracker = $prose(() => new Plugin({
       key: trackerKey,
       view: () => ({
         update(view) {
+          if (spliced) reportSelection(view)
           const doc = view.state.doc
           if (!spliced || !shownDoc || doc === shownDoc) return
           // A write that throws (the editor's writer meeting a shape it cannot write) is not writable either.
@@ -134,6 +150,14 @@ export const milkdownEngine: InPlaceEngine = {
     let made: Awaited<ReturnType<typeof makeMilkdown>>
     try {
       made = await makeMilkdown(host, ctx => {
+        // The bubble's keys are the app's commands (shortcuts in the command catalog): Milkdown's own
+        // for the same operations are off, or a key would act twice.
+        ctx.set(strongKeymap.key, { ToggleBold: { shortcuts: [] } })
+        ctx.set(emphasisKeymap.key, { ToggleEmphasis: { shortcuts: [] } })
+        ctx.set(inlineCodeKeymap.key, { ToggleInlineCode: { shortcuts: [] } })
+        ctx.set(strikethroughKeymap.key, { ToggleStrikethrough: { shortcuts: [] } })
+        ctx.set(paragraphKeymap.key, { TurnIntoText: { shortcuts: [] } })
+        ctx.update(headingKeymap.key, prev => ({ ...prev, TurnIntoH1: { shortcuts: [] }, TurnIntoH2: { shortcuts: [] }, TurnIntoH3: { shortcuts: [] } }))
         ctx.update(editorViewOptionsCtx, prev => ({
           ...prev,
           attributes: { class: 'markdown-body acb-in-place', spellcheck: 'false' },
@@ -141,6 +165,8 @@ export const milkdownEngine: InPlaceEngine = {
             image: (node: PMNode) => imageView(node, options.folder),
           },
           handleDOMEvents: {
+            focus: (v: EditorView) => { if (spliced) reportSelection(v); return false },
+            blur: (v: EditorView) => { if (spliced) queueMicrotask(() => { if (!v.isDestroyed) reportSelection(v) }); return false },
             // ⌘-click opens a web link in the browser (a plain click places the caret).
             click: (_view: EditorView, e: MouseEvent) => {
               if (!(e.metaKey || e.ctrlKey)) return false
@@ -179,6 +205,16 @@ export const milkdownEngine: InPlaceEngine = {
       surface: {
         destroy: () => { destroyed = true; void made.destroy() },
         focus: () => { if (!view.isDestroyed) view.focus() },
+        hasFocus: () => !view.isDestroyed && view.hasFocus(),
+        toggleMark: mark => { if (!view.isDestroyed) toggleInPlaceMark(view, mark) },
+        setLink: href => {
+          if (view.isDestroyed) return
+          if (!view.hasFocus() && lastRange && lastRange.to <= view.state.doc.content.size) {
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, lastRange.from, lastRange.to)))
+          }
+          setInPlaceLink(view, href)
+        },
+        setSize: size => { if (!view.isDestroyed) setInPlaceSize(view, size) },
       },
     }
   },

@@ -18,6 +18,7 @@ import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, Rea
 import { ExternalCompareView } from './ExternalCompareView'
 import { LocalImage, PdfPreview, VideoPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
+import type { SelectionSlot } from '../selectionSlot'
 import { HtmlDocumentPane } from './HtmlDocumentPane'
 import { HtmlSourceBar } from './HtmlViewToggle'
 
@@ -55,6 +56,8 @@ interface TabbedEditorPanelProps {
   notice?: ReactNode
   /** A Markdown document is read and edited in the same view; without it the preview reads only (the source edits). */
   inPlaceEditing?: boolean
+  /** What the screen plugs into the selected words (the review's comment box: selectionSlot.ts). */
+  selection?: SelectionSlot
 }
 
 export function TabbedEditorPanel({
@@ -79,6 +82,7 @@ export function TabbedEditorPanel({
   tabsEnd,
   notice: topNotice,
   inPlaceEditing = false,
+  selection,
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
@@ -276,6 +280,7 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isHtmlFile(activeFilePath) && !htmlSources.has(activeFilePath) ? (
           // One view per file and per showing: another tab or 中身 closes it (its scripts stop).
           <HtmlDocumentPane
+            commentBox={selection?.commentBox}
             key={`${companyId ?? ''}\n${activeFilePath}`}
             filePath={activeFilePath}
             onShowSource={() => showHtmlSource(activeFilePath, true)}
@@ -303,6 +308,7 @@ export function TabbedEditorPanel({
           <VideoPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
+            commentBox={selection?.commentBox}
             // One preview per file: it restores that file's scroll position when mounted.
             key={activeFilePath}
             paneId={paneId}
@@ -343,14 +349,14 @@ export function TabbedEditorPanel({
               <div className="absolute top-3 right-3 flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
                 <button
                   className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                  title="エディタ"
+                  title="もとの書き方"
                 >
                   <Code size={12} />
                 </button>
                 <button
                   onClick={() => handleSetMdViewMode('preview')}
                   className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
-                  title="プレビュー"
+                  title="文章"
                 >
                   <Eye size={12} />
                 </button>

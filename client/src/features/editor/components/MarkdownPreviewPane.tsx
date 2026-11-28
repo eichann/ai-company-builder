@@ -5,11 +5,12 @@ import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
 import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
 import { ReviewHistoryDropdown } from '../../doc-review/components/ReviewHistoryDropdown'
 import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
-import { CommentPopover } from '../../doc-review/components/CommentPopover'
 import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
 import { MarkdownPreview } from './MarkdownPreview'
 import { InPlaceMarkdownEditor } from './InPlaceMarkdownEditor'
+import { findTextInMarkdown } from '../../doc-review/model'
+import type { SelectionSlot } from '../selectionSlot'
 import { Callout } from '../../../shared/ui/primitives'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
@@ -28,11 +29,13 @@ interface Props {
   onEdit: () => void
   /** Edit the document right here (files-and-editor.md "Editing a document in place"); absent: read only. */
   inPlace?: { onChange: (text: string) => void } | null
+  /** The review's comment box, handed in by the screen (selectionSlot.ts): ［コメント］ and a review's selection. */
+  commentBox?: SelectionSlot['commentBox']
 }
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace,
+  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
   // A review being made or read shows the document as it reads (its quotes are marked in the text).
@@ -85,6 +88,14 @@ export function MarkdownPreviewPane({
               onShowSource={onShowEditor}
               previewRef={previewRef}
               initialScrollRatio={initialScrollRatio}
+              comment={commentBox ? {
+                box: commentBox,
+                // Into the member's own review (a new one when none is in progress); the quote is found in the tab's text.
+                add: (text, body, severity) => {
+                  const at = findTextInMarkdown(content, text)
+                  return review.commentAsReviewer(text, at?.start ?? 0, at?.end ?? 0, body, severity)
+                },
+              } : undefined}
             />
           ) : (
           <MarkdownPreview
@@ -128,13 +139,13 @@ export function MarkdownPreviewPane({
               <button
                 onClick={onShowEditor}
                 className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
-                title="エディタ"
+                title="もとの書き方"
               >
                 <Code size={12} />
               </button>
               <button
                 className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                title="プレビュー"
+                title="文章"
               >
                 <Eye size={12} />
               </button>
@@ -150,14 +161,12 @@ export function MarkdownPreviewPane({
               編集
             </button>
           )}
-          {textSelection.popover && (
-            <CommentPopover
-              position={{ x: textSelection.popover.x, y: textSelection.popover.y }}
-              selectedText={textSelection.popover.text}
-              onSubmit={textSelection.handleSubmitComment}
-              onClose={textSelection.closePopover}
-            />
-          )}
+          {textSelection.popover && commentBox?.({
+            position: { x: textSelection.popover.x, y: textSelection.popover.y },
+            selectedText: textSelection.popover.text,
+            onSubmit: textSelection.handleSubmitComment,
+            onClose: textSelection.closePopover,
+          })}
         </div>
         {(review.isReviewing || review.isViewingCompleted) && review.activeReview && (
           <ReviewSidePanel

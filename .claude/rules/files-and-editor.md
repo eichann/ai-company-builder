@@ -44,6 +44,7 @@ paths:
   - "client/tests/company-watcher.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
+  - "client/src/app/editorSelection.ts"
   - "client/scripts/check-bundle-size.mjs"
   - "client/tests/doc-review-ui.*"
   - "client/tests/file-tree-ui.*"
@@ -408,7 +409,9 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   **and** the blocks right before and after it still read as the same blocks from the same bytes;
   changes in several places at once are written run by run; a block deleted whole takes the blank
   lines after it; a written change becomes the baseline (the next one is placed against it). CRLF
-  files keep CRLF (a region's new lines follow the region's own).
+  files keep CRLF (a region's new lines follow the region's own). Spaces typed at the start or end
+  of a line (before the next word) are left out of what is written, as a reader drops them: they
+  stay on screen and reach the file with the next word (`trimEdges`; code keeps every space).
   Measured (demo, 2026-11-28): opening and leaving 0 lines, one character 1 line, Enter in a list
   one new line, bold / a heading level 1 line; a column added changes every row (accepted, owner).
 - **Never written approximately**: a document with a block kind it does not hold (footnotes, …:
@@ -427,9 +430,9 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   ［自分の版を保存］ on the edits written — the next change is placed against that text. Any change of
   the tab's text that did not come from the editor (the disk followed, a version picked, the source
   edited) opens the document afresh. Tests: `editor-in-place.spec.ts` (both picks, 保存せずに進む).
-- **The source** is the same `CodeEditor` (記号の画面): the toggle's エディタ button and ⌘⇧V
-  (`mdViewMode`; nothing chosen yet → the document view where in-place editing is on — a member who
-  chose エディタ before keeps it). Reading view instead of editing: 閲覧のみ files, a review being
+- **The source** is the same `CodeEditor` (記号の画面): the toggle's ［もとの書き方］ button (back:
+  ［文章］; were エディタ / プレビュー) and ⌘⇧V (`mdViewMode`; nothing chosen yet → the document view
+  where in-place editing is on — a member who chose the source before keeps it). Reading view instead of editing: 閲覧のみ files, a review being
   made or read (its quotes are marked in the text), the snapshot diff. Someone else's review in
   progress: one line says comments may lose their place (they are never deleted) — no confirm.
 - Raw HTML is shown as written, quietly (kept byte for byte); images load from the document's folder
@@ -447,8 +450,48 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   `tests/ui/editor-in-place.spec.ts` on `tests/editor-in-place-ui.html` (real keys, autosave, Enter in
   a list, ⌘⇧V, the AI writing the file with and without edits, closing the window, a refused
   document, ⌘F).
-- Next (PR2–5): the selection bubble (marks, size, link, ［コメント］ through the slot `app/` fills),
-  「/」 and line starts, empty-line hint and table bar, pasting images into `images/`, ［AI に直してもらう］.
+- Next (PR3–5): 「/」 and line starts, empty-line hint and table bar, pasting images into `images/`,
+  ［AI に直してもらう］ (its part through the selection slot, below).
+
+## The selection bubble (UX check 9 PR2, owner decision 2026-11-28)
+
+- Selecting words in a document edited in place shows **one bubble** (`components/SelectionBubble.tsx`,
+  `role="toolbar"` 「選んだ文字の飾り」): 太字・斜体・取り消し線・コード (pressed = every selected
+  character has it; press again takes it off), リンク (an address box: `https://…`, `mailto:`, a
+  relative path; on a link ［リンクを外す］ takes the whole link off), 文字の大きさ (本文 / 見出し1〜3 —
+  offered only for one line where a heading can stand, a top-level paragraph or heading, not a list
+  item or a table cell; a paragraph written over several lines has only the selected line changed;
+  the size it already has changes nothing), ［コメント］. No typeface, colour or
+  underline (a Markdown file cannot keep them; owner). Its presses never take the focus from the
+  document. The operations are the door's (`InPlaceSurface.toggleMark / setLink / setSize`,
+  `milkdownFormat.ts`) and are written back like typing: the changed line only.
+- **Keys go through the command catalog** (`commands.md`): `editor.toggleBold` ⌘B, `toggleItalic`
+  ⌘I, `toggleStrike` ⌘⇧S, `toggleCode` ⌘E, `editLink` ⌘K, `setBodyText` ⌘⌥0, `setHeadingOne|Two|Three`
+  ⌘⌥1〜3 (area `editor`, `notInHtmlDocument`: an HTML document keeps them). Each declines its key
+  unless the focus is in the document (⌘K also needs a selection) and, on a Mac, a Ctrl+letter (the
+  text's own Ctrl+B back / Ctrl+E line end), so ⌘B / ⌘K stay the app's left column / 探す elsewhere. Milkdown's own keys for the
+  same operations are switched off (one press, one change). ⌥ keys match by the physical key too, on
+  a Mac's ⌥⌘ only (`KeyInput.code`: ⌥⌘1 is `¡` there; Windows' AltGr = Ctrl+Alt types a character).
+- **［コメント］ through a slot** (`selectionSlot.ts` `SelectionSlot.commentBox`): `app/editorSelection.ts`
+  hands doc-review's `CommentPopover` to `TabbedEditorPanel` (`selection`); the editor imports no
+  other feature's parts for it, and the same box serves a review's selection in the reading view and
+  the HTML document view. The comment goes into the member's own review in progress, or a new
+  review of theirs holding it in one write (`useMarkdownReview.commentAsReviewer`; never into a
+  completed review being read, nor while the reviews load or after they could not be read: a second
+  review of theirs would be written beside the first; a review request is answered as by
+  「レビューする」) — the sidecar's name and shape are those 「レビューする」 + a comment
+  write (`editor-selection-bubble.spec.ts` checks the keys' order). The document then shows as
+  reviewed (reading view, its comment beside it). `useTextSelection` moved from doc-review to
+  `editor/hooks/` (the selection is the editor's). With this, `FEATURE_IMPORT_EXCEPTIONS` lost
+  `editor -> doc-review/components/CommentPopover.tsx` and `…/hooks/useTextSelection.ts`; the
+  review's banners, side panel, history, snapshot diff, its state hook and `model.ts` stay (the review
+  shown around a document is not a selection part — moving it is the review's own slot, not this PR).
+- Tests: `tests/ui/editor-selection-bubble.spec.ts` (bubble and keys, each written as its one line;
+  size; link by ⌘K and off; ［コメント］ → the review file and the reviewed view; ⌘B / ⌘K the app's
+  outside the document — mutation-checked: Milkdown's keys left on, the `acceptsKey`),
+  `markdownSplice.test.ts` (a mark in a nested list and off, a size on one line of a multi-line
+  paragraph, a `----` heading to body text, spaces typed at a line's end),
+  `src/shared/commands/commands.test.ts` (⌥⌘1 on a Mac; ⌘B bold in the document, else the left column).
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
 
@@ -575,8 +618,9 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
   components never call `window.electronAPI`), over two small ports — `ReviewReads` (readFile,
   readDirectory, exists) and `ReviewWrites` (writeFile, renameItem, deleteItem); nothing is sent
-  outside the computer; state in `hooks/useMarkdownReview.ts` and
-  `hooks/useTextSelection.ts`; banners, side panel, popover, history and the snapshot diff in
+  outside the computer; state in `hooks/useMarkdownReview.ts` (the selection that starts a comment is
+  the editor's: `features/editor/hooks/useTextSelection.ts`, the box reached through the selection
+  slot, "The selection bubble"); banners, side panel, popover, history and the snapshot diff in
   `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching, merging edits), `api.test.ts` (atomic write, retries, unreadable files, one at a
   time) and `client/tests/ui/doc-review.spec.ts` on the preview

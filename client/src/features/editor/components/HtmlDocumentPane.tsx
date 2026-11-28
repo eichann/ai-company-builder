@@ -1,16 +1,16 @@
 // The 見る side of an .html tab (doc-frame.md "The viewer (A2)"): the toolbar and the area the
 // document's own view covers, and its review ("Review in the document view"). The document is never
 // drawn by this page; `DocViewSession` owns it.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowsIn, ArrowsOut, ChatCircleDots, Eye, LockSimple, Minus, Play, Plus, Stop, ArrowClockwise, X } from '@phosphor-icons/react'
 import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
 import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
 import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
 import { ReviewHistoryDropdown } from '../../doc-review/components/ReviewHistoryDropdown'
 import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
-import { CommentPopover } from '../../doc-review/components/CommentPopover'
 import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
+import type { SelectionSlot } from '../selectionSlot'
 import { anchorHtmlQuote, htmlReadableText, htmlReviewMarks } from '../htmlReview'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { Button } from '../../../shared/ui/primitives'
@@ -48,6 +48,8 @@ interface HtmlDocumentPaneProps {
   /** The document's review (as a Markdown preview's) and the file's text its quotes are found in. */
   review?: EditorReview['review']
   content?: string
+  /** The review's comment box, handed in by the screen (selectionSlot.ts). */
+  commentBox?: SelectionSlot['commentBox']
 }
 
 /** What the member is told when a comment's place cannot be shown in the document right now. */
@@ -56,7 +58,7 @@ const NOT_SHOWN: Readonly<Record<'hidden' | 'missing', string>> = {
   missing: 'この部分はいまの表示では見つかりません。資料の中のタブなどを切り替えてから、もう一度押してください。',
 }
 
-export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom, review, content = '' }: HtmlDocumentPaneProps) {
+export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom, review, content = '', commentBox }: HtmlDocumentPaneProps) {
   // The company the document is shown for: its session plays the document's Drive videos (the pane is
   // keyed by company and file, so another company is another view).
   const companyId = useAppStore(s => s.currentCompany?.id ?? null)
@@ -186,19 +188,20 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
           </div>
         )}
       </div>
-      {review && selection && reviewing && (
-        <CommentPopover
-          key={selection.seq}
-          position={{ x: side ? side.left : window.innerWidth - 300, y: side ? side.top + 32 : 80 }}
-          selectedText={selection.text}
-          onSubmit={async (body, severity) => {
-            const at = anchorHtmlQuote(content, selection)
-            const saved = await review.addComment(selection.text, at?.start ?? 0, at?.end ?? 0, body, severity)
-            if (saved) session.clearSelection()
-            return saved
-          }}
-          onClose={() => session.clearSelection()}
-        />
+      {review && selection && reviewing && commentBox && (
+        <Fragment key={selection.seq}>
+          {commentBox({
+            position: { x: side ? side.left : window.innerWidth - 300, y: side ? side.top + 32 : 80 },
+            selectedText: selection.text,
+            onSubmit: async (body, severity) => {
+              const at = anchorHtmlQuote(content, selection)
+              const saved = await review.addComment(selection.text, at?.start ?? 0, at?.end ?? 0, body, severity)
+              if (saved) session.clearSelection()
+              return saved
+            },
+            onClose: () => session.clearSelection(),
+          })}
+        </Fragment>
       )}
       <ConfirmDialog
         isOpen={link !== null}

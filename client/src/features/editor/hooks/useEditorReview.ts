@@ -2,7 +2,7 @@
 // MarkdownPreviewPane and through MarkdownDiffView (boundary test: editor -> doc-review).
 import { useEffect } from 'react'
 import { useMarkdownReview } from '../../doc-review/hooks/useMarkdownReview'
-import { useTextSelection } from '../../doc-review/hooks/useTextSelection'
+import { useTextSelection } from './useTextSelection'
 import { markReviewSeen } from '../../doc-review/model'
 import { useAuthStore } from '../../../stores/authStore'
 import { isHtmlFile, isMarkdownFile } from '../fileKinds'

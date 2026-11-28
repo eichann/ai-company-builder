@@ -426,7 +426,11 @@ export function writable(nodes: readonly PMNode[]): PMNode[] {
   const emptyItem = (n: PMNode) => /list_item/.test(n.type.name) && n.childCount === 1 && empty(n.firstChild!)
   const clean = (n: PMNode): PMNode | null => {
     if (empty(n)) return null
-    if (n.isTextblock || n.isLeaf) return n
+    if (n.isTextblock) {
+      const t = trimEdges(n)
+      return empty(t) ? null : t
+    }
+    if (n.isLeaf) return n
     const kept: PMNode[] = []
     let dropped = false
     n.forEach(c => {
@@ -440,6 +444,28 @@ export function writable(nodes: readonly PMNode[]): PMNode[] {
     try { return n.type.create(n.attrs, kept, n.marks) } catch { return n }
   }
   return nodes.map(clean).filter((n): n is PMNode => n !== null)
+}
+
+/**
+ * A text block as Markdown holds it: spaces just typed at its start or end (before the next word)
+ * are not in the file — a reader drops them —, so they stay on screen only until text follows.
+ * Code keeps every space.
+ */
+function trimEdges(block: PMNode): PMNode {
+  if (block.type.spec.code || block.childCount === 0) return block
+  let kids: PMNode[] = []
+  block.forEach(c => { kids.push(c) })
+  const trim = (i: number, edge: RegExp) => {
+    const k = kids[i]
+    if (!k?.isText || !edge.test(k.text!)) return false
+    const t = k.text!.replace(edge, '')
+    kids = t ? kids.map((c, j) => (j === i ? k.type.schema.text(t, k.marks) : c)) : kids.filter((_, j) => j !== i)
+    return true
+  }
+  const atStart = trim(0, /^[ \t]+/)
+  const atEnd = trim(kids.length - 1, /[ \t]+$/)
+  if (!atStart && !atEnd) return block
+  try { return block.type.create(block.attrs, kids, block.marks) } catch { return block }
 }
 
 /** The source range of `target` (a text block inside `nodes`), when the reader's text blocks line up with the editor's. */

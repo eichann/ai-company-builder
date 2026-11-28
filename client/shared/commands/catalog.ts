@@ -267,6 +267,63 @@ export const COMMANDS = defineCommands([
     // Does nothing on an HTML document's tab: the document keeps ⌘F (its own find, or nothing).
     keybinding: { key: 'mod+f', area: 'editor', notInHtmlDocument: true },
   },
+  // A Markdown document edited in place (files-and-editor.md "Editing a document in place"): the selection
+  // bubble's operations. Each declines its key unless the focus is in that document (⌘B / ⌘K then reach the
+  // app's own: the left column, 探す), and leaves an HTML document's own keys to it. Written back like typing.
+  {
+    id: 'editor.toggleBold', title: '太字にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+b', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleItalic', title: '斜体にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+i', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleStrike', title: '取り消し線を付ける／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+shift+s', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.toggleCode', title: 'コードの書き方にする／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+e', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.editLink', title: 'リンクを付ける／外す', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+k', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setBodyText', title: '文字の大きさを本文にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+0', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingOne', title: '見出し1にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+1', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingTwo', title: '見出し2にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+2', area: 'editor', notInHtmlDocument: true },
+  },
+  {
+    id: 'editor.setHeadingThree', title: '見出し3にする', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+alt+3', area: 'editor', notInHtmlDocument: true },
+  },
 ])
 
 export type AppCommands = typeof COMMANDS
