@@ -905,7 +905,7 @@ contract.type IpcInvokeChannels.'approvals:sameAs' = 'approvals:sameAs': { args:
 contract.type IpcInvokeChannels.'approvals:sendBack' = 'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:withdraw' = 'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'auth:getSession' = 'auth:getSession': { args: []; result: SessionResult }
-contract.type IpcInvokeChannels.'auth:signIn' = 'auth:signIn': { args: [email: string, password: string]; result: AuthResult }
+contract.type IpcInvokeChannels.'auth:signIn' = 'auth:signIn': { args: [email: string, password: string, server: string]; result: AuthResult }
 contract.type IpcInvokeChannels.'auth:signOut' = 'auth:signOut': { args: []; result: SimpleResult }
 contract.type IpcInvokeChannels.'auth:signUp' = 'auth:signUp': { args: [email: string, password: string, name?: string]; result: AuthResult }
 contract.type IpcInvokeChannels.'backup:list' = 'backup:list': { args: [repoPath: string]; result: BackupListResult }
@@ -1289,7 +1289,7 @@ main.handle approvals:sameAs @ features/approvals/ipc.ts (companyId, approvalId,
 main.handle approvals:sendBack @ features/approvals/ipc.ts (companyId, approvalId, reason)
 main.handle approvals:withdraw @ features/approvals/ipc.ts (companyId, approvalId)
 main.handle auth:getSession @ features/auth/ipc.ts ()
-main.handle auth:signIn @ features/auth/ipc.ts (email: string, password: string)
+main.handle auth:signIn @ features/auth/ipc.ts (email: string, password: string, server: unknown)
 main.handle auth:signOut @ features/auth/ipc.ts ()
 main.handle auth:signUp @ features/auth/ipc.ts (email: string, password: string, name?: string)
 main.handle backup:list @ features/backups/ipc.ts (unsafeRepoPath: string)
@@ -2164,8 +2164,8 @@ preload shareTask -> invoke tasks:share($0, $1, $2, $3)
 preload shareTask : (companyId: string, recordId: string, folder: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload shareTaskToBundle -> invoke tasks:shareToBundle($0, $1, $2)
 preload shareTaskToBundle : (companyId: string, recordId: string, expectedVersion: number) => Promise<TaskWriteResult>
-preload signIn -> invoke auth:signIn($0, $1)
-preload signIn : (email: string, password: string) => Promise<AuthResult>
+preload signIn -> invoke auth:signIn($0, $1, $2)
+preload signIn : (email: string, password: string, server: string) => Promise<AuthResult>
 preload signOut -> invoke auth:signOut()
 preload signOut : () => Promise<SimpleResult>
 preload signUp -> invoke auth:signUp($0, $1, $2)

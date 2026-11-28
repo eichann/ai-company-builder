@@ -7,7 +7,7 @@ import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { commitRepo, git, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
+import { commitRepo, git, loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harness/main-harness.ts'
 import { NO_GIT_IN_WORKING_FOLDER } from '../electron/services/working-folders.ts'
 import { SYNCED_FOLDER_MESSAGE, WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
 import { STEP_SKILL_NOT_HERE } from '../electron/features/plugin-steps/ipc.ts'
@@ -98,7 +98,7 @@ test('a plugin step that needs a company Skill says plainly that such a company 
   const user = { id: 'u-me', email: 'me@example.com', name: 'Me' }
   h.server.on('POST', '/api/auth/sign-in/email', { json: { user }, headers: { 'Set-Cookie': 'better-auth.session_token=tok.me; Path=/; HttpOnly' } })
   h.server.on('GET', '/api/me', { json: { success: true, data: user } })
-  await h.invoke('auth:signIn', 'me@example.com', 'pw')
+  await h.invoke('auth:signIn', 'me@example.com', 'pw', SERVER_URL)
   company('co-none4', 'none')
   const parent = h.companyDir('parent-step')
   await h.invoke('fs:registerAllowedRoot', parent)

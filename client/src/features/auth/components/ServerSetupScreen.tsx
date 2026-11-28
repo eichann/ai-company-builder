@@ -3,7 +3,8 @@
 // the mail cannot be found. An address a link brought is shown on the sign-in form, and
 // ［ログイン］ is the member's press that connects to it (ipc-and-main-process.md "The
 // invitation's 「アプリを開く」"): main uses only the address it holds, and only while it is
-// still the one this screen shows.
+// still the one this screen shows; sign-in names that address too, and main sends the password
+// only while it is the saved server.
 import { useCallback, useRef, useState } from 'react'
 import { ArrowRight, Buildings, CheckCircle, Globe, SpinnerGap, WarningCircle } from '@phosphor-icons/react'
 import { useAuthStore } from '../../../stores/authStore'
@@ -59,7 +60,8 @@ export function ServerSetupScreen({ onComplete }: Props) {
         if (!result?.success) return result?.error ?? 'つなげませんでした。もう一度押してください。'
         setAccepted(shown)
       }
-      const signedIn = await signIn(email, password)
+      // Also on a retry after connecting: main sends the password only while `shown` is the saved server.
+      const signedIn = await signIn(email, password, shown)
       if (!signedIn.success) return signedIn.error || 'ログインできませんでした'
       onComplete()
       return null
@@ -148,6 +150,10 @@ function TypedAddress({ onBack, onComplete }: { onBack: () => void; onComplete: 
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [validated, setValidated] = useState(false)
+  // False once this screen is gone (a link's sign-in form replaced it): a check still on its way
+  // must not save its address after the member went on with another one.
+  const onScreen = useRef(true)
+  const watchOnScreen = useCallback((node: HTMLDivElement | null) => { onScreen.current = node !== null }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -160,6 +166,7 @@ function TypedAddress({ onBack, onComplete }: { onBack: () => void; onComplete: 
       }
       normalizedUrl = normalizedUrl.replace(/\/+$/, '')
       const result = await validateServerUrl(normalizedUrl)
+      if (!onScreen.current) return
       if (result.valid) {
         await setServerUrl(normalizedUrl)
         setValidated(true)
@@ -175,7 +182,7 @@ function TypedAddress({ onBack, onComplete }: { onBack: () => void; onComplete: 
   }
 
   return (
-    <div className="w-full max-w-md p-8">
+    <div ref={watchOnScreen} className="w-full max-w-md p-8">
       <div className="text-center mb-8">
         <Buildings size={56} className="mx-auto mb-3 text-primary" weight="duotone" />
         <h1 className="text-page font-bold text-text mb-1">会社のアドレスを入れます</h1>
