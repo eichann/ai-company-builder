@@ -1,10 +1,11 @@
 /**
  * 「返事の形」 of a consultation (pure; the renderer's switch, the stored conversation and the chat
  * server read it). `plain` is today's reply and adds nothing to what the AI is told; `rich` adds one
- * line that diagrams are welcome and, when the member has a 今日のフォルダ, one line that a page may be
- * made there and shown as a card. Whether a diagram or a page card in a reply is drawn does not depend
- * on it: the chat draws a ```mermaid / ```svg block and a link to an HTML file of the company folder in
- * every reply (chat-ui-and-history.md "Diagrams in a reply", "Page cards in a reply").
+ * line that diagrams are welcome, the rich-reply line with its ready-made pieces and, when the member
+ * has a 今日のフォルダ, one line that a page may be made there and shown as a card. Whether a diagram, a
+ * rich reply or a page card is drawn does not depend on it: the chat draws a ```mermaid / ```svg block,
+ * an ```acb-html / ```acb-slide block and a link to an HTML file of the company folder in every reply
+ * (chat-ui-and-history.md "Diagrams in a reply", "Rich replies", "Page cards in a reply").
  */
 import { isTodayFolderPath } from './today-folder'
 
@@ -17,6 +18,31 @@ export function replyStyleOf(value: unknown): ReplyStyle {
 
 /** The one line a rich reply adds to the turn (the owner: few words; the app, not the prompt, keeps diagrams safe). */
 export const RICH_REPLY_INSTRUCTION = '図があると分かりやすいときは、```mermaid か ```svg のコードブロックで図を入れてかまいません（アプリが図として表示します）。'
+
+/**
+ * The ready-made pieces of a rich reply's frame, as the AI is told to write them. Their look is the frame's
+ * (`richReplyFrame.ts` FRAME_CSS: tokens only, so they read in light and dark); a piece named here without a rule
+ * there fails `tests/ui/chat-rich-reply.spec.ts`. The cleaning keeps `class` as it does any (the frame keeps it in).
+ */
+export const RICH_HTML_PIECES: readonly (readonly [what: string, markup: string])[] = [
+  ['Key point, note, warning, done', '<div class="acb-key">…</div> <div class="acb-note">…</div> <div class="acb-warn">…</div> <div class="acb-ok">…</div>'],
+  ['Steps', '<ol class="acb-steps"><li>…</li></ol> (openable: <li><details><summary>Step</summary><p>…</p></details></li>)'],
+  ['Comparison (the recommended column\'s cells: class="best")', '<table class="acb-compare"><tr><th>…</th><th class="best">…</th></tr><tr><td><span class="acb-no">×</span></td><td class="best"><span class="acb-yes">○</span></td></tr></table>, also <span class="acb-mid">△</span>'],
+  ['Tabs (up to 5; ids unique in the reply)', '<div class="acb-tabs"><input type="radio" name="t" id="t1" checked><label for="t1">…</label><input type="radio" name="t" id="t2"><label for="t2">…</label><div class="acb-tab">…</div><div class="acb-tab">…</div></div>'],
+  ['Explanation on hover', '<span class="acb-tip">term<span class="acb-tip-text">…</span></span>'],
+  ['Bar', '<div class="acb-bar"><span style="width: 45%"></span></div>'],
+]
+
+/**
+ * The rich-reply line (owner decision 2026-11-28; English, as the demo's draft for the AI): when to write HTML, what
+ * the app removes, and the pieces. Short on purpose: the cleaning and the closed frame, not these words, keep a reply safe.
+ */
+export const RICH_HTML_INSTRUCTION = 'When a table, comparison, steps or a small figure would make the answer easier to read, you may write that part'
+  + ' as HTML in a ```acb-html code block (one 16:9 slide, 1280×720: ```acb-slide), the rest in Markdown; the app draws it in'
+  + ' the chat\'s own look. Scripts, forms, outside images, fonts and url() are removed; draw pictures with inline <svg>; for'
+  + ' colours use the pieces below or var(--color-text), var(--color-text-muted), var(--color-border), var(--color-primary)'
+  + ' (they follow light / dark). Ready-made pieces: '
+  + RICH_HTML_PIECES.map(([what, markup]) => `${what}: ${markup}`).join('; ') + '.'
 
 /**
  * Where a rich reply's pages go, inside the member's 今日のフォルダ (`<department>/.personal/inbox/日付別/…`):
@@ -44,9 +70,9 @@ export function replyPageInstruction(pageFolder: string): string {
 
 /**
  * What this turn adds for the reply's form: nothing unless it is rich and the agent takes it
- * (`capabilities.richReplies`); then the diagram line, and the page line when there is a page folder.
+ * (`capabilities.richReplies`); then the diagram line, the rich-reply line, and the page line when there is a page folder.
  */
 export function replyStyleInstruction(value: unknown, agentTakesIt: boolean, pageFolder: string | null = null): string {
   if (!agentTakesIt || replyStyleOf(value) !== 'rich') return ''
-  return `\n\n${RICH_REPLY_INSTRUCTION}${pageFolder ? `\n${replyPageInstruction(pageFolder)}` : ''}`
+  return `\n\n${RICH_REPLY_INSTRUCTION}\n${RICH_HTML_INSTRUCTION}${pageFolder ? `\n${replyPageInstruction(pageFolder)}` : ''}`
 }

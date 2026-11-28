@@ -5,6 +5,7 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 import { ALL_TRAPS, GOOD_REPLY } from './fixtures/reply-html-traps'
+import { RICH_HTML_PIECES } from '../../shared/reply-style'
 
 type Control = { open(): boolean; send(chunk: unknown): void; text(id: string, delta: string): void; finish(): void; toggleTheme(): void }
 type PageGlobals = { __acbChat: Control; __pwned?: unknown[] }
@@ -290,6 +291,64 @@ test.describe('in the chat', () => {
     expect(await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
     await expect(page.locator('[data-rich-reply]')).toHaveAttribute('data-rich-reply-state', 'frame')
     await expect(frames(page)).toHaveCount(1)
+  })
+
+  // The pieces the AI is told about (reply-style.ts RICH_HTML_PIECES) survive the cleaning, each class has a rule of the
+  // frame's own, and the boxes and marks read in light and dark (contrast against what is behind them, the chat's page too).
+  test('the ready-made pieces the AI is told about are kept, styled by the frame and readable in light and dark', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '既製の箱で')
+    const markup = RICH_HTML_PIECES.map(([, example]) => `<div>${example.replace(/…/g, '見本の文')}</div>`).join('\n')
+    await reply(page, fence('acb-html', markup))
+    await finish(page)
+    const classes = [...new Set([...markup.matchAll(/class="([\w-]+)"/g)].map(match => match[1]))]
+    expect(classes.length).toBeGreaterThan(10)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
+    for (const theme of ['light', 'dark']) {
+      if (theme === 'dark') {
+        await chat(page, c => c.toggleTheme())
+        await expect.poll(() => inside.locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
+      }
+      const behind = await frames(page).last().evaluate(el => {
+        for (let at: Element | null = el; at; at = at.parentElement) {
+          const bg = getComputedStyle(at).backgroundColor
+          if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg
+        }
+        return 'rgb(255, 255, 255)'
+      })
+      const seen = await inside.locator('html').evaluate((_, [classes, behind]) => {
+        const rules: string[] = []
+        const walk = (list: CSSRuleList) => { for (const rule of Array.from(list)) { if (rule instanceof CSSStyleRule) rules.push(rule.selectorText); else if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules) } }
+        walk(document.styleSheets[0].cssRules)
+        const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+        const lum = (value: string) => {
+          const [r, g, b] = rgb(value).map(c => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        }
+        const backOf = (el: Element) => {
+          for (let at: Element | null = el; at; at = at.parentElement) {
+            const bg = getComputedStyle(at).backgroundColor
+            if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg
+          }
+          return behind
+        }
+        const contrast = (el: Element) => {
+          const [a, b] = [lum(getComputedStyle(el).color), lum(backOf(el))].sort((x, y) => y - x)
+          return Math.round((a + 0.05) / (b + 0.05) * 10) / 10
+        }
+        const readable = ['acb-key', 'acb-note', 'acb-warn', 'acb-ok', 'acb-yes', 'acb-mid', 'acb-no']
+        return {
+          kept: classes.filter(name => !document.querySelector(`.${name}`)),
+          unstyled: classes.filter(name => !rules.some(selector => selector.includes(`.${name}`))),
+          contrast: Object.fromEntries(readable.map(name => [name, contrast(document.querySelector(`.${name}`)!)])),
+          bare: ['acb-key', 'acb-note', 'acb-warn', 'acb-ok'].filter(name => /rgba\(0, 0, 0, 0\)|transparent/.test(getComputedStyle(document.querySelector(`.${name}`)!).backgroundColor)),
+        }
+      }, [classes, behind] as const)
+      expect(seen.kept, `${theme}: removed by the cleaning`).toEqual([])
+      expect(seen.unstyled, `${theme}: no rule of the frame`).toEqual([])
+      expect(seen.bare, `${theme}: a box without its own background`).toEqual([])
+      for (const [name, ratio] of Object.entries(seen.contrast)) expect(ratio, `${theme}: ${name}`).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   test('a 16:9 slide is scaled to the chat\'s width, whole', async ({ page }) => {
