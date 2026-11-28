@@ -73,7 +73,7 @@ test('「返事の形：リッチ」 tells this turn about ```acb-html and the r
   const rich = await turnOf({ replyStyle: 'rich' })
   assert.match(rich.system, /```acb-html code block/)
   assert.match(rich.system, /```acb-slide/)
-  for (const piece of ['acb-key', 'acb-warn', 'acb-steps', 'acb-compare', 'acb-tabs', 'acb-tip', 'acb-bar']) assert.ok(rich.system.includes(`class="${piece}"`), piece)
+  for (const piece of ['acb-key', 'acb-warn', 'acb-steps', 'acb-compare', 'acb-tabs', 'acb-tip', 'acb-bar']) assert.ok(rich.system.includes(piece), piece)
   assert.doesNotMatch(rich.standing, /acb-/)
   for (const body of [{}, { replyStyle: 'plain' }, { replyStyle: 'fancy' }, { replyStyle: 'rich', authMode: 'api-key' }]) {
     const other = await turnOf(body)

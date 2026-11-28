@@ -25,10 +25,10 @@ export const RICH_REPLY_INSTRUCTION = '図があると分かりやすいとき�
  * there fails `tests/ui/chat-rich-reply.spec.ts`. The cleaning keeps `class` as it does any (the frame keeps it in).
  */
 export const RICH_HTML_PIECES: readonly (readonly [what: string, markup: string])[] = [
-  ['Key point, note, warning, done', '<div class="acb-key">…</div> <div class="acb-note">…</div> <div class="acb-warn">…</div> <div class="acb-ok">…</div>'],
-  ['Steps', '<ol class="acb-steps"><li>…</li></ol> (openable: <li><details><summary>Step</summary><p>…</p></details></li>)'],
-  ['Comparison (the recommended column\'s cells: class="best")', '<table class="acb-compare"><tr><th>…</th><th class="best">…</th></tr><tr><td><span class="acb-no">×</span></td><td class="best"><span class="acb-yes">○</span></td></tr></table>, also <span class="acb-mid">△</span>'],
-  ['Tabs (up to 5; ids unique in the reply)', '<div class="acb-tabs"><input type="radio" name="t" id="t1" checked><label for="t1">…</label><input type="radio" name="t" id="t2"><label for="t2">…</label><div class="acb-tab">…</div><div class="acb-tab">…</div></div>'],
+  ['Key point, note, warning, done', '<div class="acb-key">…</div> (acb-note, acb-warn, acb-ok)'],
+  ['Steps', '<ol class="acb-steps"><li><details><summary>…</summary>…</details></li></ol>'],
+  ['Comparison', '<table class="acb-compare"><tr><th>…</th><th class="best">…</th></tr><tr><td><span class="acb-no">×</span></td><td class="best"><span class="acb-yes">○</span></td></tr></table> (best: the recommended column; also acb-mid △)'],
+  ['Tabs (≤5; name and ids unique in the reply)', '<div class="acb-tabs"><input type="radio" name="g1" id="g1a" checked><label for="g1a">…</label> (one pair per tab), then <div class="acb-tab">…</div> per tab</div>'],
   ['Explanation on hover', '<span class="acb-tip">term<span class="acb-tip-text">…</span></span>'],
   ['Bar', '<div class="acb-bar"><span style="width: 45%"></span></div>'],
 ]
@@ -39,9 +39,8 @@ export const RICH_HTML_PIECES: readonly (readonly [what: string, markup: string]
  */
 export const RICH_HTML_INSTRUCTION = 'When a table, comparison, steps or a small figure would make the answer easier to read, you may write that part'
   + ' as HTML in a ```acb-html code block (one 16:9 slide, 1280×720: ```acb-slide), the rest in Markdown; the app draws it in'
-  + ' the chat\'s own look. Scripts, forms, outside images, fonts and url() are removed; draw pictures with inline <svg>; for'
-  + ' colours use the pieces below or var(--color-text), var(--color-text-muted), var(--color-border), var(--color-primary)'
-  + ' (they follow light / dark). Ready-made pieces: '
+  + ' the chat\'s look. Scripts, forms, outside images, fonts and url() are removed; pictures: inline <svg>; colours: the pieces'
+  + ' below or var(--color-text) and the like (they follow light / dark). Pieces: '
   + RICH_HTML_PIECES.map(([what, markup]) => `${what}: ${markup}`).join('; ') + '.'
 
 /**

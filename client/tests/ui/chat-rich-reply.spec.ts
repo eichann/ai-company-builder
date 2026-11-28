@@ -298,10 +298,14 @@ test.describe('in the chat', () => {
   test('the ready-made pieces the AI is told about are kept, styled by the frame and readable in light and dark', async ({ page }) => {
     await openPreview(page, 'chat-header', { turn: 'manual' })
     await send(page, '既製の箱で')
-    const markup = RICH_HTML_PIECES.map(([, example]) => `<div>${example.replace(/…/g, '見本の文')}</div>`).join('\n')
+    // Each example as written, and a box of its own for a name the example only mentions (「acb-note, acb-warn」).
+    const examples = RICH_HTML_PIECES.map(([, example]) => example)
+    const written = new Set(examples.flatMap(example => [...example.matchAll(/class="([\w-]+)"/g)].map(match => match[1])))
+    const mentioned = [...new Set(examples.flatMap(example => example.match(/\bacb-[a-z-]+/g) ?? []))].filter(name => !written.has(name))
+    const markup = [...examples.map(example => `<div>${example.replace(/…/g, '見本の文')}</div>`), ...mentioned.map(name => `<div class="${name}">見本の文</div>`)].join('\n')
     await reply(page, fence('acb-html', markup))
     await finish(page)
-    const classes = [...new Set([...markup.matchAll(/class="([\w-]+)"/g)].map(match => match[1]))]
+    const classes = [...written, ...mentioned]
     expect(classes.length).toBeGreaterThan(10)
     const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
     for (const theme of ['light', 'dark']) {
