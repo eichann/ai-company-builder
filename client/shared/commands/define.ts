@@ -151,6 +151,8 @@ export interface KeyInput {
   readonly altKey: boolean
   /** The physical key (`Digit1`, `KeyS`): ⌥ changes what `key` reports on a Mac (⌥⌘1 is `¡`). */
   readonly code?: string
+  /** A word is being composed (Japanese input): Enter and the arrows are the input method's. */
+  readonly isComposing?: boolean
 }
 
 const MODIFIERS = new Set(['mod', 'shift', 'alt'])
