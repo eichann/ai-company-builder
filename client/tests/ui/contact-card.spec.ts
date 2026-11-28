@@ -54,6 +54,30 @@ test('with a draft the main button checks and sends it; ［返した（下書き
   await expect(page.locator('#acted')).toHaveText('')
 })
 
+test('the draft opened from a contact keeps its place in the list: 「4 / 8」 and ［次の件］ stay, and once sent the next row comes (Codex review)', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { contact: 'draft' })
+  await openCard(page)
+  await card(page).getByRole('button', { name: '下書きを確かめて送る' }).click()
+  const draft = page.getByRole('region', { name: '送るメールの下書き', exact: true })
+  await expect(draft.getByRole('group', { name: '一覧の何件目か' })).toContainText(/^\d+ \/ \d+/)
+  await expect(draft.getByRole('button', { name: '次の件' })).toBeEnabled()
+  await draft.getByRole('button', { name: '（見本）送った' }).click()
+  await expect(notice(page)).toContainText('「A社 見積のご相談」を片づけました。次の件です')
+  await expect(page.locator('#opened')).toHaveText('record task-asked0001')
+  expectNoPageErrors(state)
+})
+
+test('a contact whose first read did not reach the server is read again when the PC is back online, without a new notice (Codex review)', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { contact: 'own', firstread: 'offline' })
+  // Not read: each notice keeps its own row, as before.
+  await expect(page.locator('[data-inbox-row="record:reply_request-prev01a"]')).toHaveCount(1)
+  await expect(row(page)).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as { __acbInbox: { reconnect(): void } }).__acbInbox.reconnect())
+  await expect(row(page)).toHaveCount(1)
+  await expect(row(page)).toContainText('返事が要る（期限 12/2）')
+  expectNoPageErrors(state)
+})
+
 test('［取り消す］ of a contact ACB archived in Gmail says the mail stays archived; one never archived says nothing of Gmail', async ({ page }) => {
   for (const [scene, stays] of [['archived', true], ['own', false]] as const) {
     await openPreview(page, 'inbox', { contact: scene })

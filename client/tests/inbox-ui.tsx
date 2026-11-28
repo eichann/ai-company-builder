@@ -161,6 +161,8 @@ function sceneContact(scene: string): ContactView {
   return { interaction, replyRequests: [reply], tasks: [] }
 }
 let contactNow: ContactView | null = CONTACT ? sceneContact(CONTACT) : null
+// `&firstread=offline`: the contact's reads fail (not reached) until `window.__acbInbox.reconnect()` (then an `online` event).
+let contactOffline = params.get('firstread') === 'offline'
 let contactBefore: ContactView | null = null
 if (contactNow) {
   const items = [
@@ -252,7 +254,10 @@ function Preview() {
     },
     getOutboundMail: async () => ({ success: false, offline: false, code: null, error: '（見本）下書きは、このページでは読み込みません。' }),
     sendOutboundMail: async () => { setActed('send'); return { success: false, offline: true, error: '（見本）' } as never },
-    getContact: async (_companyId, id) => (contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }),
+    getContact: async (_companyId, id) => {
+      if (contactOffline) return { success: false, gone: false, offline: true, error: 'サーバーにつながりません' }
+      return contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }
+    },
     finishContact: async (_companyId, _id, input) => { setActed(`finish ${JSON.stringify(input)}`); return finishOnServer(input) },
     undoContactFinish: async (_companyId, _id, input) => { setActed(`undo ${JSON.stringify(input)}`); return undoOnServer(input) },
     // `?contact=archived`: ACB archived the mail in Gmail right after the 「済んだ」 (its note follows the finish's entry 8).
@@ -266,7 +271,11 @@ function Preview() {
     newsSince: '2026-01-01T00:00:00.000Z',
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: (id, onDone) => <ApprovalCard key={id} card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} onDone={onDone} />,
-    renderMailDraft: (id, onDone) => <PreparedMailCard key={id} companyId="co-preview" messageId={id} onDone={onDone} />,
+    // `?contact=draft`: the draft opened from the contact's card is a stand-in whose ［（見本）送った］ is the real card's sent
+    // `onDone` (this page reads no draft): what the inbox does after it is the real slot's.
+    renderMailDraft: (id, onDone) => CONTACT === 'draft'
+      ? <button type="button" onClick={onDone}>（見本）送った</button>
+      : <PreparedMailCard key={id} companyId="co-preview" messageId={id} onDone={onDone} />,
     browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: (id, onDone) => <BrowserPlanCard key={id} companyId="co-preview" planId={id} onDone={onDone} />, planStates: PLAN_STATES } : undefined,
     memberName: id => (id === 'u-tanaka' ? '田中' : null),
   })
@@ -296,6 +305,11 @@ Object.assign(window, {
     /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
     planApprovedElsewhere() {
       browserInbox = { ...browserInbox, plans: [] }
+    },
+    /** `&firstread=offline`: the server is reached again and the PC says it is online. */
+    reconnect() {
+      contactOffline = false
+      window.dispatchEvent(new Event('online'))
     },
     /** Every plan settled elsewhere: the next read lists none. */
     plansSettled() {

@@ -11,9 +11,9 @@ import type { BesideCard } from './workModel'
 export const INBOX_WORK_KEY = 'inbox'
 
 /**
- * The card shown beside the list: the row it belongs to (null: a draft opened from a contact's card), its title, where
- * that row stood when opened (the next one's place if the row leaves the list before the card's press answers), and
- * the company era it was opened in (only `openBeside` makes one, so no card lacks it).
+ * The card shown beside the list: the row it belongs to (a draft opened from a contact's card keeps the contact's row, so
+ * its send or throw-away moves on and ［前の件］［次の件］ stay), its title, where that row stood when opened (the next one's
+ * place if the row leaves the list before the card's press answers), and the company era it was opened in (only `openBeside` makes one, so no card lacks it).
  */
 export type Beside = BesideCard & { rowKey: string | null; title: string; readKey: string; at: number; readonly era: CompanyEra }
 

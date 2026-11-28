@@ -26,7 +26,7 @@ export interface ContactStore {
   entry: (recordId: string) => ContactEntry | undefined
   /** The contact's view for a record id, when one was read. */
   view: (recordId: string) => ContactView | undefined
-  /** Read each `id@stamp` not read at that stamp yet (a new notice, a card opened). */
+  /** Read each `id@stamp` not read at that stamp yet (a new notice, a card opened), and each whose last read failed. */
   want: (companyId: string, wanted: readonly string[]) => void
   /** Read again now (after a press on the card, answered or not). */
   refresh: (companyId: string, recordId: string) => void
@@ -91,9 +91,12 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
         // would show the title the server no longer shows them —, and no read already on its way may put it back.
         const gone: ContactEntry = { kind: 'gone' }
         for (const id of groupOf(recordId)) { written.set(id, seq); entries.set(id, gone); groups.delete(id) }
+      } else {
+        // Not read: asked again the next time the names are (a reconnect, the panel shown again) — never on a timer.
+        asked.delete(recordId)
+        // A failure keeps what was shown (offline must not empty the card); only a first read shows the failure.
+        if (!entries.has(recordId)) put(recordId, { kind: 'failed', offline: r.offline, error: r.error })
       }
-      // A failure keeps what was shown (offline must not empty the card); only a first read shows the failure.
-      else if (!entries.has(recordId)) put(recordId, { kind: 'failed', offline: r.offline, error: r.error })
       notify()
     })
   }

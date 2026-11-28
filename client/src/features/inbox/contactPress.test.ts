@@ -141,3 +141,24 @@ test('the 「Gmail でアーカイブされたまま」 line is asked after the 
   assert.doesNotMatch(await run(true, { replyRequest: both.replyRequest }, replyOnly), /Gmail/)
   assert.deepEqual(asked, [8, 8])
 })
+
+test('a first read that failed (offline) is read again when the same names are asked again (a reconnect, the panel shown again); one read already is not (Codex review)', async () => {
+  let fail = true
+  const asked: string[] = []
+  const store = createContactStore(async (_c, id) => {
+    asked.push(id)
+    return fail ? { success: false, gone: false, offline: true, error: 'つながりません' } : { success: true, contact: view }
+  })
+  store.want('co-a', ['interaction-bbb222@3'])
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(store.entry('interaction-bbb222')?.kind, 'failed')
+  fail = false
+  // The same `id@stamp` (no new notice came): read again, and shown.
+  store.want('co-a', ['interaction-bbb222@3'])
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(store.view('interaction-bbb222')?.interaction.version, 7)
+  // Read now: asking the same names again reads nothing (no new server call per look).
+  store.want('co-a', ['interaction-bbb222@3'])
+  await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(asked, ['interaction-bbb222', 'interaction-bbb222'])
+})

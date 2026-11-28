@@ -23,6 +23,7 @@ import { commandArea } from '../../../shared/commands/commands'
 import type { WorkUndoAnswer } from '../../../shared/lib/workThrough'
 import { finishBeside, INBOX_WORK_KEY, openBeside, type Beside } from '../besideDone'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import { useEventListener } from '../../../shared/hooks/useEventListener'
 
 interface InboxSlotInput {
   companyId: string | undefined
@@ -98,7 +99,10 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   // 「連絡」1枚: the contacts the notices name, read into one store the rows and the card share (memory only).
   const contactReads = contactPorts?.reads
   const [contacts] = useState(() => createContactStore((c, id) => readContact(c, id, contactReads)))
-  const contactsShown = useContacts(contacts, companyId, useMemo(() => contactsToRead(notices, CONTACT_ROW_READS), [notices]))
+  // A contact not read (offline) is asked again only when the PC is back online or the panel opens again (never on a timer).
+  const [contactsAgain, setContactsAgain] = useState(0)
+  useEventListener(window, 'online', () => setContactsAgain(k => k + 1))
+  const contactsShown = useContacts(contacts, companyId, useMemo(() => contactsToRead(notices, CONTACT_ROW_READS), [notices]), contactsAgain)
   // Rebuilt from every answer main hands over (nothing of its own is kept but the contacts' last answers).
   const view = useMemo(() => inboxView(notices, meetings, plans.inbox, newsSince, id => shownView(contactsShown.get(id))),
     [notices, meetings, plans.inbox, newsSince, contactsShown])
@@ -118,7 +122,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   /** A new look (another chip or kind, the panel opened again): the opened 新着 go where they belong, 15 rows again. */
   const newLook = () => { setLingering(new Set()); setLimit(INBOX_PAGE) }
   // The undo line is about what was just pressed: gone once the panel closes or opens again.
-  if (wasShown !== shown) { setWasShown(shown); setStatus(null); newLook(); setBeside(null); if (shown) setPlanReadKey(k => k + 1) }
+  if (wasShown !== shown) { setWasShown(shown); setStatus(null); newLook(); setBeside(null); if (shown) { setPlanReadKey(k => k + 1); setContactsAgain(k => k + 1) } }
 
   /** Looked at: its notices read on the server (every PC agrees), a finished meeting's news on this PC. */
   const markRead = (ids: string[]) => {
@@ -215,7 +219,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
     : beside.kind === 'contact'
     ? <ContactCard key={beside.id} companyId={companyId} contactId={beside.id} store={contacts} readKey={beside.readKey} writes={contactPorts?.writes} reads={contactPorts?.reads} nameOf={memberName}
         onOpenTask={id => { setBeside(null); onOpenRecord(id) }} onOpenRecord={id => { setBeside(null); onOpenRecord(id) }}
-        onCheckDraft={id => setBeside({ ...beside, kind: 'mail', id, rowKey: null })}
+        onCheckDraft={id => setBeside({ ...beside, kind: 'mail', id })}
         onFinished={u => onDone(u ?? undefined)} />
     : renderMailDraft(beside.id, () => onDone()))
   const words = beside ? BESIDE_WORDS[beside.kind] : null
