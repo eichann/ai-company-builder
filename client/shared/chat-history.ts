@@ -91,6 +91,8 @@ export interface ChatSession {
   topicRecordId?: string
   /** The member took the topic off (「このやることから外す」): no topic is set by itself again. */
   topicDetached?: boolean
+  /** 「返事の形：リッチ」 chosen for this consultation (reply-style.ts); absent = ふつう. Saved by the renderer like the draft. */
+  replyStyle?: 'rich'
 }
 
 export type ChatMetadataPatch = Partial<Pick<ChatSession,

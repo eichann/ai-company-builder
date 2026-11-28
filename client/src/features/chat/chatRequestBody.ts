@@ -3,6 +3,7 @@ import type { ChatRequestOptions } from '../../../shared/chat-server-api'
 import type { PluginPersonStep, PluginRunStep } from '../../../shared/ai-turn-steps/plugin'
 import type { JobRunStep } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnStep } from '../../../shared/ai-turn-steps/registry'
+import type { ReplyStyle } from '../../../shared/reply-style'
 
 type Ref<T> = { current: T }
 
@@ -18,6 +19,8 @@ export interface ChatRequestSources {
   todayFolder?: Ref<(() => string | null) | undefined>
   modelId: Ref<string | undefined>
   effort: Ref<string>
+  /** 「返事の形」 of this consultation (ModelMenu): only a rich one is sent. */
+  replyStyle?: Ref<ReplyStyle>
   /** Settings → 入力候補; off → the CLI is not asked for a suggestion. */
   promptSuggestions: () => boolean
   appSessionId: Ref<string | null>
@@ -55,6 +58,7 @@ export function buildChatRequestBody(s: ChatRequestSources): ChatRequestOptions 
   }
   const todayFolder = s.todayFolder?.current?.()
   if (todayFolder) body.todayFolder = todayFolder
+  if (s.replyStyle?.current === 'rich') body.replyStyle = 'rich'
   // Ensure app session ID exists (eagerly create on first request)
   if (!s.appSessionId.current) {
     s.appSessionId.current = crypto.randomUUID()

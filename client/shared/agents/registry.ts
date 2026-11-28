@@ -122,6 +122,11 @@ export interface AgentCapabilities {
   readonly privateFolderCommitMessages: boolean
   /** The model list comes from the agent at run time (e.g. `model/list`), not from `models`. */
   readonly liveModelCatalog: boolean
+  /**
+   * 「返事の形：リッチ」 is offered beside the model (reply-style.ts): the turn then says diagrams are welcome.
+   * The chat draws a reply's diagrams whatever the agent (chat-ui-and-history.md "Diagrams in a reply").
+   */
+  readonly richReplies: boolean
 }
 
 /** Which model the app uses for each job. `undefined` = the agent's own choice (documented per entry). */
@@ -261,6 +266,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     commitMessageFallback: true,
     privateFolderCommitMessages: false,
     liveModelCatalog: false,
+    richReplies: true,
   },
 }
 
@@ -338,6 +344,7 @@ const CODEX: AgentDescriptor = {
     commitMessageFallback: false,
     privateFolderCommitMessages: false,
     liveModelCatalog: true,
+    richReplies: true,
   },
 }
 
@@ -386,6 +393,7 @@ const API_KEY: AgentDescriptor = {
     commitMessageFallback: true,
     privateFolderCommitMessages: true,
     liveModelCatalog: false,
+    richReplies: false,
   },
 }
 

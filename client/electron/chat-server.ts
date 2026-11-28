@@ -58,6 +58,7 @@ import { turnToolEvents } from './agents/tool-events'
 import { FILE_LINKED_PART_TYPE, taskTopicInstructions, taskTopicOf } from '../shared/consultation-task'
 import { SHARE_PROPOSAL_PART_TYPE, type ShareProposalCardRef } from '../shared/share-proposals'
 import { RECORD_TOOLS_MISSING_PART_TYPE, recordToolsMissingInstructions, type RecordToolsMissingReason } from '../shared/record-tools-missing'
+import { replyStyleInstruction } from '../shared/reply-style'
 import { droppedRecordIdsOf, droppedRecordsContext, recordTopicInstructions, withTextBeforeLatestUserMessage } from '../shared/record-drop'
 import { TOPIC_RECORD_RE } from '../shared/task-consult'
 import { isTodayFolderPath } from '../shared/today-folder'
@@ -404,6 +405,7 @@ export async function startChatServer(config: ChatServerConfig) {
       pluginStep: requestedPluginStep,
       todayFolder: requestedTodayFolder,
       droppedRecordIds: requestedDroppedRecords,
+      replyStyle,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -666,6 +668,8 @@ export async function startChatServer(config: ChatServerConfig) {
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
     const repeatAsk = repeatAskForTurn(config.jobRepeatAsk, { unattended: !!aiTurnStep, sightings: !!sightingTurn, records, companyId, companyRoot: companyRootPath, workingDirectory }, repeatSkill)
     if (repeatAsk) turnPrompt += repeatAsk
+    // 「返事の形：リッチ」 (reply-style.ts): one line with the turn, never in an unattended step (nobody reads it).
+    if (!aiTurnStep) turnPrompt += replyStyleInstruction(replyStyle, can.richReplies)
     // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the
     // member sees keeps them in the member's 今日のフォルダ. Unattended steps are left as they are.
     const topicOf = () => {

@@ -4,6 +4,8 @@ import { useAppStore } from '../../../stores/appStore'
 import { chatMarkdownSafety } from '../chatMarkdownSafety'
 import { splitMarkdownBlocks } from '../markdownBlocks'
 import { CodeHighlighter, PlainCodeBlock } from './codeHighlighter'
+import { ChatDiagram } from './ChatDiagram'
+import { diagramOf } from '../diagrams'
 
 interface MarkdownMessageProps {
   content: string
@@ -46,7 +48,10 @@ function makeComponents(isDark: boolean, highlight: boolean): Components {
         return <PlainCodeBlock isDark={isDark}>{codeText}</PlainCodeBlock>
       }
       // Fenced block: Prism (curated languages, codeHighlighter.ts). Unknown languages render plain.
-      return <CodeHighlighter isDark={isDark} language={lang || 'text'}>{codeText}</CodeHighlighter>
+      const code = <CodeHighlighter isDark={isDark} language={lang || 'text'}>{codeText}</CodeHighlighter>
+      // A ```mermaid / ```svg block is drawn as a picture once its fence closes (diagramRenderer.ts), whatever 「返事の形」.
+      const diagram = diagramOf(lang, codeText)
+      return diagram ? <ChatDiagram diagram={diagram} isDark={isDark} code={code} /> : code
     },
     pre({ children }: { children?: React.ReactNode }) {
       // SyntaxHighlighter renders its own container; wrap with margin only

@@ -152,6 +152,11 @@ its latest window (#154); the renderer bundle ≤ 3.2 MiB JS (raised from 2.2 �
   conflicts between parallel PRs. Over 50 KB: lazy-load what is new, or split the change; an exception
   is the owner's decision. Locally: build the base into another folder and pass `--base`.
 
+- **Files loaded on demand only** (`dist/vendor/`, 2026-11-28; owner decision asked in the pull request that added it):
+  mermaid for a reply's diagrams (`chat-ui-and-history.md` "Diagrams in a reply") is one file there, loaded only when a
+  diagram is drawn, never at start. `check-bundle-size.mjs` does not add it to the renderer JS above; it measures each
+  such file against its own budget in `ON_DEMAND_VENDOR` (`[perf] bundle.onDemand.<name>`) and fails on any file there
+  that is not listed, so the folder is no way around the budget.
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.
 - Run one: `cd client && npx tsx --test tests/perf/git-search.perf.test.ts`; bundle:

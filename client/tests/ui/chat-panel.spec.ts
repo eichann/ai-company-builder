@@ -99,7 +99,10 @@ test.describe('a running turn', () => {
     await send(page, '見積書を作って')
     await expect(page.getByRole('button', { name: /^手分けした作業 過去の見積書と価格表を調べる/ })).toBeVisible()
     await models.click()
-    for (const item of await page.getByRole('menuitemradio').all()) await expect(item).toBeDisabled()
+    // The model and its effort are locked while Codex answers (「返事の形」 is for the next message, so it stays open).
+    const locked = page.getByRole('group', { name: /^(モデル|考える強さ)/ }).getByRole('menuitemradio')
+    await expect(locked.first()).toBeVisible()
+    for (const item of await locked.all()) await expect(item).toBeDisabled()
     await page.keyboard.press('Escape')
     // The progress event arrives 300 ms after the rows; give it time to (not) show.
     await page.waitForTimeout(800)
