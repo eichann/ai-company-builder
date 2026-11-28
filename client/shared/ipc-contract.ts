@@ -506,7 +506,7 @@ export interface IpcInvokeChannels {
   // Authentication and the server's API (the session stays in the main process)
   'auth:signUp': { args: [email: string, password: string, name?: string]; result: AuthResult }
   // server: the address the screen showed; main signs in only when it is still this computer's server.
-  'auth:signIn': { args: [email: string, password: string, server?: string]; result: AuthResult }
+  'auth:signIn': { args: [email: string, password: string, server: string]; result: AuthResult }
   'auth:signOut': { args: []; result: SimpleResult }
   'auth:getSession': { args: []; result: SessionResult }
   'api:getCompanies': { args: []; result: CompaniesResult }

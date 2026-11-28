@@ -11,7 +11,7 @@
 // A server address containing "bad" is refused, any other is accepted. Calls the page made are
 // in window.__acbSignIn.calls; window.__acbSignIn.offer(server) changes the link's address (as a
 // newer link would) and accepting checks the address the screen passes against it, as main does.
-// Sign-in, like main, sends nothing when the address the screen names is not the one saved.
+// Sign-in, like main, sends nothing when the address the screen names (always named) is not the one saved.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -36,7 +36,7 @@ installElectronAPI({
   getServerUrl: async () => 'https://acb.example.com',
   signIn: async (email, _password, server) => {
     calls.push(['signIn', email, server])
-    if (server !== undefined && server !== saved) return { success: false, error: 'つなぎ先が変わったため、ログインしませんでした。' }
+    if (server !== saved) return { success: false, error: 'つなぎ先が変わったため、ログインしませんでした。' }
     calls.push(['passwordSentTo', saved])
     return params.get('signin') === 'ok' ? { success: true } : { success: false, error: 'メールアドレスかパスワードが違います' }
   },

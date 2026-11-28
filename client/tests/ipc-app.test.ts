@@ -121,8 +121,8 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
 
   assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null }) // no cookie: no request
   assert.equal(h.server.to('/api/me').length, 0)
-  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'wrong'), { success: false, error: 'Invalid email or password' })
-  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'right'), { success: true })
+  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'wrong', SERVER_URL), { success: false, error: 'Invalid email or password' })
+  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'right', SERVER_URL), { success: true })
   const signIn = h.server.to('/api/auth/sign-in/email').at(-1)!
   assert.equal(signIn.headers.get('Origin'), 'app://')
   assert.ok(signIn.headers.get('X-ACB-Client-Version'), 'server requests carry the client identity')
@@ -151,7 +151,7 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
   assert.equal(h.server.to('/api/me').length, asked)
 
   // Signing out offline still forgets the session on this computer.
-  await h.invoke('auth:signIn', 'me@example.com', 'right')
+  await h.invoke('auth:signIn', 'me@example.com', 'right', SERVER_URL)
   h.server.offline = true
   assert.deepEqual(await h.invoke('auth:signOut'), { success: false, error: 'fetch failed' })
   h.server.offline = false
@@ -170,7 +170,9 @@ test('auth:signIn with the address the screen showed: sent only while it is this
   const sent = () => h.server.to('/api/auth/sign-in/email').length
   const before = sent()
 
-  for (const shown of ['https://invited.example.com', `${SERVER_URL}.evil.test`, `${SERVER_URL}/api`, '', 42, null]) {
+  // No address named (a caller that does not say where it shows) is refused too.
+  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'secret-pw'), { success: false, error: AUTH_SERVER_CHANGED })
+  for (const shown of [undefined, 'https://invited.example.com', `${SERVER_URL}.evil.test`, `${SERVER_URL}/api`, '', 42, null]) {
     assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'secret-pw', shown), { success: false, error: AUTH_SERVER_CHANGED }, String(shown))
   }
   assert.equal(sent(), before, 'no password left for a server other than the one on screen')
@@ -193,7 +195,7 @@ test('auth:signIn / auth:signUp never hand the session token (or anything of the
   h.server.on('POST', '/api/auth/sign-out', { json: { success: true } })
 
   const answers = [
-    await h.invoke('auth:signIn', 'me@example.com', 'right'),
+    await h.invoke('auth:signIn', 'me@example.com', 'right', SERVER_URL),
     await h.invoke('auth:signUp', 'new@example.com', 'pw', 'New'),
   ]
   for (const answer of answers) {
@@ -531,7 +533,7 @@ test('first setup without choices: 所属 is the signed-in member\'s own, and an
   const user = { id: 'u-me', email: 'me@example.com', name: 'Me' }
   h.server.on('POST', '/api/auth/sign-in/email', { json: { user }, headers: { 'Set-Cookie': 'better-auth.session_token=tok.me; Path=/; HttpOnly' } })
   h.server.on('GET', '/api/me', { json: { success: true, data: user } })
-  await h.invoke('auth:signIn', 'me@example.com', 'pw')
+  await h.invoke('auth:signIn', 'me@example.com', 'pw', SERVER_URL)
   await h.invoke('auth:getSession')
 
   const members = (ids: string[]) => ({ json: { success: true, data: { canEdit: false, members: ids.map(userId => ({ userId, name: null, email: null })) } } })

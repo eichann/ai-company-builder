@@ -85,7 +85,7 @@ const api: ElectronAPI = {
   // Authentication
   signUp: (email: string, password: string, name?: string) =>
     invoke('auth:signUp', email, password, name),
-  signIn: (email: string, password: string, server?: string) =>
+  signIn: (email: string, password: string, server: string) =>
     invoke('auth:signIn', email, password, server),
   signOut: () => invoke('auth:signOut'),
   getSession: () => invoke('auth:getSession'),

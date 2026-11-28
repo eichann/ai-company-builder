@@ -1,8 +1,8 @@
 // Signing in to the ACB server and the server calls the renderer makes
 // directly. The session (cookies, and the token in the sign-in / sign-up
 // answer) stays in the main process (services/session.ts): sign-in and sign-up
-// answer the renderer only { success, error? }. Sign-in may name the server its screen showed:
-// main then sends the password only when that is still this computer's server
+// answer the renderer only { success, error? }. Sign-in names the server its screen showed:
+// main sends the password only when that is still this computer's server (never without one)
 // (ipc-and-main-process.md "The invitation's 「アプリを開く」").
 //   auth:signUp, auth:signIn, auth:signOut, auth:getSession,
 //   api:getCompanies, api:createCompany, api:getDepartments
@@ -93,11 +93,11 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
     }
   })
 
-  ipc.handle('auth:signIn', async (_, email: string, password: string, server?: unknown) => {
+  ipc.handle('auth:signIn', async (_, email: string, password: string, server: unknown) => {
     // One read: the password goes to exactly the server compared here.
     const target = serverUrl()
-    // The screen names the server it showed: anything saved since (or not a string) sends nothing.
-    if (server !== undefined && !sameServer(server, target)) {
+    // The screen names the server it showed: none, anything saved since, or not a string sends nothing.
+    if (!sameServer(server, target)) {
       console.warn('[auth] sign-in refused: the server on screen is not this computer\'s server')
       return { success: false, error: AUTH_SERVER_CHANGED }
     }

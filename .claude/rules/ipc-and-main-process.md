@@ -372,9 +372,10 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   them (an address typed before the link came, whose check answered late). So both sign-in screens
   pass the address they show to `auth:signIn(email, password, server)` — also on a retry after
   connecting, which skips the accept — and main, reading its server once, sends nothing and answers
-  `AUTH_SERVER_CHANGED` when that is not this computer's server (trailing slashes aside; `''`, a
-  non-string or another address is refused). `server` is optional in the contract (add-only); every
-  sign-in screen passes it. The typed path's check that answers after its screen was replaced (a
+  `AUTH_SERVER_CHANGED` when that is not this computer's server (trailing slashes aside; none, `''`, a
+  non-string or another address is refused). `server` is **required** (owner decision 2026-11-29:
+  renderer and main ship together, so no released renderer calls without it); a call without one
+  sends nothing. The typed path's check that answers after its screen was replaced (a
   link's form came) saves nothing (`TypedAddress`, a callback ref, no effect). Before sign-in nothing names the company (owner decision 6): the host is the
   check, the company's name shows only on the join screen after sign-in (`download-choices.md`).
   With no server and no link, the first screen waits for the link (「招待のメールから始めます」);
