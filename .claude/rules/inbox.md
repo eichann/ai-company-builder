@@ -496,7 +496,8 @@ pressing each record's own action.
   versions, `pressUndo`, era-bound) and the next row takes the card's place; the list's ［取り消す］ says the undo's words
   (the Gmail line included) and shows the contact again. Without it the card says what happened and offers ［取り消す］ itself.
 - **Buttons follow `may` only** (owner decision 11/28): 返事が要る / AI が下書き中 ［返した］ (`replied_elsewhere`); a draft →
-  ［下書きを確かめて送る］ (opens the mail draft's own card, which alone sends) with ［返した（下書きは送らない）］ in 「…」;
+  ［下書きを確かめて送る］ (opens the mail draft's own card, which alone sends; in the inbox it keeps the contact's row — 「4 / 8」,
+  ［前の件］［次の件］ — and once sent or thrown away the next row comes, `contact-card.spec.ts` 「the draft opened from a contact…」) with ［返した（下書きは送らない）］ in 「…」;
   返事待ち ［済んだ（もう待たない）］ and 確かめ中 ［済んだ］ (`close`); 「…」 ［返事は要らなくなった］ (`drop`, the reason asked in
   a dialog). A button whose action the server did not allow is not drawn; someone else's open 返事のお願い is one read-only
   line (「田中さんが返します（期限 12/2）」, the name from the task list's members through AppShell, else 「ほかの人」). The card
@@ -523,7 +524,12 @@ pressing each record's own action.
   card's status; a contact whose reply is over with a やること open is put in 「確認したもの」. The contacts read are the
   ones the newest notices name (`contactsToRead`, ≤ `CONTACT_ROW_READS` 30, read again when a newer notice about the
   record comes — its version is the stamp —, and each time the card opens); until a contact is read its notices keep
-  their own rows as before (offline included). No new count, kind or server call per list beyond these reads.
+  their own rows as before (offline included). **A read that failed is not counted as read** (Codex review of UX stage 2:
+  its stamp stayed asked, so the rows never became the contact until a new notice): its stamp is forgotten and the same
+  names are asked again when the PC is back online (the window's `online` event) or the panel opens again
+  (`useContacts`' `again`, from `useInboxSlot`) — only the failed ones are read, never on a timer, never per draw
+  (`contactPress.test.ts` 「a first read that failed…」, `contact-card.spec.ts` 「…back online…」). No new count, kind or
+  server call per list beyond these reads.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
   one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
   and a read answered after a company change show nothing; the newest read wins), `model.test.ts` (one row, 確認したもの,

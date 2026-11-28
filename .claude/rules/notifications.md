@@ -515,7 +515,7 @@ Never a row's own approve or send (unchanged): only the card's buttons act.
 - **The next one after a press** (common decision): a card's own press that finished it there hands the inbox `onDone`
   (`ApprovalCard`: approved, sent back, withdrawn, 「同じ」 — only when the request's state says so, `DONE_STATE`: an approve
   answered `failed` or `stale` stays on its card; `MailDraftCard` / `PreparedMailCard`: sent with a known result,
-  thrown away; `BrowserPlanCard`: cancelled, or 済んでいた / されていなかった — **not** after ［任せる］, whose result is read on
+  thrown away — also the draft opened from a 連絡's card, which stands for the contact's row (`Beside.rowKey` kept); `BrowserPlanCard`: cancelled, or 済んでいた / されていなかった — **not** after ［任せる］, whose result is read on
   the card first; `ContactCard` `onFinished`: a finish written). The next row takes its place (`work.ended`; the last
   one → the card goes) and the list says 「『…』を片づけました。次の件です」; ［取り消す］ only where the press can be taken back (a
   contact's finish, at the versions it answered); approvals and sends cannot. A send whose result nobody knows stays.
