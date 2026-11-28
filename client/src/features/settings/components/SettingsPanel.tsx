@@ -1,3 +1,5 @@
+// Over ~300 lines: the panel owns the .env / .gitignore drafts and asks before they (or a section's) are lost;
+// the sections it draws are their own files.
 import { VoiceShortcutSettings } from '../../voice/components/VoiceShortcutSettings'
 import { companyHasSharedFolder } from '../../../../shared/company-folder'
 import { VoicePromptSettings } from '../../voice/components/VoicePromptSettings'
@@ -18,7 +20,9 @@ import { useBrowserSites } from '../hooks/useBrowserSites'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { Dialog } from '../../../shared/ui/Dialog'
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
+import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected, Globe } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
@@ -122,6 +126,12 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   const [newKeyName, setNewKeyName] = useState('')
   const [pastedEnv, setPastedEnv] = useState('')
   const [gitignoreContent, setGitignoreContent] = useState('')
+  const [gitignoreSaved, setGitignoreSaved] = useState('')
+  // The open section's own unsaved input (download choices, AI env names, a key, voice instructions).
+  const sectionUnsaved = useRef<UnsavedChanges>(null)
+  // Asked before closing (or leaving a section whose input would be dropped): what to do with what is unsaved.
+  const [leaving, setLeaving] = useState<{ what: string[]; verb: string; then: () => void; section: boolean } | null>(null)
+  const [leaveSaving, setLeaveSaving] = useState(false)
   // Read-only until the server says this member is an owner or admin (canEditCompanyGitignore).
   const [gitignoreEditable, setGitignoreEditable] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -156,11 +166,8 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
 
         // Load .gitignore
         const gitignoreResult = await readGitignore(currentCompany.rootPath)
-        if (gitignoreResult) {
-          setGitignoreContent(gitignoreResult)
-        } else {
-          setGitignoreContent('')
-        }
+        setGitignoreContent(gitignoreResult || '')
+        setGitignoreSaved(gitignoreResult || '')
       } catch (e) {
         setError(e instanceof Error ? e.message : '読み込みに失敗しました')
       } finally {
@@ -236,52 +243,83 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
     })
   }, [])
 
-  // Save all changes
-  const saveChanges = useCallback(async () => {
-    if (!currentCompany?.rootPath) return
+  // .env: only typed values and removals are sent; main merges them into the file. null = saved.
+  const envChanges = envChangesToSave({ ...envDrafts, ...envDraftsFromText(pastedEnv) }, removedKeys)
+  const envDirty = Object.keys(envChanges).length > 0
+  // Also typed but not a value to save yet (a new name, a paste without values): asked about at closing.
+  const envTyped = envDirty || addedKeys.length > 0 || newKeyName.trim() !== '' || pastedEnv.trim() !== ''
+  const gitignoreDirty = gitignoreEditable && gitignoreContent !== gitignoreSaved
+  const saveEnv = useCallback(async (): Promise<string | null> => {
+    if (!currentCompany?.rootPath) return null
+    const result = await updateCompanyEnv(currentCompany.rootPath, envChanges)
+    if (!result.success) return result.error || '保存に失敗しました'
+    const status = await readCompanyEnvStatus(currentCompany.rootPath)
+    if (status.success && status.vars) setEnvStatus(status.vars)
+    setEnvDrafts({})
+    setRemovedKeys(new Set())
+    setAddedKeys([])
+    setPastedEnv('')
+    return null
+  }, [currentCompany?.rootPath, envChanges])
+  const saveGitignore = useCallback(async (): Promise<string | null> => {
+    if (!currentCompany?.rootPath || !gitignoreEditable) return null
+    if (!await writeGitignore(currentCompany.rootPath, gitignoreContent)) return '保存に失敗しました'
+    setGitignoreSaved(gitignoreContent)
+    return null
+  }, [currentCompany?.rootPath, gitignoreContent, gitignoreEditable])
 
+  // The footer's 保存: the open section's part.
+  const saveChanges = useCallback(async () => {
     setSaving(true)
     setError(null)
     try {
-      if (activeTab === 'gitignore') {
-        if (!gitignoreEditable) return
-        // Save .gitignore
-        const result = await writeGitignore(currentCompany.rootPath, gitignoreContent)
-        if (result) {
-          setSaved(true)
-          setTimeout(() => setSaved(false), 2000)
-        } else {
-          setError('保存に失敗しました')
-        }
-      } else {
-        // .env: only typed values and removals are sent; main merges them into the file.
-        const drafts = { ...envDrafts, ...envDraftsFromText(pastedEnv) }
-        const changes = envChangesToSave(drafts, removedKeys)
-        const result = await updateCompanyEnv(currentCompany.rootPath, changes)
-        if (result.success) {
-          const status = await readCompanyEnvStatus(currentCompany.rootPath)
-          if (status.success && status.vars) setEnvStatus(status.vars)
-          setEnvDrafts({})
-          setRemovedKeys(new Set())
-          setAddedKeys([])
-          setPastedEnv('')
-          setSaved(true)
-          setTimeout(() => setSaved(false), 2000)
-        } else {
-          setError(result.error || '保存に失敗しました')
-        }
-      }
+      const failed = await (activeTab === 'gitignore' ? saveGitignore() : saveEnv())
+      if (failed) setError(failed)
+      else { setSaved(true); setTimeout(() => setSaved(false), 2000) }
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました')
     } finally {
       setSaving(false)
     }
-  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent, gitignoreEditable])
+  }, [activeTab, saveEnv, saveGitignore])
+
+  // What closing would drop (`section`: only the open section's own input, which leaving it drops too).
+  const unsavedParts = (sectionOnly: boolean): string[] => [
+    ...(!sectionOnly && envTyped ? ['APIキー・環境変数（.env）の入力'] : []),
+    ...(!sectionOnly && gitignoreDirty ? ['同期しないファイル（.gitignore）の変更'] : []),
+    ...[sectionUnsaved.current?.pending() ?? null].filter((x): x is string => !!x),
+  ]
+  const leave = (then: () => void, sectionOnly: boolean, verb: string) => {
+    const what = unsavedParts(sectionOnly)
+    if (what.length === 0) then()
+    else setLeaving({ what, verb, then, section: sectionOnly })
+  }
+  const close = () => leave(onClose, false, '閉じる')
+  const saveAndLeave = async () => {
+    if (!leaving) return
+    setLeaveSaving(true)
+    setError(null)
+    let failed: string | null = null
+    try {
+      if (!leaving.section && envDirty) failed = await saveEnv()
+      if (!failed && !leaving.section && gitignoreDirty) failed = await saveGitignore()
+      if (!failed && sectionUnsaved.current?.pending()) failed = await sectionUnsaved.current.save()
+    } catch (e) {
+      failed = e instanceof Error ? e.message : '保存に失敗しました'
+    }
+    setLeaveSaving(false)
+    const then = leaving.then
+    setLeaving(null)
+    // Not saved: the settings stay open where the reason shows ('' = the section says it or asks itself).
+    if (failed !== null) { if (failed) setError(failed); return }
+    then()
+  }
 
   if (!currentCompany) {
     return null
   }
 
+  const tabDirty = activeTab === 'gitignore' ? gitignoreDirty : (activeTab === 'apikeys' || activeTab === 'advanced') && envDirty
   const hasSaveFooter = activeTab === 'apikeys' || (activeTab === 'gitignore' && gitignoreEditable) || activeTab === 'advanced'
 
   const loadingState = (
@@ -293,7 +331,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   return (
     // The shared frame (design-system.md, P2d): its surface, scrim and keys — Tab stays inside, Esc
     // closes and stops there, focus goes back to what opened it; a wide two-pane dialog of its own size.
-    <Dialog onClose={onClose} label="設定" size="custom" padded={false}
+    <Dialog onClose={close} label="設定" size="custom" padded={false}
       className="flex h-[min(760px,92vh)] max-w-[1040px] overflow-hidden">
         {/* Section nav */}
         <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-[color:var(--color-border)] bg-bg px-3 py-5">
@@ -313,13 +351,16 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                         <button
                           type="button"
                           aria-current={active ? 'page' : undefined}
-                          onClick={() => { setActiveTab(item.id); setSaved(false); setError(null) }}
+                          onClick={() => { if (!active) leave(() => { setActiveTab(item.id); setSaved(false); setError(null) }, true, '移る') }}
                           className={`flex h-control w-full items-center gap-2.5 rounded-control px-2.5 text-left text-body transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring ${active
                             ? 'bg-surface-raised font-medium text-text shadow-card ring-1 ring-[color:var(--color-border)]'
                             : 'text-text-muted hover:bg-surface-sunken hover:text-text'}`}
                         >
                           <span className={active ? 'text-selected-icon' : 'text-text-subtle'}>{item.icon}</span>
                           {item.label}
+                          {((envDirty && (item.id === 'apikeys' || item.id === 'advanced')) || (gitignoreDirty && item.id === 'gitignore')) && (
+                            <span className="ml-auto text-caption font-normal text-warning-text">未保存</span>
+                          )}
                         </button>
                       </li>
                     )
@@ -339,13 +380,16 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
         <div className="relative flex min-w-0 flex-1 flex-col">
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             aria-label="閉じる"
             className="absolute right-4 top-4 z-10 rounded-control p-1.5 text-text-subtle transition-colors hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
           >
             <X size={18} />
           </button>
 
+          {error && !hasSaveFooter && (
+            <div className="px-8 pt-7"><Callout tone="danger">{error}</Callout></div>
+          )}
           <div className="flex-1 overflow-y-auto">
             {activeTab === 'sync' ? (
               <>
@@ -356,16 +400,16 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                     </Callout>
                   </div>
                 )}
-                <DownloadFoldersSection rootPath={currentCompany.rootPath} companyId={currentCompany.id} departments={departments} />
+                <DownloadFoldersSection unsavedRef={sectionUnsaved} rootPath={currentCompany.rootPath} companyId={currentCompany.id} departments={departments} />
               </>
             ) : activeTab === 'voice' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
                 <Card className="p-5"><VoiceShortcutSettings /></Card>
-                <Card className="p-5"><VoicePromptSettings /></Card>
+                <Card className="p-5"><VoicePromptSettings unsavedRef={sectionUnsaved} /></Card>
               </div>
             ) : activeTab === 'ownkeys' ? (
-              <OwnKeysSection companyId={currentCompany.id} focusService={focusService} />
+              <OwnKeysSection unsavedRef={sectionUnsaved} companyId={currentCompany.id} focusService={focusService} />
             ) : activeTab === 'tools' ? (
               <ConnectToolsScreen key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'google' ? (
@@ -386,7 +430,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             ) : activeTab === 'aienv' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
-                <Card className="p-5"><AgentEnvSettings /></Card>
+                <Card className="p-5"><AgentEnvSettings unsavedRef={sectionUnsaved} /></Card>
               </div>
             ) : activeTab === 'autosync' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
@@ -553,6 +597,8 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             <div className="flex items-center justify-between gap-4 border-t border-[color:var(--color-border)] bg-surface-raised px-8 py-3">
               {error ? (
                 <p role="alert" className="text-body text-red-600 dark:text-red-300">{error}</p>
+              ) : tabDirty ? (
+                <p role="status" className="min-w-0 truncate text-small text-warning-text">まだ保存していません。保存すると反映されます。</p>
               ) : (
                 <p className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
                   保存先: <code className={CODE}>{currentCompany.rootPath}/{activeTab === 'gitignore' ? '.gitignore' : '.env'}</code>
@@ -564,6 +610,10 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             </div>
           )}
         </div>
+        {leaving && (
+          <UnsavedChangesDialog what={leaving.what} verb={leaving.verb} saving={leaveSaving}
+            onSave={() => void saveAndLeave()} onDiscard={() => { const then = leaving.then; setLeaving(null); then() }} onBack={() => setLeaving(null)} />
+        )}
     </Dialog>
   )
 }

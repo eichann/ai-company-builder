@@ -3,7 +3,7 @@
 // folder up), with the preload API faked. Query:
 //   ?companies=empty|error   the member's company list
 //   ?folder=empty|clone|refuse|upload|offline   what main says the chosen folder is
-//   ?depts=0                 the company has no departments (no picker)
+//   ?depts=0                 the company has no departments (no picker); ?depts=fail the list cannot be read
 //   ?pick=cancel             the folder dialog is cancelled
 //   ?setup=fail|manual       the download fails / waits for window.__acbCompany.finishSetup()
 //   ?companies=one           the member belongs to one company (it opens by itself)
@@ -93,6 +93,7 @@ installElectronAPI({
   getDepartments: async companyId => {
     calls.push(['getDepartments', companyId])
     if (params.get('depts') === '0') return { success: true, data: [] }
+    if (params.get('depts') === 'fail') return { success: false, error: 'offline' }
     return { success: true, data: MANUAL
       ? [department('d1', '営業部', '営業部'), department('d2', '総務部', '総務部'), department('d3', '企画部', '企画部')]
       : [department('d1', '営業部', '営業部'), department('d2', '開発', 'development'), department('d3', '入れ子', '営業部/東京')] }

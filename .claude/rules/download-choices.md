@@ -55,12 +55,18 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   (the member's own files there) lands on the folder choice with the reason. Tests:
   `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「one company…」,
   `tests/ipc-app.test.ts` 「first setup without choices…」.
-- In a **fresh folder** the member picks departments first (`CompanySelector`:
-  「所属する部署を選んでください。他の部署はあとから設定でダウンロードできます」). Then
+- In a **fresh folder** the member picks departments first (`DepartmentPicker`, 「この PC に置く部署を選ぶ」:
+  it decides what this PC downloads, not who belongs — UX review 2026-11-28). 「すべての部署」 is an
+  option of its own at the top; choosing a department leaves it and the other way round
+  (`togglePick` / `pickedDownload` in `features/company/model.ts`). **Nothing chosen downloads nothing
+  yet**: the button says 「部署を選んでください」 and is disabled — it is never read as 「すべて」. Then
   `git:setupCompanyRemote` → `checkoutSelectedDepartments`: `fetch --filter=blob:none` → persist
   the exclusions (the departments *not* picked) and set the patterns → checkout (downloads only
-  the checked-out blobs, in one batch). Nothing picked → full clone. Existing clones are never
-  converted to partial clones.
+  the checked-out blobs, in one batch). 「すべての部署」 sends no list → full clone (main's contract
+  unchanged). When the company's department list cannot be read, the first setup stops with
+  `DEPARTMENTS_UNREAD` on the folder choice (`folderSetup.ts`) instead of downloading everything; a company that
+  answers no departments still opens whole. Existing clones are never converted to partial clones. Tests:
+  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「「すべての部署」 is chosen on purpose…」, 「the departments cannot be read…」.
 - Both selector paths (「既存のフォルダを開く」 = the folder, 「新しく作成」 = `<folder>/<company>`)
   first ask `git:inspectCompanyFolder` (`sync/company-folder.ts`, read-only; renderer
   `src/features/company/folderPlan.ts`):
@@ -159,7 +165,18 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
 - `client/src/features/settings/components/DownloadFoldersSection.tsx` (logic `src/shared/lib/download-selection.ts`):
   tri-state tree (one level per expand) with sizes; summary
   「6.5 GB をダウンロード済み（全体 10.4 GB）」 + bar + size after applying; search over loaded
-  folders; sticky footer — changes are a draft until 適用 (取り消す drops it); applying asks
+  folders; sticky footer — changes are a draft until 適用 (取り消す drops it). **Nothing typed or chosen in the
+  settings is lost silently** (UX review 2026-11-28): settings that apply at once (switches, automatic sync, voice keys)
+  stay so; a section that needs 保存 / 適用 — the .env keys and paste, 同期しないファイル, ダウンロードするフォルダ,
+  自分の鍵, AIに渡す環境変数, 音声入力の整え方 — says 「まだ保存していません」 (the nav marks 未保存 for the panel's own
+  .env / .gitignore drafts), and closing (×, Esc, the scrim) asks ［戻る］［保存しないで閉じる］［保存して閉じる］
+  (`UnsavedChangesDialog`), naming what is unsaved and never a value. A section's own input (`UnsavedChanges`
+  handle, `src/shared/lib/unsavedChanges.ts`) is asked about when the member moves to another section too (移る),
+  the panel's .env / .gitignore drafts only at closing (they survive a section change). Nothing is written as a
+  draft anywhere: a typed key lives in memory until saved or the settings close. 保存して閉じる on the download
+  choice is 適用 (its uncommitted-changes confirm still comes first, and then the settings stay open). A focus
+  request while the settings are open (`settings.openOwnKey`, 定期の仕事) no longer remounts them. Test:
+  `tests/ui/settings-unsaved.spec.ts`. Applying asks
   first about uncommitted changes and shows bytes received. Offline: sizes 「—」, the draft is
   kept. The settings panel has a left section nav and shares `src/shared/ui/primitives.tsx` (neutral zinc,
   one indigo accent, light and dark). The panel reaches the main process only through

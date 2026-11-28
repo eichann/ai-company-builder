@@ -12,7 +12,9 @@
 // ［元に戻す］ undoes that entry, ［このまま］ keeps both. 「届いた議事録を AI が自動で読む」 (4b-4 A2b): a
 // member who never chose is offered 「社外の人がいる会議だけ」 above the meetings, and choosing it sends that
 // and hides the offer, a choice made meanwhile (Settings) is never replaced and the offer goes; a server keeping a series' three choices shows them on the card, the current one
-// marked, and 「設定に従う」 sends none (null).
+// marked, and 「設定に従う」 sends none (null). The card's load (UX review 2026-11-28): a failure is said with
+// ［もう一度］ instead of a card without buttons, a failed read again keeps what was shown, a server without the
+// buttons is a plain note; the main buttons sit under the name, an unread meeting asks in its summary's place.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -154,11 +156,12 @@ for (const [where, width] of [['wide', 1300], ['narrow', 900]] as const) {
     const top = async (l: import('@playwright/test').Locator) => (await l.boundingBox())!.y
     const order = [
       card.getByRole('heading', { level: 1, name: '定例ミーティング' }),
+      // The main buttons right under the name (UX review 2026-11-28), the series' reading after the lists.
+      card.getByRole('button', { name: 'この会議について相談する' }),
       card.getByRole('region', { name: '要約' }),
       card.getByRole('article').getByRole('region', { name: '決めたこと' }),
       card.getByRole('region', { name: 'やることの案' }),
       card.locator('[data-auto-offer]'),
-      card.getByRole('button', { name: 'この会議について相談する' }),
       card.getByRole('group', { name: 'どの案件の会議ですか？' }),
     ]
     if (where === 'narrow') order.push(card.getByRole('complementary', { name: 'つながっているもの' }), card.getByRole('region', { name: '経緯' }))
@@ -333,5 +336,61 @@ test('Settings changing the setting takes the offer away at once', async ({ page
     window.dispatchEvent(new CustomEvent('acb:meeting-auto-read-changed', { detail: 'co' }))
   })
   await expect(offer).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+const openCard = async (page: import('@playwright/test').Page, params?: Record<string, string>) => {
+  const state = await openPreview(page, 'meetings', params)
+  await page.getByRole('button', { name: '定例ミーティングを開く' }).click()
+  return { state, card: page.getByTestId('record-card') }
+}
+const meetings = (page: import('@playwright/test').Page) => ({
+  cardAnswer: (kind: 'fail' | 'off' | 'throw' | null) => page.evaluate(k => (window as unknown as { __acbMeetings: { cardAnswer: (k: unknown) => void } }).__acbMeetings.cardAnswer(k), kind),
+  reread: () => page.evaluate(() => (window as unknown as { __acbMeetings: { reread: () => void } }).__acbMeetings.reread()),
+})
+
+test('a meeting not read yet: ［AI に読ませる］ once, in the empty summary right under the main buttons', async ({ page }) => {
+  const { state, card } = await openCard(page)
+  const summary = card.getByRole('region', { name: '要約' })
+  await expect(summary.getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'AI に読ませる', exact: true })).toHaveCount(1)
+  const consult = await card.getByRole('button', { name: 'この会議について相談する' }).boundingBox()
+  expect(consult!.y).toBeLessThan((await summary.boundingBox())!.y)
+  await summary.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
+  await expect(page.locator('#log')).toHaveText('read meeting-teirei01@1')
+  expectNoPageErrors(state)
+})
+
+test('the card could not be read: said with ［もう一度］, never an empty card without buttons; ［もう一度］ brings them', async ({ page }) => {
+  const { state, card } = await openCard(page, { card: 'fail' })
+  const failed = card.getByRole('alert').filter({ hasText: 'サーバーに接続できない' })
+  await expect(failed).toBeVisible()
+  await expect(card.getByRole('button', { name: 'この会議について相談する' })).toHaveCount(0)
+  await meetings(page).cardAnswer(null)
+  await failed.getByRole('button', { name: 'もう一度' }).click()
+  await expect(card.getByRole('button', { name: 'この会議について相談する' })).toBeVisible()
+  await expect(failed).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('reading the card again fails: what was shown stays, with why and ［もう一度］', async ({ page }) => {
+  const { state, card } = await openCard(page)
+  await expect(card.getByRole('button', { name: 'この会議について相談する' })).toBeVisible()
+  await meetings(page).cardAnswer('throw')
+  await meetings(page).reread()
+  const stale = card.getByRole('alert').filter({ hasText: '最新の状態を読み込めませんでした' })
+  await expect(stale).toBeVisible()
+  await expect(card.getByRole('button', { name: 'この会議について相談する' })).toBeVisible()
+  await meetings(page).cardAnswer(null)
+  await stale.getByRole('button', { name: 'もう一度' }).click()
+  await expect(stale).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a server without the card\'s buttons: said plainly, not as a failure', async ({ page }) => {
+  const { state, card } = await openCard(page, { card: 'off' })
+  await expect(card.getByRole('note').filter({ hasText: '操作は使えません' })).toBeVisible()
+  await expect(card.getByRole('alert')).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'もう一度' })).toHaveCount(0)
   expectNoPageErrors(state)
 })

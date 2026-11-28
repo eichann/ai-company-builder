@@ -198,7 +198,8 @@ export function CompanySelector() {
           <DepartmentPicker
             departments={picker.departments}
             onBack={() => setView(picker.backView)}
-            onDownload={folders => startSetup(selected, picker.folder, folders, 'firstSetup')}
+            // 「すべての部署」 is the setup's full download (no folder list); a list downloads only those.
+            onDownload={folders => startSetup(selected, picker.folder, folders === 'all' ? [] : folders, 'firstSetup')}
           />
         )}
 

@@ -25,6 +25,33 @@ export interface PickableDepartment {
   folder: string
 }
 
+/**
+ * What the first setup's 「この PC に置く部署」 has chosen: every department (an explicit choice), some, or
+ * nothing yet. Nothing chosen is never read as 「すべて」 (UX review 2026-11-28): the setup waits for a choice.
+ */
+export type DepartmentPick = { all: true } | { all: false; folders: ReadonlySet<string> }
+
+export const NOTHING_PICKED: DepartmentPick = { all: false, folders: new Set() }
+
+/**
+ * A press on 「すべての部署」 or on one department (tagged: a department may be named anything, `all` included):
+ * choosing one leaves 「すべて」, and the other way round.
+ */
+export function togglePick(pick: DepartmentPick, press: { all: true } | { folder: string }): DepartmentPick {
+  if ('all' in press) return pick.all ? NOTHING_PICKED : { all: true }
+  const folders = new Set(pick.all ? [] : pick.folders)
+  if (folders.has(press.folder)) folders.delete(press.folder)
+  else folders.add(press.folder)
+  return { all: false, folders }
+}
+
+/** What the download button does: every department, these folders in the list's order, or nothing yet (disabled). */
+export function pickedDownload(departments: readonly PickableDepartment[], pick: DepartmentPick): 'all' | string[] | null {
+  if (pick.all) return 'all'
+  const folders = departments.map(d => d.folder).filter(f => pick.folders.has(f))
+  return folders.length > 0 ? folders : null
+}
+
 /** Departments the picker offers: root folders only (a sparse exclusion is per root folder here). */
 export function pickableDepartments(departments: DepartmentInfo[]): PickableDepartment[] {
   return departments

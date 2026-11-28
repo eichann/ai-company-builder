@@ -1,7 +1,7 @@
 // Meetings for their attendees (minutes.md "Meetings for their attendees", design §4-5): what the
 // inbox's row says for one meeting (the banner on やること before 2026-11-26), in the member's words. Pure.
 import type { AiTurnItemView } from '../../../shared/ai-turns'
-import type { InviteSet, MeetingArrivalView, MeetingInviteChoicesResult } from '../../../shared/minutes-app'
+import type { InviteSet, MeetingArrivalView, MeetingCardStateResult, MeetingInviteChoicesResult } from '../../../shared/minutes-app'
 import type { MeetingNews } from '../../../shared/notifications-app'
 
 type InviteChoices = Extract<MeetingInviteChoicesResult, { success: true }>
@@ -160,3 +160,29 @@ export const SERIES_CHOICES: ReadonlyArray<{ choice: 'auto' | 'off' | null; labe
   { choice: 'off', label: '読まない' },
   { choice: null, label: '設定に従う' },
 ]
+
+type MeetingCardState = Extract<MeetingCardStateResult, { success: true }>
+
+/**
+ * A meeting card's load, kept apart so the card never turns into a page without buttons that looks
+ * broken: still reading it, it could not be read (［もう一度］), or the server has no buttons for it
+ * (an older server, records off, a state it does not name: main's `error: ''`).
+ */
+export type MeetingCardLoad =
+  | { kind: 'loading' }
+  | { kind: 'failed'; error: string }
+  | { kind: 'unavailable' }
+  /** `refreshFailed`: reading it again failed; what was shown stays, with why. */
+  | { kind: 'ready'; state: MeetingCardState; refreshFailed: string | null }
+
+/** Said when main's answer never came (the call itself threw). */
+export const MEETING_CARD_LOAD_FAILED = '会議の情報を読み込めませんでした。'
+
+/** The card's load after one answer (`'threw'`: no answer from main). A failure keeps what was shown. */
+export function nextMeetingCardLoad(prev: MeetingCardLoad, answer: MeetingCardStateResult | 'threw'): MeetingCardLoad {
+  if (answer !== 'threw' && answer.success) return { kind: 'ready', state: answer, refreshFailed: null }
+  // Main's empty error also covers a passing outage of the arrivals: a card already shown keeps its state.
+  if (answer !== 'threw' && answer.error === '') return prev.kind === 'ready' ? { ...prev, refreshFailed: MEETING_CARD_LOAD_FAILED } : { kind: 'unavailable' }
+  const error = answer === 'threw' || !answer.error ? MEETING_CARD_LOAD_FAILED : answer.error
+  return prev.kind === 'ready' ? { ...prev, refreshFailed: error } : { kind: 'failed', error }
+}

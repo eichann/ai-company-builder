@@ -337,7 +337,7 @@ export const scenes: Scene[] = [
   // ── 3章 自分の部署を選ぶ ─────────────────────────────────────────────────
   {
     id: 'setup-department-picker',
-    about: '「所属する部署を選択」 with 営業部 checked and the download button.',
+    about: '「この PC に置く部署を選ぶ」 with 営業部 checked and the download button.',
     ...SELECTOR,
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
@@ -347,23 +347,26 @@ export const scenes: Scene[] = [
       { click: 'role=button[name=/^営業部/]' },
     ],
     annotations: [
-      { marker: { target: 'text=所属する部署を選んでください', label: '1', at: 'left' } },
+      { marker: { target: 'text=この PC にダウンロードする部署を選んでください', label: '1', at: 'left' } },
       { box: 'role=button[name=/^営業部/]' }, { marker: { target: 'role=button[name=/^営業部/]', label: '2', at: 'left' } },
       { box: 'role=button[name=/^選んだ部署をダウンロード/]' }, { marker: { target: 'role=button[name=/^選んだ部署をダウンロード/]', label: '3', at: 'below' } },
     ],
   },
   {
     id: 'setup-department-none',
-    about: 'Nothing checked: the button says すべての部署をダウンロード.',
+    about: 'Nothing chosen: 「すべての部署」 is a choice of its own, and the button waits (「部署を選んでください」).',
     ...SELECTOR,
     steps: [
       { click: 'role=button[name=/^検証A社/]' },
       { click: 'role=button[name=/^新しく作成/]' },
       { click: 'role=button[name=/^フォルダを選択/]' },
       { click: 'role=button[name=/^開始/]' },
-      { waitFor: 'text=所属する部署を選んでください' },
+      { waitFor: 'text=この PC にダウンロードする部署を選んでください' },
     ],
-    annotations: [{ box: 'role=button[name=/^すべての部署をダウンロード/]' }, { marker: { target: 'role=button[name=/^すべての部署をダウンロード/]', label: '1', at: 'below' } }],
+    annotations: [
+      { box: 'role=button[name=/^すべての部署 /]' }, { marker: { target: 'role=button[name=/^すべての部署 /]', label: '1', at: 'left' } },
+      { box: 'role=button[name=/^部署を選んでください/]' }, { marker: { target: 'role=button[name=/^部署を選んでください/]', label: '2', at: 'below' } },
+    ],
   },
   {
     id: 'setup-progress',

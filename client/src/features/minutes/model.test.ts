@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingArrivalView } from '../../../shared/minutes-app'
-import { invitedText, meetingBanner, meetingNewsOf, mergeMeetingRows, MEETING_EXPIRES_SOON_MS, offeredSets, readingWords, type MeetingBanner } from './model'
+import { invitedText, meetingBanner, meetingNewsOf, mergeMeetingRows, MEETING_CARD_LOAD_FAILED, MEETING_EXPIRES_SOON_MS, nextMeetingCardLoad, offeredSets, readingWords, type MeetingBanner, type MeetingCardLoad } from './model'
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
@@ -119,4 +119,26 @@ test('［招待する］: groups and departments only when the server says the m
   const members = [{ id: 'u-1', name: '有田' }]
   assert.equal(invitedText(['u-1'], [{ type: 'group', id: 'g1' }, { type: 'department', id: 'd1' }], members, choices), '有田さん、「採用チーム」の人、営業部に所属する人を招待しました。')
   assert.equal(invitedText([], [], members, choices), '選んだ人は、もうこの会議を見られます。')
+})
+
+test('the card\'s load: a failure is said (never an empty card), 「使えない」 apart from it, and reading again keeps what was shown', () => {
+  const loading: MeetingCardLoad = { kind: 'loading' }
+  const ok = { success: true as const, meeting: { ...item(), made: null }, review: null }
+  // A first read that fails says why (main's words, or ours when main never answered) — the card offers ［もう一度］.
+  assert.deepEqual(nextMeetingCardLoad(loading, { success: false, error: 'オフラインです' }), { kind: 'failed', error: 'オフラインです' })
+  assert.deepEqual(nextMeetingCardLoad(loading, 'threw'), { kind: 'failed', error: MEETING_CARD_LOAD_FAILED })
+  // main's empty error = an older server / records off: not a failure to retry.
+  assert.deepEqual(nextMeetingCardLoad(loading, { success: false, error: '' }), { kind: 'unavailable' })
+  const ready = nextMeetingCardLoad(loading, ok)
+  assert.deepEqual(ready, { kind: 'ready', state: ok, refreshFailed: null })
+  // Reading again fails: the meeting and its buttons stay, with why.
+  const kept = nextMeetingCardLoad(ready, 'threw')
+  assert.equal(kept.kind === 'ready' && kept.state, ok)
+  assert.equal(kept.kind === 'ready' && kept.refreshFailed, MEETING_CARD_LOAD_FAILED)
+  // An empty error after the card was shown (a passing outage, not an older server): kept, with ［もう一度］.
+  const keptOff = nextMeetingCardLoad(ready, { success: false, error: '' })
+  assert.equal(keptOff.kind === 'ready' && keptOff.refreshFailed, MEETING_CARD_LOAD_FAILED)
+  // ［もう一度］ that works clears the line; a failed first read recovers the same way.
+  assert.deepEqual(nextMeetingCardLoad(kept, ok), { kind: 'ready', state: ok, refreshFailed: null })
+  assert.equal(nextMeetingCardLoad({ kind: 'failed', error: 'x' }, ok).kind, 'ready')
 })
