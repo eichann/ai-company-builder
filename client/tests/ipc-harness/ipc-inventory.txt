@@ -979,7 +979,7 @@ contract.type IpcInvokeChannels.'docView:review' = 'docView:review': { args: [vi
 contract.type IpcInvokeChannels.'docView:setBounds' = 'docView:setBounds': { args: [viewId: number, bounds: DocViewBounds | null]; result: void }
 contract.type IpcInvokeChannels.'docView:setZoom' = 'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
 contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
-contract.type IpcInvokeChannels.'editor:backupEdits' = 'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string]; result: EditorBackupResult }
+contract.type IpcInvokeChannels.'editor:backupEdits' = 'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string, reason?: EditorEditsReason]; result: EditorBackupResult }
 contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
 contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
 contract.type IpcInvokeChannels.'fs:copy' = 'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
@@ -1358,7 +1358,7 @@ main.handle docView:review @ features/doc-frames/ipc.ts (viewId, review)
 main.handle docView:setBounds @ features/doc-frames/ipc.ts (viewId, bounds)
 main.handle docView:setZoom @ features/doc-frames/ipc.ts (viewId, factor)
 main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string, filePath: string)
-main.handle editor:backupEdits @ features/fs/ipc.ts (rootPath: string, filePath: string, content: string)
+main.handle editor:backupEdits @ features/fs/ipc.ts (rootPath: string, filePath: string, content: string, reason?: unknown)
 main.handle env:status @ features/env/ipc.ts (rootPath: string)
 main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
 main.handle fs:copy @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
@@ -1592,8 +1592,8 @@ preload approveApproval -> invoke approvals:approve($0, $1, $2, $3)
 preload approveApproval : (companyId: string, approvalId: string, hash: string, reason: string) => Promise<ApprovalResult>
 preload backupBeforeOverwrite -> invoke editor:backupBeforeOverwrite($0, $1)
 preload backupBeforeOverwrite : (rootPath: string, filePath: string) => Promise<EditorBackupResult>
-preload backupEdits -> invoke editor:backupEdits($0, $1, $2)
-preload backupEdits : (rootPath: string, filePath: string, content: string) => Promise<EditorBackupResult>
+preload backupEdits -> invoke editor:backupEdits($0, $1, $2, $3)
+preload backupEdits : (rootPath: string, filePath: string, content: string, reason?: EditorEditsReason | undefined) => Promise<EditorBackupResult>
 preload backupList -> invoke backup:list($0)
 preload backupList : (repoPath: string) => Promise<BackupListResult>
 preload backupOpenFolder -> invoke backup:openFolder($0)

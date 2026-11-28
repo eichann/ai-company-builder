@@ -125,10 +125,10 @@ Object.assign(window, {
       ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
       return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }
     },
-    backupEdits: async (_root: string, p: string, content: string) => {
+    backupEdits: async (_root: string, p: string, content: string, reason = 'editor_edits') => {
       if (failBackups.on) return { success: false, error: 'EACCES' }
       if (failBackups.skip) return { success: true, skipped: 'internal' }
-      backups.push({ reason: 'editor_edits', path: p, content })
+      backups.push({ reason, path: p, content })
       // What happens on "disk" while the edits are being kept (a spec sets it).
       ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
       return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_edits` }

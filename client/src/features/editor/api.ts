@@ -2,6 +2,7 @@
 // contract (src/shared/ipc/electron-api.ts), one per capability. Every function
 // takes its port as the last parameter, defaulting to window.electronAPI.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
+import type { EditorEditsReason } from '../../../shared/editor-disk-state'
 
 /** Reading an open file on this computer: its text, its bytes (PDF), whether it still exists. */
 export type EditorReads = ElectronPort<'readFile' | 'readFileBinary' | 'exists'>
@@ -89,9 +90,12 @@ export function backupBeforeOverwrite(rootPath: string, filePath: string, writes
   return writes.backupBeforeOverwrite(rootPath, filePath)
 }
 
-/** Keeps the tab's unsaved edits (.backups/<ts>_editor_edits/, or the private backups). */
-export function backupEdits(rootPath: string, filePath: string, content: string, writes: EditorWrites = window.electronAPI) {
-  return writes.backupEdits(rootPath, filePath, content)
+/**
+ * Keeps the tab's unsaved edits (.backups/<ts>_<reason>/, or the private backups):
+ * before ［届いた版を採用］ (`editor_edits`) or ［保存せずに進む］ (`editor_left_unsaved`).
+ */
+export function backupEdits(rootPath: string, filePath: string, content: string, reason: EditorEditsReason, writes: EditorWrites = window.electronAPI) {
+  return writes.backupEdits(rootPath, filePath, content, reason)
 }
 
 /** Whether a record a tidied tab points to can still be read (「片づけたタブ」 marks it 「見つかりません」). */

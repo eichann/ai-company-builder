@@ -12,6 +12,7 @@ import type { DirectoryTreeNode, FileOpResult } from '../../../shared/ipc-contra
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { keepCurrentVersion, keepGivenVersion } from '../backups/keep-current'
+import { EDITOR_EDITS_REASON, EDITOR_EDITS_REASONS } from '../../../shared/editor-disk-state'
 import type { DesktopShell, PathGuard, WindowPort } from '../ports'
 import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
 import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-guards'
@@ -187,14 +188,17 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     }
   })
 
-  // Before the editor drops a tab's unsaved edits for the version that arrived
-  // (［届いた版を採用］): keep the edits, which were never on disk, as a version of the file.
-  ipc.handle('editor:backupEdits', async (_, rootPath: string, filePath: string, content: string) => {
+  // Before the editor drops a tab's unsaved edits — for the version that arrived
+  // (［届いた版を採用］) or on leaving (［保存せずに進む］): keep the edits, which were never on
+  // disk, as a version of the file.
+  ipc.handle('editor:backupEdits', async (_, rootPath: string, filePath: string, content: string, reason?: unknown) => {
     try {
       const root = paths.validate(rootPath)
       const safePath = paths.validate(filePath)
       if (typeof content !== 'string') return { success: false, error: 'No text to keep' }
-      return await keepGivenVersion(paths, root, safePath, Buffer.from(content, 'utf-8'), 'editor_edits')
+      const why = reason === undefined ? EDITOR_EDITS_REASON : EDITOR_EDITS_REASONS.find(r => r === reason)
+      if (!why) return { success: false, error: 'Unknown reason' }
+      return await keepGivenVersion(paths, root, safePath, Buffer.from(content, 'utf-8'), why)
     } catch (error) {
       console.error('[editor] backup of the edits failed:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

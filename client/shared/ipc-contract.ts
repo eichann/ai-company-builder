@@ -30,6 +30,7 @@ import type { VoicePromptSettings } from './voice-prompt'
 import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession, ChatSessionSummary } from './chat-history'
 import type { PermissionMode } from './permission-mode'
 import type { BrowserOperatorToolset } from './browser-operator-toolsets'
+import type { EditorEditsReason } from './editor-disk-state'
 import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
@@ -564,8 +565,11 @@ export interface IpcInvokeChannels {
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
   'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
-  /** Keep a tab's unsaved edits of `filePath` (the text given) before ［届いた版を採用］ drops them. */
-  'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string]; result: EditorBackupResult }
+  /**
+   * Keep a tab's unsaved edits of `filePath` (the text given) before they are dropped:
+   * ［届いた版を採用］ (`editor_edits`, also when `reason` is left out) or ［保存せずに進む］ (`editor_left_unsaved`).
+   */
+  'editor:backupEdits': { args: [rootPath: string, filePath: string, content: string, reason?: EditorEditsReason]; result: EditorBackupResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
   'fs:delete': { args: [path: string]; result: FileOpResult }

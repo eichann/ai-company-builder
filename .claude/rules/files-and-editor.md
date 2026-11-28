@@ -301,7 +301,14 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   (`src/shared/lib/unsavedEdits.ts` `registerUnsavedEditsSaver`, in `useFileSaving.ts`) that writes
   every tab with edits without asking; `features/editor/hooks/useSaveBeforeLeaving.ts` runs them and
   names what could not be saved (「保存できていない編集があります」 … 「保存せずに進む」 / 「キャンセル」,
-  Enter does not confirm; `LeaveConfirmDialog`). Sign-out (`AppShell` → `authStore.signOut`, the
+  Enter does not confirm; `LeaveConfirmDialog`). **［保存せずに進む］ keeps those edits first** (owner
+  2026-11-28): each editor's keeper (`registerUnsavedEditsKeeper`, same file) writes them through
+  `editor:backupEdits` with reason `editor_left_unsaved` (`.backups/<ts>_editor_left_unsaved/`, or the
+  private backups); only a keep with a `backupPath` counts. What could not be kept is named again —
+  「バックアップにも残せなかった編集があります」 … 「それでも進む」 / 「キャンセル」 (Enter does not confirm;
+  `leaving.ts` `notKeptQuestion`). Tests: `editor-panel.spec.ts` 「a tab that cannot be saved…」 /
+  「保存せずに進む when the edits cannot be kept either…」, `src/shared/lib/unsavedEdits.test.ts`,
+  `ipc-fs.test.ts` 「editor:backupEdits…」 (the reason; an unknown one keeps nothing). Sign-out (`AppShell` → `authStore.signOut`, the
   one sign-out: it also closes the company, so the login screen shows), switching company from
   the title bar (`download-choices.md`) and closing the main window go through it. Closing / quitting: main holds the window's close and asks the renderer
   (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`

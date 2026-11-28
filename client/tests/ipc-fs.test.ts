@@ -446,6 +446,11 @@ test('editor:backupEdits: the tab\'s edits (never on disk) kept as a version of 
   // A file already deleted on disk: its edits are still kept.
   const gone = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '営業', 'gone.md'), '消える前の編集')
   assert.equal(fs.readFileSync(path.join(gone.backupPath!, '営業', 'gone.md'), 'utf-8'), '消える前の編集')
+  // ［保存せずに進む］ names its own reason (the backup list's label); an unknown reason keeps nothing.
+  const left = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), '進む前の編集', 'editor_left_unsaved')
+  assert.match(path.relative(company, left.backupPath!), /_editor_left_unsaved$/)
+  assert.equal(fs.readFileSync(path.join(left.backupPath!, '営業', '提案書.md'), 'utf-8'), '進む前の編集')
+  assert.deepEqual(await h.invoke('editor:backupEdits', company, path.join(company, '営業', '提案書.md'), 'x', 'before_restore'), { success: false, error: 'Unknown reason' })
 })
 
 // Fake values only: what the test proves is that none of them reach the renderer.

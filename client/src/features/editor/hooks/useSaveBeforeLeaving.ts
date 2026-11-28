@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { saveUnsavedEdits } from '../../../shared/lib/unsavedEdits'
+import { keepUnsavedEdits, saveUnsavedEdits } from '../../../shared/lib/unsavedEdits'
 import { answerWindowClose, onWindowCloseRequested } from '../../../shared/ipc/window-close'
-import { leaveQuestion, type LeaveQuestion } from '../leaving'
+import { leaveQuestion, notKeptQuestion, type LeaveQuestion } from '../leaving'
 
 /**
  * Leaving the company screen (sign-out) or closing the window: every editor
  * first saves all its tabs with edits, not only the shown one; what could not
  * be saved is named and the member decides (`question`, answered with
- * `answer`). `confirmLeave` resolves true when it is fine to go on.
+ * `answer`). ［保存せずに進む］ keeps those edits in the backups first; what
+ * cannot be kept either is named again (［それでも進む］). `confirmLeave`
+ * resolves true when it is fine to go on.
  */
 export function useSaveBeforeLeaving({ guardWindowClose = false }: { guardWindowClose?: boolean } = {}) {
   const [pending, setPending] = useState<{ question: LeaveQuestion; resolve: (ok: boolean) => void } | null>(null)
@@ -17,9 +19,13 @@ export function useSaveBeforeLeaving({ guardWindowClose = false }: { guardWindow
     // A second request (another close while asking) waits for the same answer.
     busy.current ??= (async () => {
       try {
+        const ask = (question: LeaveQuestion) => new Promise<boolean>(resolve => setPending({ question, resolve }))
         const left = await saveUnsavedEdits()
         if (left.length === 0) return true
-        return await new Promise<boolean>(resolve => setPending({ question: leaveQuestion(left), resolve }))
+        if (!await ask(leaveQuestion(left))) return false
+        const notKept = await keepUnsavedEdits(left)
+        if (notKept.length === 0) return true
+        return await ask(notKeptQuestion(notKept))
       } finally {
         busy.current = null
       }

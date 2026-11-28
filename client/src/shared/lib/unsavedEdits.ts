@@ -44,3 +44,29 @@ export async function saveUnsavedEdits(): Promise<string[]> {
   }
   return [...new Set(left)]
 }
+
+// ［保存せずに進む］: before leaving, every editor keeps the edits of the tabs it
+// could not save in the backups (the member's work is never just dropped). A
+// keeper answers the paths it kept; a path no keeper kept (none holds it, its
+// keep failed, a keeper threw) is answered as not kept, so the caller can say so.
+type UnsavedEditsKeeper = (paths: readonly string[]) => Promise<string[]>
+const keepers = new Set<UnsavedEditsKeeper>()
+
+/** Register an editor's keeper while it is mounted; returns the unregister function. */
+export function registerUnsavedEditsKeeper(keeper: UnsavedEditsKeeper): () => void {
+  keepers.add(keeper)
+  return () => { keepers.delete(keeper) }
+}
+
+/** Keep the edits of `paths` in the backups; resolves to the paths whose edits could not be kept. */
+export async function keepUnsavedEdits(paths: readonly string[]): Promise<string[]> {
+  const kept = new Set<string>()
+  for (const keeper of [...keepers]) {
+    try {
+      for (const p of await keeper(paths)) kept.add(p)
+    } catch {
+      // Counts as not kept: its paths stay in the answer.
+    }
+  }
+  return paths.filter(p => !kept.has(p))
+}
