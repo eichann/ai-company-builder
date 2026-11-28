@@ -3,7 +3,9 @@ import type { TaskListResult } from '../../../../shared/tasks'
 import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { getTaskList, onTasksMayHaveChanged } from '../api'
-import { nextListState, type TaskListState } from '../listAnswers'
+import { answerStillWanted, nextListState, type TaskListState } from '../listAnswers'
+import { currentCompanyEra } from '../../../shared/lib/companyEra'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { keptTaskTabFacts, taskTabFactsOf, type TaskTabFacts } from '../model'
 
 /** Read again at least this often while the list is mounted (others' changes reach no signal of ours). */
@@ -43,10 +45,14 @@ export function useTaskList(companyId: string | undefined) {
   const tickets = useRef(0)
   /** The newest read whose tab facts were kept: an older answer landing later never overwrites them. */
   const keptTicket = useRef(0)
+  const readsNow = useLatestRef(companyId)
   const read = useCallback((fresh: boolean) => {
-    if (!companyId) return
+    // A reload asked by the company left behind (its undo's follow-up) reads nothing.
+    if (!companyId || companyId !== readsNow.current) return
     const ticket = ++tickets.current
+    const era = currentCompanyEra()
     void getTaskList(companyId, undefined, fresh ? { fresh: true } : undefined).then((r: TaskListResult | undefined) => {
+      if (!answerStillWanted(companyId, era, readsNow.current)) return
       // Never an answer older than the one shown (listAnswers.ts): a press's result is not put back.
       if (r) setState(s => nextListState(s, companyId, ticket, r))
       if (r?.success && ticket > keptTicket.current) {
@@ -54,7 +60,7 @@ export function useTaskList(companyId: string | undefined) {
         keepTabFacts(companyId, taskTabFactsOf(r.data))
       }
     }, () => {})
-  }, [companyId])
+  }, [companyId, readsNow])
   const look = useCallback(() => read(false), [read])
   const reload = useCallback(() => read(true), [read])
   const subscribe = useCallback((listener: (payload: undefined) => void) => {

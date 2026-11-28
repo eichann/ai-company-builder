@@ -283,9 +283,13 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
   answered after the switch showed the old item and put 「『…』を元に戻しました」 — the last company's 件名 — on the new
   list). Work started for a list takes the era when it starts and, when its answer comes back in another era, changes
   nothing on screen (shows no item, says nothing); the request itself was the last company's and stays so. 取り消す is
-  `undoOfEnded` (`workThrough.ts`; pressed in another era it does nothing). **The inbox (段2) uses the same era** for
-  what it starts, never a check of its own. Tests: `workThrough.test.ts` 「取り消す answered after another company…」 /
-  「取り消す kept on screen past a company change…」, `src/stores/appStore.test.ts` (which changes end the era) — mutation-checked.
+  `undoOfEnded` (`workThrough.ts`; pressed in another era it does nothing). The やること list's reads too
+  (`useTaskList`, `listAnswers.ts` `answerStillWanted`): a reload asked by the company left behind (an undo's follow-up)
+  reads nothing, and an answer read for another company or in an earlier era is dropped — it used to blank the new
+  company's list until the next look. **The inbox (段2) uses the same era** for what it starts, never a check of its own.
+  Tests: `workThrough.test.ts` 「取り消す answered after another company…」 / 「取り消す kept on screen past a company
+  change…」, `src/stores/appStore.test.ts` (which changes end the era), `listAnswers.test.ts` 「a read of the company
+  left behind…」 — mutation-checked.
 - **Finishing the item shown** (the card's end button, the list's ☑ on that row; `TaskCard` / `RecordCard` /
   `TaskListPanel` hand `onEnded` / `onCompleted` an `undo` of that one-step press's entry): the next item (the one
   after it; the last one → the one before) takes its place, and the list says 「『…』を片づけました。次の件です」 with
