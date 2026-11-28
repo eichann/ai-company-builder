@@ -20,7 +20,16 @@ for (const key of ['addEventListener', 'removeEventListener', 'dispatchEvent']) 
   Object.defineProperty(globalThis, key, { value: (win[key] as (...a: unknown[]) => unknown).bind(dom.window), configurable: true, writable: true })
 }
 
+// Layout the editor asks for when it scrolls a change into view (jsdom lays nothing out).
+const noRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList
+const zeroRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+for (const proto of [dom.window.Element.prototype, dom.window.Range.prototype] as Array<{ getClientRects: () => DOMRectList; getBoundingClientRect: () => DOMRect }>) {
+  proto.getClientRects = noRects
+  proto.getBoundingClientRect = zeroRect
+}
 const { SplicedDocument, splitFront } = await import('./markdownSplice')
+const { setInPlaceSize, toggleInPlaceMark } = await import('./milkdownFormat')
+const { TextSelection } = await import('@milkdown/prose/state')
 const { makeMilkdown } = await import('./milkdownSurface')
 
 let md: Awaited<ReturnType<typeof makeMilkdown>>
@@ -430,4 +439,43 @@ test('a change that would make the next block read differently is not written', 
   loaded.doc.rebase(view.state.doc)
   view.dispatch(view.state.tr.insertText('つなぐ', posAfter(view.state.doc, '二つめ')))
   assert.equal(loaded.doc.write(view.state.doc), null)
+})
+
+/** Selects the first occurrence of `words`. */
+function selectWords(view: EditorView, words: string) {
+  const to = posAfter(view.state.doc, words)
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, to - words.length, to)))
+}
+
+test('the bubble\'s operations write their one line: a mark in a nested list, a size on one line of a paragraph written over several', () => {
+  {
+    const { spliced, view } = open(MEETING)
+    selectWords(view, '金額は前回と同じ')
+    toggleInPlaceMark(view, 'strong')
+    assert.equal(saved(spliced, view), MEETING.replace('    * 金額は前回と同じ', '    * **金額は前回と同じ**'))
+    toggleInPlaceMark(view, 'strong')
+    assert.equal(saved(spliced, view), MEETING)
+  }
+  {
+    const text = '一行め\n二行め\n三行め\n'
+    const { spliced, view } = open(text)
+    selectWords(view, '二行')
+    setInPlaceSize(view, 2)
+    assert.equal(saved(spliced, view), '一行め\n\n## 二行め\n\n三行め\n')
+  }
+  {
+    const { spliced, view } = open(SKILL)
+    selectWords(view, '手順')
+    setInPlaceSize(view, 0)
+    assert.equal(saved(spliced, view), SKILL.replace('手順\n----\n', '手順\n'))
+  }
+})
+
+test('a space typed at the end of a line waits on screen: the file gets it with the next word, never taken back', () => {
+  const text = '- 次回：12/1\n- 二つめ\n'
+  const { spliced, view } = open(text)
+  insertAfter(view, '12/1', ' ')
+  assert.equal(saved(spliced, view), text, 'the trailing space alone writes nothing')
+  insertAfter(view, '12/1 ', 'に再訪問')
+  assert.equal(saved(spliced, view), '- 次回：12/1 に再訪問\n- 二つめ\n')
 })

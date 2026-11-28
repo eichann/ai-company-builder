@@ -57,7 +57,8 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
   shows, `tasks-ui.md` "Working through a list"). `mod` = ⌘ or Ctrl (either one, on every
   platform); `shift` and `alt` must match exactly (⌥⌘P is not ⌘P); `key` is `KeyboardEvent.key`,
   a letter A–Z matched in either case (Windows / Linux report Ctrl+Shift+C as `C`, macOS ⌘⇧C as
-  `c`), any other key exactly. Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
+  `c`), any other key exactly; with `alt`, a digit or letter also matches by its physical key
+  (`KeyboardEvent.code` `Digit1` / `KeyS`: a Mac reports ⌥⌘1 as `¡`). Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
   A shortcut runs the command with no
   arguments, so its args must allow `{}`; two commands cannot share a key in one area.
 - `defineCommands` refuses a bad catalog at start-up (duplicate id, missing class, bad id,
@@ -98,6 +99,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source, an HTML document's 見る ⇄ 中身; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.viewDocument` `{ path, pane? }` | view | each editor (`TabbedEditorPanel.tsx`): an `.html` / `.htm` tab shown as 中身 goes back to 見る, then `file.open` (doc-frame.md "The chat's ［見る］ (A3)") | the chat's ［見る］ on a 「ファイルに書きました／直しました」 row (`features/chat/components/ToolRows.tsx`; shown only while a handler exists — none in a consultation's own window) |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
+| `editor.toggleBold` ⌘B, `editor.toggleItalic` ⌘I, `editor.toggleStrike` ⌘⇧S, `editor.toggleCode` ⌘E, `editor.editLink` ⌘K, `editor.setBodyText` ⌘⌥0, `editor.setHeadingOne` / `Two` / `Three` ⌘⌥1〜3 `{ pane? }` (editor) | local (changes the document; written back like typing) | the document edited in place (`components/InPlaceMarkdownEditor.tsx`): its selection bubble's operations (`files-and-editor.md` "The selection bubble"); each declines the key unless the focus is in the document (`editLink` also needs a selection), so ⌘B / ⌘K reach `layout.toggleLeft` / `find.byName` otherwise | the shortcuts; the bubble's buttons call the same operations directly |
 
 A chat pane keeps the request until its shown tab can act (history read): the tab then starts a
 new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`

@@ -61,6 +61,17 @@ test('a Markdown document opens as the document, editable in place; typing chang
   expectNoPageErrors(state)
 })
 
+test('words with spaces typed at the end of a line are written as typed, never taken back', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  const before = (await files(page))[MEETING]
+  await caretAfter(page, '送る前に田中さんが確認する')
+  await page.keyboard.type(' (12/1 まで)')
+  await page.clock.runFor(1500)
+  await expect.poll(async () => (await files(page))[MEETING]).toBe(before.replace('確認する\n', '確認する (12/1 まで)\n'))
+  await expect(page.getByText('元に戻しました')).toHaveCount(0)
+})
+
 test('Enter in a nested list adds one line in the list\'s own indentation and marker, nothing else changes', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
   await open(page)

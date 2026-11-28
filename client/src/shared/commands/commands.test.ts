@@ -140,6 +140,32 @@ test('on Windows / Linux, Ctrl+Shift+letter (reported upper-case) runs the short
   assert.equal(toggled, 1)
 })
 
+test('on a Mac, ⌥⌘1 (reported as `¡`) runs the ⌥ shortcut by its physical key; ⌘1 alone does not', async () => {
+  const registry = createCommandRegistry(COMMANDS)
+  let ran = 0
+  registry.register('editor.setHeadingOne', () => { ran++ }, { target: 'editor' })
+  const editor: FocusScope[] = [{ area: 'editor', target: 'editor' }, { area: 'app' }]
+  assert.equal(registry.handleKey({ key: '¡', code: 'Digit1', metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, editor), true)
+  assert.equal(registry.handleKey({ key: '1', code: 'Digit1', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }, editor), false)
+  await Promise.resolve()
+  assert.equal(ran, 1)
+})
+
+test('⌘B in a document edited in place is bold; declined there (no document focused) it is the app\'s left column', async () => {
+  const registry = createCommandRegistry(COMMANDS)
+  let bold = 0
+  let left = 0
+  let inDocument = true
+  registry.register('editor.toggleBold', () => { bold++ }, { target: 'editor', acceptsKey: () => inDocument })
+  registry.register('layout.toggleLeft', () => { left++ })
+  const editor: FocusScope[] = [{ area: 'editor', target: 'editor' }, { area: 'app' }]
+  assert.equal(registry.handleKey(key({ key: 'b', mod: true }), editor), true)
+  inDocument = false
+  assert.equal(registry.handleKey(key({ key: 'b', mod: true }), editor), true)
+  await Promise.resolve()
+  assert.deepEqual([bold, left], [1, 1])
+})
+
 test('a handler that declines the key lets it through', () => {
   const registry = createCommandRegistry(catalog)
   let ran = false

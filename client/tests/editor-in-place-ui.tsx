@@ -10,10 +10,12 @@ import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
-import { useKeybindings } from '../src/shared/commands/commands'
+import { EDITOR_SELECTION } from '../src/app/editorSelection'
+import { useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { useAppStore } from '../src/stores/appStore'
+import { useAuthStore } from '../src/stores/authStore'
 
 const ROOT = '/Users/demo/会社'
 const MEETING = `${ROOT}/営業部/定例メモ.md`
@@ -53,7 +55,17 @@ installElectronAPI({
     backups.push({ reason, path: p, content })
     return { success: true, backupPath: `${ROOT}/.backups/2026-11-28T01-02-03-456_${reason}` }
   },
-  readDirectory: async () => [],
+  // The review's sidecars (`<doc>.review.<id>.json`) are written to a temporary name and renamed over.
+  readDirectory: async (dir: string) => Object.keys(files)
+    .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
+    .map(p => ({ name: p.slice(dir.length + 1), path: p, isDirectory: false })),
+  renameItem: async (from: string, to: string) => {
+    if (!(from in files)) return { success: false, error: 'ENOENT' }
+    files[to] = files[from]
+    delete files[from]
+    return { success: true, newPath: to }
+  },
+  deleteItem: async (p: string) => { delete files[p]; return { success: true } },
   onFileChanges: changes.subscribe,
   onCloseRequested: (cb: () => void) => closeRequests.subscribe(cb),
   answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
@@ -68,15 +80,22 @@ Object.assign(window, {
   __acbExternalEdit: (p: string, text: string) => { files[p] = text; changes.emit([{ type: 'change', path: p }]) },
 })
 
+useAuthStore.setState({ user: { id: 'u-yamada', email: 'demo@example.com', name: '山田', image: null, emailVerified: true } })
 useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+
+const appKeys: string[] = []
+Object.assign(window, { __acbAppKeys: appKeys })
 
 export function Preview() {
   useKeybindings()
+  // As AppShell has them: ⌘B is the left column's, ⌘K 探す — the document's bold and link only while it has the focus.
+  useCommandHandler('layout.toggleLeft', () => { appKeys.push('layout.toggleLeft') })
+  useCommandHandler('find.byName', () => { appKeys.push('find.byName') })
   const [active, setActive] = useState(new URLSearchParams(location.search).get('file') === 'notes' ? NOTES : MEETING)
   return (
     <main className="min-h-screen bg-bg text-text">
       <div style={{ height: 480, width: 800 }}>
-        <TabbedEditorPanel openFiles={[MEETING, NOTES]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} inPlaceEditing />
+        <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={[MEETING, NOTES]} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} inPlaceEditing />
       </div>
       <WindowCloseGuard />
     </main>

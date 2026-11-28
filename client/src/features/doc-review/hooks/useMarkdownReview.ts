@@ -213,25 +213,49 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     })
   }, [activeReview, filePath, attempt])
 
+  const newComment = useCallback((selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity): ReviewComment => ({
+    id: crypto.randomUUID(),
+    authorName: reviewerName,
+    severity,
+    selectedText,
+    startOffset,
+    endOffset,
+    body,
+    createdAt: new Date().toISOString(),
+    resolved: false,
+    replies: [],
+  }), [reviewerName])
+
   const addComment = useCallback(async (selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity): Promise<boolean> => {
     if (!activeReview || !filePath) return false
-    const comment: ReviewComment = {
-      id: crypto.randomUUID(),
-      authorName: reviewerName,
-      severity,
-      selectedText,
-      startOffset,
-      endOffset,
-      body,
-      createdAt: new Date().toISOString(),
-      resolved: false,
-      replies: [],
-    }
+    const comment = newComment(selectedText, startOffset, endOffset, body, severity)
     const review = activeReview
     return attempt('comment', async () => {
       showReview(await saveOwnReview(filePath, { ...review, comments: [...review.comments, comment] }))
     })
-  }, [activeReview, filePath, reviewerName, attempt, showReview, saveOwnReview])
+  }, [activeReview, filePath, attempt, showReview, saveOwnReview, newComment])
+
+  /**
+   * A comment from the document being edited in place (its ［コメント］): into the member's own review
+   * in progress, else a new review of theirs holding it — one write, the same file and shape as
+   * 「レビューする」 and a comment make. Never into a completed review being read.
+   */
+  const commentAsReviewer = useCallback(async (selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity): Promise<boolean> => {
+    if (!filePath) return false
+    if (activeReview) return activeReview.status === 'in_progress' ? addComment(selectedText, startOffset, endOffset, body, severity) : false
+    const review: Review = {
+      id: crypto.randomUUID(),
+      reviewerName,
+      reviewerEmail,
+      status: 'in_progress',
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      comments: [newComment(selectedText, startOffset, endOffset, body, severity)],
+    }
+    return attempt('comment', async () => {
+      showReview(await saveOwnReview(filePath, review))
+    })
+  }, [activeReview, filePath, reviewerName, reviewerEmail, addComment, newComment, attempt, showReview, saveOwnReview])
 
   const deleteComment = useCallback(async (commentId: string): Promise<boolean> => {
     if (!activeReview || !filePath) return false
@@ -321,6 +345,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     saveError,
     dismissSaveError,
     startReview,
+    commentAsReviewer,
     completeReview,
     cancelReview,
     addComment,

@@ -149,6 +149,8 @@ export interface KeyInput {
   readonly ctrlKey: boolean
   readonly shiftKey: boolean
   readonly altKey: boolean
+  /** The physical key (`Digit1`, `KeyS`): ⌥ changes what `key` reports on a Mac (⌥⌘1 is `¡`). */
+  readonly code?: string
 }
 
 const MODIFIERS = new Set(['mod', 'shift', 'alt'])
@@ -168,6 +170,13 @@ export function parseKey(spec: string): ParsedKey | null {
  */
 function keyName(key: string): string {
   return /^[A-Za-z]$/.test(key) ? key.toLowerCase() : key
+}
+
+/** A digit or letter's physical key (`Digit1`, `KeyS`), for a shortcut with ⌥. */
+function physicalKeyOf(key: string): string | null {
+  if (/^[0-9]$/.test(key)) return `Digit${key}`
+  if (/^[a-z]$/.test(key)) return `Key${key.toUpperCase()}`
+  return null
 }
 
 function normalizeKey(spec: string): string {
@@ -192,7 +201,7 @@ export function matchesKey(spec: ParsedKey, input: KeyInput): boolean {
   return spec.mod === (input.metaKey || input.ctrlKey)
     && spec.shift === input.shiftKey
     && spec.alt === input.altKey
-    && spec.key === keyName(input.key)
+    && (spec.key === keyName(input.key) || (spec.alt && physicalKeyOf(spec.key) === input.code))
 }
 
 /**
