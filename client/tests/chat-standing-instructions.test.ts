@@ -52,3 +52,17 @@ test('a consultation: ACB\'s standing rules reach the agent\'s own slot, the dep
   assert.match(system, /閲覧中の部署: 「営業部」/)
   assert.doesNotMatch(system, /RECORD_RULES/)
 })
+
+// 「返事の形」 (reply-style.ts): ふつう adds nothing to what the AI is told; リッチ one line with the turn (so switching
+// takes effect at the next message), and only for an agent the registry says takes it.
+test('「返事の形」: the plain reply adds nothing, a rich one adds the diagram line to this turn only, and only for an agent that takes it', async () => {
+  const plain = await turnOf({})
+  assert.doesNotMatch(plain.system + plain.standing, /mermaid/)
+  const rich = await turnOf({ replyStyle: 'rich' })
+  assert.match(rich.system, /mermaid か ```svg/)
+  assert.doesNotMatch(rich.standing, /mermaid/)
+  const unknown = await turnOf({ replyStyle: 'fancy' })
+  assert.doesNotMatch(unknown.system, /mermaid/)
+  const apiKey = await turnOf({ replyStyle: 'rich', authMode: 'api-key' })
+  assert.doesNotMatch(apiKey.system + apiKey.standing, /mermaid/)
+})

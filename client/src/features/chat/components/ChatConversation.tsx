@@ -39,6 +39,7 @@ import { useAgentModelSelection } from '../hooks/useAgentModelSelection'
 import { useRateLimitsRefresh, useStreamingChat } from '../hooks/useStreamingChat'
 import { ChatHeader } from './ChatHeader'
 import { ModelMenu } from './ModelMenu'
+import type { ReplyStyle } from '../../../../shared/reply-style'
 import { RateLimitMeter } from './RateLimitMeter'
 import { hasRateLimits } from '../../../../shared/rate-limits'
 import { MessageList } from './ChatMessageList'
@@ -166,6 +167,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     else editingMessagesRef.current.delete(messageId)
   }, [])
   const pendingRecordIdsRef = useRef<string[]>([])
+  // 「返事の形」 (reply-style.ts): read by each request, restored and stored with the conversation (useChatHistory).
+  const replyStyleRef = useRef<ReplyStyle>('plain')
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
     agentSession: agentSessionRef,
@@ -176,6 +179,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     todayFolder: todayFolderRef,
     modelId: aiModelRef,
     effort: aiEffortRef,
+    replyStyle: replyStyleRef,
     promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
     appSessionId: appSessionIdRef,
     claudeSessionId: claudeSessionIdRef,
@@ -214,7 +218,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, unmountedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, unmountedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, replyStyle, setReplyStyle, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     initialTopicRecordId,
@@ -235,6 +239,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     setMessageReferenceFiles: attachments.setMessageReferenceFiles,
     onTitleChange,
     onSessionIdChange,
+    replyStyleRef,
   })
 
   useTitleGeneration({
@@ -501,8 +506,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // The usage meter and the model switch in the input's row. Memoised: ChatInput is, and a streamed chunk re-renders this tab.
   const composerTools = useMemo(() => <>
     {hasRateLimits(authMode) && <RateLimitMeter provider={authMode} size="compact" />}
-    <ModelMenu authMode={authMode} codexStatus={codexStatus} models={models} modelLocked={modelLocked} />
-  </>, [authMode, codexStatus, models, modelLocked])
+    <ModelMenu authMode={authMode} codexStatus={codexStatus} models={models} modelLocked={modelLocked} replyStyle={replyStyle} onReplyStyle={setReplyStyle} />
+  </>, [authMode, codexStatus, models, modelLocked, replyStyle, setReplyStyle])
 
   // ============================================================================
   // Render

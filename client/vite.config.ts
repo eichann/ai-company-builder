@@ -64,4 +64,15 @@ export default defineConfig(({ command }) => ({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // mermaid (a reply's diagrams, src/features/chat/diagramRenderer.ts) is a file loaded only when a diagram is
+        // drawn: it goes to dist/vendor/, which scripts/check-bundle-size.mjs measures against its own budget.
+        assetFileNames: (asset) => (asset.names ?? []).some(name => name.startsWith('mermaid.tiny'))
+          ? 'vendor/[name]-[hash][extname]'
+          : 'assets/[name]-[hash][extname]',
+      },
+    },
+  },
 }))

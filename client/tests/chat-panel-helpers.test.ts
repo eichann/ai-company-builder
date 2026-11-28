@@ -151,6 +151,15 @@ test('chat request body: dropped records go with one send only', () => {
   assert.equal(buildChatRequestBody(s).droppedRecordIds, undefined)
 })
 
+// The transport is made once: a 「返事の形」 switched mid-consultation must reach the next request, and ふつう sends nothing.
+test('chat request body: 「返事の形」 is read when each request is made; the plain reply sends nothing', () => {
+  const replyStyle: { current: 'plain' | 'rich' } = { current: 'plain' }
+  const s = sources({ replyStyle })
+  assert.equal('replyStyle' in buildChatRequestBody(s), false)
+  replyStyle.current = 'rich'
+  assert.equal(buildChatRequestBody(s).replyStyle, 'rich')
+})
+
 // The bubble's 「やること『…』を AI に渡しました」 survives a restart (it is how the member knows the AI read it).
 test('a message\'s dropped records survive the history round trip', () => {
   const dropped = [{ id: 'task-0001ab', title: '見積を直す', word: 'やること' }]

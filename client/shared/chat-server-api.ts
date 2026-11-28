@@ -47,6 +47,8 @@ export interface ChatRequestOptions {
    * once, with the member's record token, and gives the AI their summary with this message only.
    */
   droppedRecordIds?: string[]
+  /** 「返事の形」 of the consultation (reply-style.ts): only 'rich' is sent; absent = the plain reply. */
+  replyStyle?: 'rich'
   modelId?: string
   effort?: string
   /** The member's setting (Settings → 入力候補); absent = on. */

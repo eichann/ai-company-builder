@@ -1,13 +1,17 @@
 import { useState, type KeyboardEvent } from 'react'
 import { CaretDown, Check } from '@phosphor-icons/react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
-import { agentShortLabel } from '../../../../shared/agents/registry'
+import { agentCan, agentShortLabel } from '../../../../shared/agents/registry'
+import type { ReplyStyle } from '../../../../shared/reply-style'
 import { MODEL_EFFORT_OPTIONS, CLAUDE_MODELS, MODEL_LABELS } from '../../../stores/appStore'
 import { useDismiss } from '../../../shared/hooks/useDismiss'
 import type { AgentModelSelection } from '../hooks/useAgentModelSelection'
 
 /** The effort's name on screen (the agents' own words; Claude Code's xhigh reads xHigh). */
 const effortLabel = (effort: string) => effort === 'xhigh' ? 'xHigh' : effort.charAt(0).toUpperCase() + effort.slice(1)
+
+/** ふつう: today's reply. リッチ: the AI is told diagrams are welcome (diagrams in any reply are drawn either way). */
+const REPLY_STYLE_LABELS: Record<ReplyStyle, string> = { plain: 'ふつう', rich: 'リッチ（図も使う）' }
 
 interface Choice { key: string; label: string; checked: boolean; disabled?: boolean; choose: () => void }
 
@@ -17,12 +21,15 @@ interface Choice { key: string; label: string; checked: boolean; disabled?: bool
  * Code's static list, Codex's live catalog — the one place a new agent brings its own choices.
  * The button never shrinks or clips (it wraps to its own line with the rest of the composer's row).
  */
-export function ModelMenu({ authMode, codexStatus, models, modelLocked }: {
+export function ModelMenu({ authMode, codexStatus, models, modelLocked, replyStyle, onReplyStyle }: {
   authMode: AuthMode
   codexStatus: CodexStatus
   models: AgentModelSelection
   /** A turn is in flight: the model cannot change. */
   modelLocked: boolean
+  /** 「返事の形」 of this consultation (reply-style.ts); offered only to an agent that takes it (`richReplies`). */
+  replyStyle: ReplyStyle
+  onReplyStyle: (style: ReplyStyle) => void
 }) {
   const [open, setOpen] = useState(false)
   const [frame, setFrame] = useState<HTMLDivElement | null>(null)
@@ -48,8 +55,12 @@ export function ModelMenu({ authMode, codexStatus, models, modelLocked }: {
     effortChoices = MODEL_EFFORT_OPTIONS[aiModel].map(e => ({ key: e, label: effortLabel(e), checked: e === aiEffort, choose: () => models.setAIEffort(e) }))
   }
   if (modelChoices.length === 0) return null
+  // The next request takes it, so it may change while a turn runs (like Claude Code's effort).
+  const replyChoices: Choice[] = agentCan(authMode, 'richReplies')
+    ? (['plain', 'rich'] as const).map(style => ({ key: style, label: REPLY_STYLE_LABELS[style], checked: style === replyStyle, choose: () => onReplyStyle(style) }))
+    : []
 
-  const name = effortName ? `${modelName}・${effortName}` : modelName
+  const name = [modelName, effortName, replyChoices.length > 0 && replyStyle === 'rich' ? 'リッチ' : ''].filter(Boolean).join('・')
   // ↑ ↓ move between the choices (the menu's own keys; Esc closes through useDismiss).
   const onMenuKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
@@ -87,6 +98,7 @@ export function ModelMenu({ authMode, codexStatus, models, modelLocked }: {
           className="absolute bottom-full right-0 mb-1 z-menu min-w-48 bg-surface-raised text-text border border-[color:var(--color-border)] rounded-control shadow-pop divide-y divide-[color:var(--color-border)]">
           {section(`モデル${lockedNote}`, modelChoices)}
           {section('考える強さ', effortChoices)}
+          {section('返事の形', replyChoices)}
         </div>
       )}
     </div>

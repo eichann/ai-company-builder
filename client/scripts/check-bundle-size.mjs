@@ -21,6 +21,10 @@
 // 「記録する」 (#846) and company site settings (#847) each passed alone but together left main at
 // 3,146,245 bytes (517 over). Lazy chunks count here, so splitting would not lower it; the 50 KB
 // growth guard per pull request stays.
+// 2026-11-28: a reply's diagrams (mermaid, ~2.8 MB) are not in the renderer bundle: one file in dist/vendor/, loaded
+// only when a reply has a mermaid diagram (src/features/chat/diagramRenderer.ts), never at start. It is measured here
+// against its own budget (ON_DEMAND_VENDOR), and any other file there fails, so dist/vendor/ is no way around the
+// budget above. Owner decision pending in the pull request that added it (the alternative: count it and raise the budget).
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N] [--base baseDistDir] [--max-growth-kb N]
 import fs from 'node:fs'
@@ -71,6 +75,27 @@ if (options.has('--base')) {
   console.log(`[perf] bundle.rendererJsGrowth=${growth} bytes (base ${baseBytes} bytes; limit ${limit} bytes = ${maxGrowthKb} KB)`)
   if (growth > limit) {
     console.error(`::error::This change grows the renderer JavaScript by ${(growth / 1000).toFixed(1)} KB, over the ${maxGrowthKb} KB a pull request may add. Lazy-load what is new, or split the change; the owner decides an exception (testing.md "Performance baselines").`)
+    failed = true
+  }
+}
+
+// Files loaded on demand only (dist/vendor/), each with its own budget; nothing else may be there.
+const ON_DEMAND_VENDOR = [
+  { prefix: 'mermaid.tiny-', budgetBytes: 3_100_000, what: 'mermaid for a reply\'s diagrams (@mermaid-js/tiny)' },
+]
+const vendorDir = path.join(dist, 'vendor')
+const vendorFiles = fs.existsSync(vendorDir) ? fs.readdirSync(vendorDir) : []
+for (const name of vendorFiles) {
+  const bytes = fs.statSync(path.join(vendorDir, name)).size
+  const entry = ON_DEMAND_VENDOR.find(e => name.startsWith(e.prefix))
+  if (!entry) {
+    console.error(`::error::dist/vendor/${name} is not a listed on-demand file. The renderer's code belongs in dist/assets (counted above); list a file here only with the owner's agreement.`)
+    failed = true
+    continue
+  }
+  console.log(`[perf] bundle.onDemand.${entry.prefix.replace(/[-.]+$/, '')}=${bytes} bytes (budget ${entry.budgetBytes} bytes; ${entry.what})`)
+  if (bytes > entry.budgetBytes) {
+    console.error(`::error::dist/vendor/${name} is ${bytes} bytes, over its ${entry.budgetBytes} byte budget.`)
     failed = true
   }
 }

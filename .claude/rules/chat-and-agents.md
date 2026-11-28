@@ -171,7 +171,10 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
   false` renders it per request, so a company's change reaches a conversation already going); Codex puts them first in
   its developer instructions (`agents/codex.ts`).
 - **This turn's words** (`turnPrompt` → the system message): the department on screen, attached files, the task /
-  record topic, the other AI's tool, the repeat question. They stay out of the standing part so it changes rarely (the
+  record topic, the other AI's tool, the repeat question, and 「返事の形：リッチ」's one line that diagrams are welcome
+  (`client/shared/reply-style.ts` `replyStyleInstruction`: only when the request says `replyStyle: 'rich'` and the
+  agent has `capabilities.richReplies`; ふつう adds nothing; never in an unattended step; `chat-ui-and-history.md`
+  "Diagrams in a reply"). They stay out of the standing part so it changes rarely (the
   shelf of a company without the shared folder still follows the department on screen; `snapshot: false` keeps it
   current).
 - With the preset, `settings.includeGitInstructions: false`: measured 2026-11-27, the preset otherwise opens the first
