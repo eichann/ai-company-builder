@@ -5,7 +5,7 @@
 
 import path from 'path'
 import { pathToFileURL } from 'url'
-import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebFrameMain, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget, localVideoTarget, videoFileResponse } from './local-file-protocol'
 import { MEDIA_SCHEME } from '../shared/video-files'
@@ -132,8 +132,23 @@ export function keepAppPageInWindow(contents: WebContents, page: AppPage): void 
   contents.on('will-frame-navigate', event => {
     if (event.isMainFrame) return
     const from = event.frame?.url
-    if (!srcdocFrameNavigationAllowed(from, event.url) || !pluginFrameNavigationAllowed(from, event.url)) event.preventDefault()
+    const srcdocOk = srcdocFrameNavigationAllowed({ frameUrl: from, ancestorUrls: ancestorUrls(event.frame), initiatorUrl: frameUrl(event.initiator), targetUrl: event.url })
+    if (!srcdocOk || !pluginFrameNavigationAllowed(from, event.url)) event.preventDefault()
   })
+}
+
+/** A frame's address; a frame already gone reads as none. */
+function frameUrl(frame: WebFrameMain | null | undefined): string | undefined {
+  try { return frame?.url } catch { return undefined }
+}
+
+/** Where each frame above `frame` is, its parent first. */
+function ancestorUrls(frame: WebFrameMain | null | undefined): string[] {
+  const urls: string[] = []
+  try {
+    for (let above = frame?.parent; above; above = above.parent) urls.push(above.url)
+  } catch { /* a frame gone meanwhile: what was read stands */ }
+  return urls
 }
 
 /** Saved bounds only when they still lie on a connected display (a monitor may be gone); else only the size. */

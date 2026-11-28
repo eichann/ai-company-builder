@@ -19,7 +19,7 @@ import { makeTempDir, stopWithTempDirs } from '../../shared/testing/temp-dirs'
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const canRun = process.platform === 'darwin' || (process.platform === 'linux' && !!process.env.DISPLAY)
 
-interface Run { frameAfterPress: string | null; newReplyLoaded: boolean; frameAfterNewReply: string | null; pageStayed: boolean }
+interface Run { navigations: Array<{ url: string; refused: boolean }>; frameAfterPress: string | null; newReplyLoaded: boolean; frameAfterNewReply: string | null; pageStayed: boolean }
 let result: { guarded: Run; unguarded: Run }
 const reached: string[] = []
 
@@ -62,6 +62,8 @@ before(async () => {
 const skip = canRun ? false : 'needs a window (macOS, or Linux with a display)'
 
 test('a link in a reply\'s frame that would move the frame is refused by main: the frame stays on its reply, nothing reached', { skip }, () => {
+  // The press reached this window's frame and main refused it (not a press that never landed: independent review).
+  assert.deepEqual(result.guarded.navigations.filter(n => n.url.endsWith('/guarded')).map(n => n.refused), [true])
   assert.equal(result.guarded.frameAfterPress, 'about:srcdoc')
   assert.deepEqual(reached.filter(url => url.startsWith('/guarded')), [])
   assert.equal(result.guarded.pageStayed, true)

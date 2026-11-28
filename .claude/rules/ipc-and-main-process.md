@@ -209,7 +209,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
   window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. Subframes
   (`will-frame-navigate`): a plugin's frame navigates nowhere (`plugin-frame.md`), and **a frame showing a srcdoc —
-  a rich reply's frame, its hidden copy, the diagrams' drawing frame — only to a srcdoc again**
+  a rich reply's frame, its hidden copy, the diagrams' drawing frame —, a frame inside one, and a navigation a srcdoc
+  frame starts (`initiator`), only to a srcdoc again**
   (`client/shared/srcdoc-frames.ts` `srcdocFrameNavigationAllowed`; main's backstop behind the renderer's guards, owner
   decision 2026-11-28: a page loaded there would arrive without the frame's policy); every other frame, the PDF
   preview's included, is unchanged. The main window alone adds

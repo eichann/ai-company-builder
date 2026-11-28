@@ -52,6 +52,9 @@ async function run(label: string, guarded: boolean) {
   const file = page(label)
   const win = new BrowserWindow({ show: true, width: 400, height: 300, webPreferences: { sandbox: true, contextIsolation: true } })
   if (guarded) keepAppPageInWindow(win.webContents, { file })
+  // What main saw (after the guard's own listener): the press did reach this window, and whether it was refused.
+  const navigations: Array<{ url: string; refused: boolean }> = []
+  win.webContents.on('will-frame-navigate', event => { if (!event.isMainFrame) navigations.push({ url: event.url, refused: event.defaultPrevented }) })
   await win.loadFile(file)
   const contents = win.webContents
   for (let i = 0; i < 50 && (await contents.executeJavaScript('window.loads')) < 1; i++) await wait(100)
@@ -68,6 +71,7 @@ async function run(label: string, guarded: boolean) {
   await contents.executeJavaScript('window.again()')
   for (let i = 0; i < 30 && (await contents.executeJavaScript('window.loads')) <= loadsBefore; i++) await wait(100)
   const result = {
+    navigations,
     frameAfterPress,
     newReplyLoaded: (await contents.executeJavaScript('window.loads')) > loadsBefore,
     frameAfterNewReply: contents.mainFrame.frames[0]?.url ?? null,

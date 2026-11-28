@@ -95,11 +95,20 @@ test('a plugin\'s frame cannot navigate, and its window.open never reaches the b
 // frames and the PDF preview keep their own rules. The real engine: tests/reply-frame-electron.test.ts.
 test('a frame showing a srcdoc never navigates away from it; a new srcdoc, plugin frames and the PDF preview are unchanged', () => {
   const main = BrowserWindow.all[0].webContents
-  const frameNavigate = (frameUrl: string, url: string) => {
+  const appPage = { url: 'file:///app/dist/index.html', parent: null }
+  const frameNavigate = (frameUrl: string, url: string, { parentUrl, initiatorUrl }: { parentUrl?: string; initiatorUrl?: string } = {}) => {
     let prevented = false
-    main.emit('will-frame-navigate', { url, isMainFrame: false, frame: { url: frameUrl }, preventDefault: () => { prevented = true } })
+    const parent = parentUrl ? { url: parentUrl, parent: appPage } : appPage
+    main.emit('will-frame-navigate', { url, isMainFrame: false, frame: { url: frameUrl, parent }, initiator: initiatorUrl ? { url: initiatorUrl } : undefined, preventDefault: () => { prevented = true } })
     return prevented
   }
+  // After an in-page jump (a reply's table of contents) the frame is at about:srcdoc#…: still the reply's frame.
+  assert.equal(frameNavigate('about:srcdoc#sec', 'https://evil.example/'), true)
+  // A frame put inside a reply's frame by a missed way, and a navigation a reply's frame starts in another frame
+  // (independent review).
+  assert.equal(frameNavigate('about:blank', 'https://evil.example/', { parentUrl: 'about:srcdoc' }), true)
+  assert.equal(frameNavigate('about:blank', 'https://evil.example/', { initiatorUrl: 'about:srcdoc' }), true)
+  assert.equal(frameNavigate('', 'about:srcdoc', { parentUrl: 'about:srcdoc' }), false)
   for (const url of ['https://evil.example/x', 'http://127.0.0.1:3001/', 'about:blank', 'data:text/html,x', 'file:///etc/passwd', 'acb-plugin://planning/0.1.0/ui/index.html', 'javascript:alert(1)']) {
     assert.equal(frameNavigate('about:srcdoc', url), true, url)
   }
