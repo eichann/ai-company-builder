@@ -2309,7 +2309,15 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     `src/features/chat/components/JobProposalEditRows.tsx`, `jobProposalEdit.ts`, `hooks/useJobProposalChoices.ts`). Before
     it is sent, a schema-4 candidate whose definition `proposalInputOf` reads back shows its values as rows (いつ・曜日 / 日・
     時刻, 何があったら動くか and its place, the Skill, 読む場所 (× / ＋足す), 置く場所 (or 置かない), やることや記録, メール, 1回の時間,
-    動けなかった回); each underlined value, pressed, becomes a list right there (edit-in-place: no separate edit box, nothing
+    動けなかった回). **読む場所 is what the job may read** (Codex review of UX stage 3, P2: a card said 「なし」 while the grant
+    read the check's place): the list is `proposalReadPaths` (`shared/core/job-proposals.ts`), the very list
+    `proposalDefinition` puts in `grant.reads.paths` — the read places, then the check's place, marked 「（確かめる場所）」 with
+    no ×, since only the check's row changes it; 「なし」 only when nothing is read. × takes off only a place added besides it
+    (tests: `tests/ui/job-proposal-card.spec.ts` 「読む場所 shows the check's place…」 / 「読む場所: the places added…」). A place
+    that is both the check's and in `reads` (not last) shows once, as the check's, without × (known; it is still listed and
+    read). What the grant adds by itself is said in fixed rows, in `jobGrantLines`' words (independent review of this fix):
+    「作れるもの：やること（1回に1つ）」 always, 「議事録：確かめで見つかった、あなたが出た会議のものだけ読む」 with a meeting check
+    (`job-proposal-card.spec.ts` 「the card says what the grant adds by itself…」). Each underlined value, pressed, becomes a list right there (edit-in-place: no separate edit box, nothing
     typed) and a choice is the change. **The card sends the whole input with the fingerprint shown** (IPC
     `jobProposals:revise` → `POST /me/job-candidates/:id/revise`, `client/electron/features/jobs/proposals.ts`, session only;
     main runs `parseJobCandidateInput` first and sends nothing else — an extra key, a hidden place, a bad id or fingerprint

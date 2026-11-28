@@ -4,6 +4,7 @@
 // Fictional data only. What the page offers the spec:
 //   ?hold=1                     a change's answer waits until `window.__acbRelease()` (the 「確かめています」 state)
 //   ?lost=1                     a change is made on the server, its answer lost
+//   ?reads=none                 the candidate reads only its check's place (「営業部/訪問メモ」), no other read place
 //   window.__acbChangeElsewhere()  the server's candidate is changed by someone else's card (the card still shows the old one)
 //   `#revised`                  every change sent (its fingerprint and the input), `#submitted` every 出す's fingerprint
 //   `#tab`                      ［大きく開く（タブ）］ opens the same card here, as AppShell's tab does
@@ -37,7 +38,11 @@ const build = (input: JobCandidateInput): JobDefinition => (parseJobDefinition(p
 
 // The server's candidate: what every read answers.
 let serial = 1
-let server = { definition: MANUAL_JOB_DEFINITION, fingerprint: fingerprintOf(serial) }
+let server = {
+  // `?reads=none`: the candidate reads no place besides the one its check looks at.
+  definition: params.get('reads') === 'none' ? build({ ...proposalInputOf(MANUAL_JOB_DEFINITION)!, reads: [] }) : MANUAL_JOB_DEFINITION,
+  fingerprint: fingerprintOf(serial),
+}
 const view = () => ({ id: CANDIDATE, definition: server.definition, fingerprint: server.fingerprint, expiresAt: '2026-11-21T01:30:00.000Z', timeZone: 'Asia/Tokyo' })
 let release: () => void = () => {}
 let submitted: JobProposalView | null = null

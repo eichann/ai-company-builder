@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Plus, X } from '@phosphor-icons/react'
-import { isJobCandidatePlace, type JobCandidateInput } from '../../../../../shared/core/job-proposals'
+import { isJobCandidatePlace, proposalReadPaths, type JobCandidateInput } from '../../../../../shared/core/job-proposals'
 import type { JobWeekday } from '../../../../../shared/core/jobs'
 import { jobMinutesText } from '../../../../../shared/core/job-words'
 import { jobTimeZoneText } from '../../../../shared/job-proposals'
@@ -64,6 +64,8 @@ export function JobProposalEditRows({ input, skillChangeable, timeZone, disabled
   const places = (keep: string | null): readonly EditChoice[] | 'loading' => choices === 'loading' || choices === null ? 'loading'
     : placeChoices(known, keep ? [keep, ...current] : current).map(p => ({ value: p, label: p }))
   const zone = jobTimeZoneText(timeZone)
+  const checkPath = input.check.kind === 'new_files' ? input.check.path : null
+  const readPaths = proposalReadPaths(input)
   const common = { disabled, onOpen: onLoadChoices }
 
   return (
@@ -103,14 +105,17 @@ export function JobProposalEditRows({ input, skillChangeable, timeZone, disabled
           : <span className="font-strong">{input.skill}</span>}」を、あなたの PC の AI が動かします（責任者はあなたです）</span>
       </Row>
       <Row label="読む場所">
-        {input.reads.map(r => (
+        {/* What the AI may read (the grant's own list): the check's place too, which only the check's row changes. */}
+        {readPaths.map(r => (
           <span key={r} className="inline-flex items-center gap-0.5 rounded-control border border-border-control bg-surface-raised px-1.5">
             {r}
-            <button type="button" aria-label={`「${r}」を外す`} disabled={disabled} className="text-text-muted hover:text-text disabled:opacity-disabled"
-              onClick={() => set({ reads: input.reads.filter(x => x !== r) })}><X size={11} aria-hidden /></button>
+            {r === checkPath
+              ? <span className="text-text-muted">（確かめる場所）</span>
+              : <button type="button" aria-label={`「${r}」を外す`} disabled={disabled} className="text-text-muted hover:text-text disabled:opacity-disabled"
+                onClick={() => set({ reads: input.reads.filter(x => x !== r) })}><X size={11} aria-hidden /></button>}
           </span>
         ))}
-        {input.reads.length === 0 && <span className="text-text-muted">なし</span>}
+        {readPaths.length === 0 && <span className="text-text-muted">なし</span>}
         {input.reads.length < 10 && (
           <InlineChoice label="足す読む場所" value="" shown={<span className="inline-flex items-center gap-0.5 font-normal text-link"><Plus size={11} aria-hidden />足す</span>} {...common}
             choices={(() => { const p = places(null); return p === 'loading' ? p : [{ value: '', label: '選んでください' }, ...p.filter(c => !input.reads.includes(c.value) && !(input.check.kind === 'new_files' && input.check.path === c.value))] })()}
@@ -123,6 +128,9 @@ export function JobProposalEditRows({ input, skillChangeable, timeZone, disabled
           onChoose={v => set({ deliverable: v === NO_DELIVERABLE ? null : v })} />
         {input.deliverable && <span>の中の、あなただけのフォルダ</span>}
       </Row>
+      {/* Fixed by what is chosen above, as the grant has them (`jobGrantLines`' words): said, not changed here. */}
+      {input.check.kind === 'new_meetings' && <Row label="議事録">確かめで見つかった、あなたが出た会議のものだけ読む</Row>}
+      <Row label="作れるもの">やること（1回に1つ）</Row>
       <Row label="やることや記録">
         <InlineChoice label="やることや記録を読むか" value={input.readRecords ? 'yes' : 'no'} shown={input.readRecords ? '読む' : '読まない'} choices={RECORDS_CHOICES} disabled={disabled}
           onChoose={v => set({ readRecords: v === 'yes' })} />
