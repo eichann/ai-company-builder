@@ -11,7 +11,7 @@ import fs from 'fs'
 import path from 'path'
 import { editorOverwriteBackupPlan, type EditorOverwriteBackupMetadata, type KeepCurrentReason } from '../../../shared/editor-disk-state'
 import { privateBackupsDir, readPrivateScopesCache } from '../../sync/private-folders'
-import { BACKUP_METADATA_FILE, renamedCopies } from '../../sync/backup-names'
+import { BACKUP_METADATA_FILE, backupCopyName } from '../../sync/backup-names'
 import type { PathGuard } from '../ports'
 
 export type KeepCurrentResult =
@@ -72,8 +72,7 @@ export async function keepGivenVersion(
     for (let n = 2; fs.existsSync(backupDir); n++) backupDir = path.join(base, `${plan.folder}_${n}`)
     // A root `_metadata.json` of the member's is kept beside the backup's own under the
     // name `copies` records (sync/backup-names.ts), never under it: the two must not meet.
-    const copies = renamedCopies([plan.rel])
-    const copyRel = copies[plan.rel] ?? plan.rel
+    const copyRel = backupCopyName(plan.rel)
     // Inside the company by its real location too (.backups could be a link).
     const target = paths.validate(path.join(backupDir, ...copyRel.split('/')))
     await fs.promises.mkdir(path.dirname(target), { recursive: true })
@@ -83,7 +82,7 @@ export async function keepGivenVersion(
       reason,
       files: [plan.rel],
       privateFolder: plan.privateFolder,
-      ...(copyRel !== plan.rel ? { copies } : {}),
+      ...(copyRel !== plan.rel ? { copies: { [plan.rel]: copyRel } } : {}),
     }
     await fs.promises.writeFile(path.join(backupDir, BACKUP_METADATA_FILE), JSON.stringify(metadata, null, 2))
     return { success: true, backupPath: backupDir }

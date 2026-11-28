@@ -482,6 +482,12 @@ test('a root _metadata.json of the member\'s is kept beside the backup\'s own me
   const deep = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, 'sub', '_metadata.json'), 'deeper edits')
   assert.equal(fs.readFileSync(path.join(deep.backupPath!, 'sub', '_metadata.json'), 'utf-8'), 'deeper edits')
   assert.equal(JSON.parse(fs.readFileSync(path.join(deep.backupPath!, '_metadata.json'), 'utf-8')).copies, undefined)
+  // Names an object already has (a plain lookup once found an inherited one) are kept at their own path.
+  for (const name of ['constructor', 'toString', '__proto__']) {
+    const kept = await h.invoke<Backup>('editor:backupEdits', company, path.join(company, name), `edits of ${name}`)
+    assert.equal(kept.success, true, name)
+    assert.equal(fs.readFileSync(path.join(kept.backupPath!, name), 'utf-8'), `edits of ${name}`, name)
+  }
 })
 
 // Fake values only: what the test proves is that none of them reach the renderer.

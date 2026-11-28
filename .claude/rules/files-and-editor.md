@@ -312,7 +312,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   neither written by that round nor kept with exactly its text), read with no await before the answer
   (code review 2026-11-28: an edit in an already saved tab during the last keep was in no list, and the
   window closed before its autosave). A tab not kept because it was typed in gets one more round; not
-  kept twice in a row is asked; still typing after 5 rounds is asked again (「保存できていない編集があります」).
+  kept twice in a row is asked (a tab given up with ［それでも進む］ is not asked about again in that leaving);
+  still typing after 5 rounds is asked again (「保存できていない編集があります」).
   What could not be kept is named again —
   「バックアップにも残せなかった編集があります」 … 「それでも進む」 / 「キャンセル」 (Enter does not confirm;
   `leaving.ts` `notKeptQuestion`). Tests: `editor-panel.spec.ts` 「a tab that cannot be saved…」 /
