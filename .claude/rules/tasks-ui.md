@@ -280,8 +280,9 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    The generic part is `src/shared/ui/InlineText.tsx` (opens, keeps the draft, closes; no rule). **One place decides
    what is sent** (`TaskTextEdit.tsx` `saveTaskText`): only a changed value (`editSteps`: `retitle` / `set_purpose`,
    compared trimmed; nothing changed sends nothing), the title checked with the core's `normalizeRecordTitle` only when
-   the title is sent (so 目的 alone saves under a title stored before the rule); the assignee of a request still
-   引き受け待ち reads 「保存すると、このやることを引き受けたことになります。」 under the field (`accepts`). The card says
+   the title is sent (so 目的 alone saves under a title stored before the rule). Correcting them never accepts a request
+   still 引き受け待ち (owner decision 2026-11-28, `records.md` "Acceptance"), so the field says nothing about it (the
+   note 「保存すると…引き受けたことになります。」 is gone; `task-card.spec.ts` checks it stays gone). The card says
    「件名を直しました」 / 「目的を直しました」 with ［取り消す］. A refusal stays under the field with the draft; someone
    else's change first is the usual conflict notice. A card left (another task, another tab) before a leave-save is
    answered keeps nothing of a refused draft — as before, when leaving the form always dropped it (Codex review: accepted). A member who may not correct them sees plain text, no control.

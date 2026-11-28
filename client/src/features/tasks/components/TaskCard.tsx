@@ -462,11 +462,9 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
   const textNow = { title: record.title, purpose: card.purpose }
-  // The assignee's every action accepts a request still 引き受け待ち (records.md "Acceptance"): said before saving.
-  const accepts = card.roles.assignee && record.state === 'awaiting_acceptance'
   return (
     <RecordPage testId="task-card" kind="task" name="やること" title={record.title}
-      titleEdit={taskTitleEdit(textNow, card.canEdit.title, busy, accepts, onEditText)}
+      titleEdit={taskTitleEdit(textNow, card.canEdit.title, busy, onEditText)}
       titleNote={meetingTitle ? `（${meetingTitle}）` : null} top={top}
       chips={<>
         {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
@@ -481,7 +479,7 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
       from={<>
         {/* 目的 right under the title, corrected in place (task version 16). Not keyed by version: a reload (someone
             else's change, a press half done) keeps the draft and the refusal in the field. */}
-        <TaskPurpose now={textNow} may={card.canEdit.purpose} busy={busy} accepts={accepts} onSave={onEditText} />
+        <TaskPurpose now={textNow} may={card.canEdit.purpose} busy={busy} onSave={onEditText} />
         {card.origin && <OriginLine origin={card.origin} />}
       </>}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
