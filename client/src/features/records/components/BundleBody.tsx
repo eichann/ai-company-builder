@@ -1,33 +1,116 @@
-import type { ReactNode } from 'react'
-import { CircleNotch, Sparkle, TreeStructure } from '@phosphor-icons/react'
-import type { BundleDetailView } from '../../../../shared/record-details'
+import { useState, type ReactNode } from 'react'
+import { CircleNotch, PencilSimpleLine, Sparkle, TreeStructure } from '@phosphor-icons/react'
+import { bundleTileAction, type BundleAction, type BundleActions, type BundleDetailView, type BundleTileField } from '../../../../shared/record-details'
 import type { RecordCardView } from '../../../../shared/record-views'
 import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
+import { InlineDate } from '../../../shared/ui/InlineDate'
+import { InlineText } from '../../../shared/ui/InlineText'
+import { Button } from '../../../shared/ui/primitives'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
+
+/**
+ * 責任者, chosen where it is shown: pressed, the name turns into the list of members (the member first, 「自分」) and
+ * ［替える］. Only ［替える］ (or Enter) saves — an arrow key or a typed letter on the list only moves the choice, since a
+ * new 責任者 is told (independent review); Esc or leaving puts it back unchanged. A refusal stays under it.
+ */
+function InlinePerson({ value, label, people, busy, children, onSave }: { value: string | null; label: string; people: BundleActions['people']; busy: boolean; children: ReactNode; onSave: (id: string) => Promise<string | null> }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const choose = async (id: string) => {
+    if (saving || !id || id === value) { setOpen(false); return }
+    setSaving(true)
+    try {
+      const failure = await onSave(id)
+      if (failure === null) { setOpen(false); setError(null) } else setError(failure)
+    } finally { setSaving(false) }
+  }
+  if (!open) {
+    return (
+      <span className="block">
+        <button type="button" disabled={busy} aria-label={label} title={label} onClick={() => { setError(null); setDraft(value ?? ''); setOpen(true) }}
+          className="group -mx-1 inline-flex items-center gap-1 rounded-small px-1 text-left hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-disabled">
+          {children}<PencilSimpleLine aria-hidden size={14} className="shrink-0 text-text-subtle opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
+        </button>
+        {error && <span role="alert" className="block text-small font-normal text-danger-text">{error}</span>}
+      </span>
+    )
+  }
+  return (
+    <span className="block space-y-1"
+      // Leaving the list and its button (not moving between them) puts it back.
+      onBlur={e => { if (!saving && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false) }}
+      onKeyDown={e => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false) }
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void choose(draft) }
+      }}>
+      <span className="flex items-center gap-1.5">
+        <select aria-label="責任者" autoFocus value={draft} disabled={saving} onChange={e => setDraft(e.target.value)}
+          className="-mx-1 block min-w-0 flex-1 rounded-small border border-border-control bg-bg px-1 py-0.5 text-body font-normal text-text focus:border-focus-border focus:outline-none">
+          {!value && <option value="">選んでください</option>}
+          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <Button size="sm" variant="primary" disabled={saving || !draft || draft === value} onClick={() => void choose(draft)}>替える</Button>
+      </span>
+      {error && <span role="alert" className="block text-small font-normal text-danger-text">{error}</span>}
+    </span>
+  )
+}
 
 const shortDue = (due: string | null) => {
   const m = due?.match(/^\d{4}-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/)
   return m ? `${Number(m[1])}/${Number(m[2])}${m[3] ? ` ${m[3]}` : ''}` : null
 }
 
+/** What the tiles need to correct a field in place: the card's actions and its press (the server decides each). */
+export interface BundleTileEdit {
+  actions: BundleActions
+  busy: boolean
+  onAct: (action: BundleAction, args: Record<string, string>) => Promise<string | null>
+}
+
 /**
- * A 案件・プロジェクト (新しい画面のデモ E): what for, who is responsible and how far, its approval
- * requests as cards, and everyone's やること by whose turn (a row opens the task).
+ * A 案件・プロジェクト (新しい画面のデモ E): what for, who is responsible, the due and how far, its approval
+ * requests as cards, and everyone's やること by whose turn (a row opens the task). なんのため・責任者・期限 are corrected
+ * where they are shown (owner 2026-11-27) by whom the type lets (`bundleTileAction`); for anyone else they are text.
  */
-export function BundleBody({ b, renderApproval }: { b: BundleDetailView; renderApproval?: (approvalId: string) => ReactNode }) {
-  const tiles: Array<[string, string]> = [
-    ['なんのため', b.purpose ?? '—'],
-    ['責任者', b.owner ? `${b.owner}さん` : '—'],
+export function BundleBody({ b, renderApproval, edit }: { b: BundleDetailView; renderApproval?: (approvalId: string) => ReactNode; edit?: BundleTileEdit }) {
+  const may = (field: BundleTileField) => (edit ? bundleTileAction(edit.actions, field) : null)
+  const send = (a: BundleAction, value: string) => edit!.onAct(a, { [a.args[0].name]: value })
+  const purposeAction = may('purpose')
+  const ownerAction = may('owner')
+  const dueAction = may('due')
+  const purpose = purposeAction
+    ? <InlineText value={b.purpose ?? ''} label={b.purpose ? 'なんのためを直す' : 'なんのためを書く'} fieldLabel="なんのため" multiline busy={edit!.busy}
+        className={b.purpose ? '' : 'font-normal text-text-subtle'}
+        onSave={draft => (draft.trim() === (b.purpose ?? '').trim() ? Promise.resolve(null) : send(purposeAction, draft.trim()))}>
+        {b.purpose ?? 'なんのためを書く'}
+      </InlineText>
+    : b.purpose ?? '—'
+  const ownerShown = b.owner ? `${b.owner}さん` : '—'
+  const owner = ownerAction
+    ? <InlinePerson value={ownerAction.args[0].value} label="責任者を替える" people={edit!.actions.people} busy={edit!.busy} onSave={id => send(ownerAction, id)}>{ownerShown}</InlinePerson>
+    : ownerShown
+  const dueShown = b.due ? shortDue(b.due) ?? b.due : '—'
+  const due = dueAction
+    ? <InlineDate value={b.due ?? null} label={b.due ? '期限を変える' : '期限を決める'} busy={edit!.busy} onSave={d => send(dueAction, d)}>{dueShown}</InlineDate>
+    : dueShown
+  const tiles: Array<[string, ReactNode]> = [
+    ['なんのため', purpose],
+    ['責任者', owner],
+    // 期限 only where the type has one to show or set (a business plugin's 案件 may have none).
+    ...(b.due || dueAction ? [['期限', due] as [string, ReactNode]] : []),
     ['進み具合', b.total > 0 ? `${b.total}つのうち ${b.done}つ終わった` : 'まだやることはありません'],
   ]
   return (
     <>
-      <div className="grid grid-cols-3 gap-2">
+      <div className={`grid gap-2 ${tiles.length === 4 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
         {tiles.map(([k, v]) => (
           // `min-w-0` + `overflow-wrap: anywhere` (FB #36): a long URL in なんのため wraps inside its tile
           // instead of running into 進み具合 (tests/ui/record-card.spec.ts `&purpose=url`).
-          <div key={k} className="min-w-0 rounded-control bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
+          <div key={k} data-tile={k} className="min-w-0 rounded-control bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
             <div className="text-caption font-normal text-gray-500">{k}</div>
             <div className="whitespace-pre-wrap text-body font-semibold leading-snug [overflow-wrap:anywhere]">{v}</div>
           </div>

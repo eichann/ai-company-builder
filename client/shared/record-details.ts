@@ -59,6 +59,8 @@ export interface BundleDetailView {
   kind: 'bundle'
   purpose: string | null
   owner: string | null
+  /** Its `due` field (`YYYY-MM-DD` or with a time); null when none. */
+  due?: string | null
   groups: Array<{ title: string; tasks: BundleTaskRow[] }>
   done: number
   total: number
@@ -105,6 +107,25 @@ export const BUNDLE_ENDS_HINT = '一覧から外れ、このタブは閉じま�
 const BUNDLE_DONE: Record<string, string> = {
   finish: '終えました', cancel: 'やめました', reopen: 'もう一度始めました',
   set_owner: '責任者を替えました', set_purpose: 'なんのためを書きました', set_due: '期限を変えました',
+}
+
+/** The fields a 案件・プロジェクト's card shows in tiles and corrects where they are shown (owner 2026-11-27: 「その場で直す」). */
+export const BUNDLE_TILE_FIELDS = ['purpose', 'owner', 'due'] as const
+export type BundleTileField = typeof BUNDLE_TILE_FIELDS[number]
+const TILE_KIND: Record<BundleTileField, BundleActionArg['kind']> = { purpose: 'text', owner: 'person', due: 'date' }
+
+/**
+ * The action that sets exactly one tile's field, when the member may run it and it asks nothing else (no reason
+ * required, ends nothing): pressed, the tile turns into its editor in place. Anything else stays in 「…」.
+ */
+export function bundleTileAction(actions: BundleActions | undefined, field: BundleTileField): BundleAction | null {
+  return actions?.more.find(a => !a.ends && !a.noteRequired && a.args.length === 1 && a.args[0].name === field && a.args[0].kind === TILE_KIND[field]) ?? null
+}
+
+/** 「…」's actions: those not corrected in a tile. */
+export function bundleMenuActions(actions: BundleActions): BundleAction[] {
+  const inTiles = new Set(BUNDLE_TILE_FIELDS.map(f => bundleTileAction(actions, f)).filter(Boolean))
+  return actions.more.filter(a => !inTiles.has(a))
 }
 
 /** The card's line after a press (with ［取り消す］): the core プロジェクト's own words, else the type's label. */
@@ -176,7 +197,7 @@ export type RecordDetailView = MeetingDetailView | IncomingDetailView | BundleDe
 /** Fields each screen already shows in its own place (not repeated under 「ほかの項目」). */
 export const DETAIL_FIELDS: Record<string, ReadonlySet<string>> = {
   meeting: new Set(['meeting_at', 'occurred_at', 'assignee', 'external_count', 'summary_text']),
-  bundle: new Set(['purpose', 'owner']),
+  bundle: new Set(['purpose', 'owner', 'due']),
   interaction: new Set(['occurred_at', 'channel', 'counterpart_text', 'needs_reply', 'from_address', 'to_addresses', 'cc_addresses', 'message_id', 'thread_ref', 'source_ref']),
 }
 
@@ -249,7 +270,7 @@ export function bundleDetailOf(r: Pick<RecordSummary, 'fields'>, linked: RecordS
   }
   const total = Object.values(groups).reduce((n, g) => n + g.length, 0)
   return {
-    kind: 'bundle', purpose: str(r.fields.purpose), owner: owner ? people[owner] ?? null : null,
+    kind: 'bundle', purpose: str(r.fields.purpose), owner: owner ? people[owner] ?? null : null, due: str(r.fields.due),
     groups: (Object.keys(GROUP_TITLES) as Array<keyof typeof GROUP_TITLES>).filter(k => groups[k].length > 0).map(k => ({ title: GROUP_TITLES[k], tasks: groups[k] })),
     done: groups.done.length, total,
     pendingApprovals: linked.filter(x => x.type === 'approval' && x.state === 'pending').map(x => x.id),

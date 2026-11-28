@@ -2262,7 +2262,12 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     されました・「定期の仕事」で受け取る / 差し戻されました（理由：<the fixed reason's words>） / 取り下げました) and 「取り下げる」 only while
     `submitted` (`jobProposals:withdraw`). A refusal that means the candidate or proposal moved on (`JOB_VERSION_FINGERPRINT`,
     `JOB_PROPOSAL_DECIDED`, `JOB_CANDIDATE_NOT_FOUND`, `JOB_CANDIDATE_PLACE`, `JOB_CANDIDATE_DISCARDED`,
-    `JOB_CANDIDATE_SUBMITTED`) reads it again. **Gone or withheld** (the one 404):
+    `JOB_CANDIDATE_SUBMITTED`) reads it again. **A press whose answer never came** (offline, a 5xx; owner 2026-11-28): never
+    「開き直すと分かります」 — the card reads the candidate again by itself (`readJobCandidateNow`, at once, then after 2, 5 and
+    8 s; "not yet" is final only at the last read; kept per candidate, not per card) and judges the press by it (a proposal there / no longer `submitted` / `discarded`): done → the state shows; not done
+    → 「確かめました。まだ管理者に出されていません。もう一度押してください。」; nothing readable → said beside the card with
+    ［結果を確かめる］ (a read only). No press is offered meanwhile (the submit is idempotent on the server anyway). Same
+    helpers and spec as the approval card (`approvals.md` "The app"; `approval-card-ui.html?card=job`). **Gone or withheld** (the one 404):
     main looks for its proposal in `GET /me/job-proposals` by the candidate's id, so a reopened conversation (or one older
     than 24 hours) still shows what became of it; none → 「この案はもう見られません（…24時間たったか、あなたが今は読めない場所が
     含まれています）」 — never which.

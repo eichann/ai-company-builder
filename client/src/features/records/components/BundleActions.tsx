@@ -1,10 +1,10 @@
 // A 案件・プロジェクト's own buttons beside its title (owner FB #30): the main one (［終える］, or
-// ［もう一度始める］ once it is finished) and the rest in 「…」 (［やめる］, 責任者を替える, 期限を変える,
-// なんのためを書く …), each from its type and only where the member's place allows it
+// ［もう一度始める］ once it is finished) and the rest in 「…」 (［やめる］ …; なんのため・責任者・期限 are corrected in
+// their tiles, BundleBody), each from its type and only where the member's place allows it
 // (`bundleActionsOf`, decided in main). The server decides every press.
 import { useState } from 'react'
 import { CheckCircle } from '@phosphor-icons/react'
-import { BUNDLE_ENDS_HINT, type BundleAction, type BundleActions as Actions } from '../../../../shared/record-details'
+import { BUNDLE_ENDS_HINT, bundleMenuActions, type BundleAction, type BundleActions as Actions } from '../../../../shared/record-details'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { MAIN_BUTTON } from '../../../shared/ui/RecordPage'
 import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
@@ -33,7 +33,9 @@ export function BundleActions({ actions, busy, onAct, extra = [] }: Props) {
     if (a.args.length > 0 || a.noteRequired || a.noteOffered) setOpen(a)
     else setError(await onAct(a, {}))
   }
-  const { main, more } = actions
+  const { main } = actions
+  // なんのため・責任者・期限 are corrected in their tiles (BundleBody), not from here.
+  const more = bundleMenuActions(actions)
   return <>
     {main && <button type="button" disabled={busy} onClick={() => void press(main)} className={MAIN_BUTTON}>{main.ends && <CheckCircle size={13} weight="fill" />}{main.title}</button>}
     <MoreMenu compact items={[...more.map(a => ({ label: a.title, ...(a.ends ? { hint: BUNDLE_ENDS_HINT } : {}), onClick: () => { void press(a) } })), ...extra]} />

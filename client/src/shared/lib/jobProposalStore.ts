@@ -88,6 +88,19 @@ export function subscribeJobProposal(key: string, loader: () => Promise<JobCandi
   }
 }
 
+/**
+ * One read whose answer the card waits for (after a press whose answer never came): taken like any read while it is still
+ * the newest, and handed back so the card can tell whether the press happened. null when nobody shows the candidate.
+ */
+export async function readJobCandidateNow(key: string): Promise<JobCandidateResult | null> {
+  const loader = loaders.get(key)
+  if (!loader) return null
+  const started = nextGeneration(key)
+  const r = await loader().catch(() => null)
+  if (r && generation.get(key) === started) take(key, r)
+  return r
+}
+
 /** 読み直す on a card (and after a refusal that says it moved on): ask the server again. */
 export function reloadJobCandidate(key: string): void {
   load(key)

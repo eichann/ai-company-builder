@@ -25,7 +25,7 @@ import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { editDoneWords, taskTitleEdit, whenDoneLine, type TextEditSteps } from '../cardActions'
 import { TaskPurpose } from './TaskTextEdit'
-import { companyNow } from '../model'
+import { companyNow, dueText } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { MinutesReview } from './MinutesReview'
@@ -458,7 +458,7 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
   ]
   // 「AIへの相談」 on the right: the consultations about this task, ［相談する］［＋新しい相談］.
   const consult = consultationLinks(consultations, onConsult && (fresh => onConsult({ id: record.id, title: record.title }, fresh)), onDetachConsultation)
-  const postpone = card.actions.find(a => a.action === 'set_due')
+  const setDue = card.actions.find(a => a.action === 'set_due')
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
   const textNow = { title: record.title, purpose: card.purpose }
@@ -548,7 +548,7 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
         {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string, _h: boolean, place: BundlePlace | null, isPrivate: boolean) => onCreateBundle(title, place, isPrivate) } : {})} />
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
-        onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
+        onSetDue={setDue ? due => onRun([{ action: 'set_due', args: { due } }], `期限を${dueText(due, now)}にしました${card.names.requester && !card.roles.requester ? `。頼んだ${card.names.requester}さんに知らせました` : ''}`) : null} />
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>

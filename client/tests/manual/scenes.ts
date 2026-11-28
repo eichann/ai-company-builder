@@ -1167,13 +1167,14 @@ export const scenes: Scene[] = [
   },
   {
     id: 'task-postpone',
-    about: '延ばす on the due: the choices (1時間あと, 今日の夕方, あしたの朝…).',
+    about: 'The due pressed in place: its chooser with 延ばす\'s choices (1時間あと, 今日の夕方, あしたの朝…), the calendar and the time.',
     ...CARD,
-    steps: [{ click: 'role=button[name="延ばす"]' }, { waitFor: 'role=group[name="延ばす"]' }],
-    crop: { target: 'role=group[name="延ばす"]', padding: { x: 60, y: 90 } },
+    viewport: { width: 1100, height: 1100 },
+    steps: [{ click: 'role=button[name="期限を変える"]' }, { waitFor: 'role=dialog[name="期限を変える"]' }],
+    crop: { target: 'role=dialog[name="期限を変える"]', padding: { x: 60, y: 90 } },
     annotations: [
-      { box: 'role=button[name="延ばす"]' }, { marker: { target: 'role=button[name="延ばす"]', label: '1', at: 'right' } },
-      { box: 'role=group[name="延ばす"]' }, { marker: { target: 'role=group[name="延ばす"]', label: '2', at: 'right' } },
+      { box: 'role=button[name="期限を変える"]' }, { marker: { target: 'role=button[name="期限を変える"]', label: '1', at: 'right' } },
+      { box: 'role=dialog[name="期限を変える"]' }, { marker: { target: 'role=dialog[name="期限を変える"]', label: '2', at: 'right' } },
     ],
   },
   {

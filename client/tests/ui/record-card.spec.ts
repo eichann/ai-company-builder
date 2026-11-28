@@ -278,7 +278,8 @@ test('a プロジェクト: its 責任者 ends it with ［終える］ (the scre
   await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
 
   await card.getByRole('button', { name: 'その他の操作' }).click()
-  for (const name of ['責任者を替える', '期限を変える', 'なんのためを書く']) await expect(page.getByRole('menuitem', { name: new RegExp(name) })).toBeVisible()
+  // なんのため・責任者・期限 are corrected in their tiles now (owner 2026-11-27), not from 「…」.
+  for (const name of ['責任者を替える', '期限を変える', 'なんのためを書く']) await expect(page.getByRole('menuitem', { name: new RegExp(name) })).toHaveCount(0)
   await page.getByRole('menuitem', { name: /やめる/ }).click()
   const dialog = page.getByRole('dialog', { name: 'やめる' })
   await expect(dialog).toContainText('一覧から外れ、このタブは閉じます。消しません')
@@ -295,25 +296,35 @@ test('a プロジェクト: its 責任者 ends it with ［終える］ (the scre
   expectNoPageErrors(state)
 })
 
-test('a プロジェクト: 期限を変える and 責任者を替える send the values chosen, prefilled with today\'s, and end nothing', async ({ page }) => {
+// Owner 2026-11-27 (「その場で直す」): the tiles are corrected where they are shown — 期限 by its date (a chooser holding the
+// value now), なんのため as words in place, 責任者 by choosing among the members in place — never a separate window.
+test('a プロジェクト: 期限・なんのため・責任者 corrected in their tiles, prefilled with today\'s, ending nothing', async ({ page }) => {
   const state = await openPreview(page, 'record-card', { record: 'project' })
   const card = page.getByTestId('record-card')
   const opened = page.locator('#opened')
-  await card.getByRole('button', { name: 'その他の操作' }).click()
-  await page.getByRole('menuitem', { name: /期限を変える/ }).click()
+  await card.getByRole('button', { name: '期限を変える' }).click()
   const due = page.getByRole('dialog', { name: '期限を変える' })
-  await expect(due.getByLabel('期限')).toHaveValue('2026-12-01')
-  await due.getByLabel('期限').fill('2026-12-15')
-  await due.getByRole('button', { name: '期限を変える' }).click()
+  await expect(due.getByLabel('日付')).toHaveValue('2026-12-01')
+  await due.getByLabel('日付').fill('2026-12-15')
+  await due.getByRole('button', { name: 'この日にする' }).click()
   await expect(opened).toHaveText('act project-0000p1 set_due@3 {"due":"2026-12-15"}')
   await expect(card.getByRole('status')).toContainText('期限を変えました')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
-  await card.getByRole('button', { name: 'その他の操作' }).click()
-  await page.getByRole('menuitem', { name: /責任者を替える/ }).click()
-  const owner = page.getByRole('dialog', { name: '責任者を替える' })
-  await owner.getByLabel('責任者').selectOption({ label: '阿部さん' })
-  await owner.getByRole('button', { name: '責任者を替える' }).click()
-  await expect(opened).toContainText('act project-0000p1 set_owner@4 {"owner":"u-abe"}')
+  await card.getByRole('button', { name: 'なんのためを直す' }).click()
+  const purpose = card.getByRole('textbox', { name: 'なんのため' })
+  await purpose.fill('窓口を4つに')
+  await purpose.press('ControlOrMeta+Enter')
+  await expect(opened).toContainText('act project-0000p1 set_purpose@4 {"purpose":"窓口を4つに"}')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await card.getByRole('button', { name: '責任者を替える' }).click()
+  await card.getByLabel('責任者').selectOption({ label: '阿部さん' })
+  // Moving the choice sends nothing (a new 責任者 is told): only ［替える］ does.
+  await expect(opened).not.toContainText('set_owner')
+  await card.getByRole('button', { name: '替える', exact: true }).click()
+  await expect(opened).toContainText('act project-0000p1 set_owner@5 {"owner":"u-abe"}')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(opened).not.toContainText('ended')
   // No longer its 責任者: nothing left to press (the server would refuse it).
   await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
@@ -327,6 +338,9 @@ test('a プロジェクト someone else is responsible for: no button to end or 
   await expect(card).toContainText('新人研修の見直し')
   await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
+  // Its tiles are plain text for them: nothing to press in place.
+  for (const name of ['期限を変える', 'なんのためを直す', '責任者を替える']) await expect(card.getByRole('button', { name })).toHaveCount(0)
+  await expect(card.locator('[data-tile="期限"]')).toContainText('12/1')
   expectNoPageErrors(state)
 })
 
@@ -392,12 +406,12 @@ test('a プロジェクト without a 責任者: only 責任者を替える, and 
   const card = page.getByTestId('record-card')
   const opened = page.locator('#opened')
   await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
-  await card.getByRole('button', { name: 'その他の操作' }).click()
-  await expect(page.getByRole('menuitem')).toHaveCount(1)
-  await page.getByRole('menuitem', { name: /責任者を替える/ }).click()
-  const owner = page.getByRole('dialog', { name: '責任者を替える' })
-  await owner.getByLabel('責任者').selectOption({ label: '自分（佐藤）' })
-  await owner.getByRole('button', { name: '責任者を替える' }).click()
+  // The 責任者 tile is the one thing to press (in place); the others are text and there is no 「…」.
+  await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
+  for (const name of ['期限を変える', '期限を決める', 'なんのためを直す', 'なんのためを書く']) await expect(card.getByRole('button', { name })).toHaveCount(0)
+  await card.getByRole('button', { name: '責任者を替える' }).click()
+  await card.getByLabel('責任者').selectOption({ label: '自分（佐藤）' })
+  await card.getByRole('button', { name: '替える', exact: true }).click()
   await expect(opened).toContainText('act project-0000p1 set_owner@3 {"owner":"u-sato"}')
   await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
   expectNoPageErrors(state)

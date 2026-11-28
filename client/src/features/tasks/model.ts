@@ -344,8 +344,8 @@ export function taskTabShown(facts: TaskTabFacts | null, departmentId: string | 
 }
 
 /**
- * 「延ばす」's choices from now, in company time (owner 2026-11-03, 使い心地のメモ #7: more of them, no
- * date picker): 1時間あと, 今日の夕方, あしたの朝, あさって, 今週の金曜, 来週の月曜, 来週の金曜, 2週間後,
+ * 「延ばす」's choices from now, in company time (owner 2026-11-03, 使い心地のメモ #7: more of them; since 2026-11-27 above the due's
+ * own date picker): 1時間あと, 今日の夕方, あしたの朝, あさって, 今週の金曜, 来週の月曜, 来週の金曜, 2週間後,
  * 来月のはじめ. A day that is a weekend or a holiday (Japan's and the company's, `holidays`) moves to
  * the next business day; one already past (today or before) or on the same day as an earlier
  * choice is left out, so each row is a different day.
