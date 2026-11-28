@@ -1,6 +1,7 @@
 // Draws a reply's diagram as a picture (chat-ui-and-history.md "Diagrams in a reply"). The text comes from the AI,
 // which may have read anything, so nothing in it may run or reach the network:
-//   1. mermaid runs with securityLevel 'strict', no HTML labels, and none of its settings open to the text;
+//   1. mermaid runs with securityLevel 'strict', no HTML labels, none of its settings open to the text, in a hidden
+//      frame whose own CSP lets nothing load (it draws in a live document before anything is sanitised);
 //   2. every SVG (mermaid's and the AI's own) is cut down to drawing elements with local references only;
 //   3. the result is shown as <img src="data:image/svg+xml">: a picture never runs script or loads anything.
 // mermaid (~2.8 MB) is loaded only when the first mermaid block is drawn (client/vite.config.ts puts it in dist/vendor/).
@@ -21,6 +22,8 @@ const ALLOWED_ELEMENTS = new Set([
   'lineargradient', 'radialgradient', 'stop',
   'filter', 'fegaussianblur', 'feoffset', 'feblend', 'feflood', 'fecomposite', 'femerge', 'femergenode', 'fedropshadow', 'fecolormatrix',
 ])
+/** More `<use>` than this is not drawn: copies of copies can make one small picture cost the renderer seconds. */
+const MAX_USES = 200
 
 /** A url() that is not a reference inside the picture (`url(#id)`). */
 const OUTSIDE_URL = /url\s*\(\s*(?!['"]?#)/i
@@ -39,6 +42,7 @@ export function sanitizeSvg(markup: string): { svg: string; width?: number; heig
   const root = doc.body.firstElementChild
   if (!root || doc.body.children.length !== 1 || root.namespaceURI !== SVG_NS || root.localName !== 'svg') return null
   clean(root)
+  if (root.getElementsByTagNameNS(SVG_NS, 'use').length > MAX_USES) return null
   const size = intrinsicSize(root)
   if (size) {
     root.setAttribute('width', String(size.width))
@@ -82,26 +86,40 @@ function intrinsicSize(root: Element): { width: number; height: number } | undef
   return width > 0 && height > 0 ? { width, height } : undefined
 }
 
-// --- mermaid, loaded once and only when needed -------------------------------------------------------------
+// --- mermaid, loaded once and only when needed, in a frame that cannot reach the network ----------------------
+// mermaid draws in a live document to measure text, and some of its shapes load on their own (a node's `img:` runs
+// `new Image()`, a sequence actor's icon inserts an <image>). It runs in a hidden same-origin frame whose own CSP
+// allows scripts from the app's files only and images from data: only, whatever the app page's CSP allows.
 
 interface Mermaid {
   initialize(config: Record<string, unknown>): void
   render(id: string, text: string): Promise<{ svg: string }>
 }
 
-let mermaidLoad: Promise<Mermaid> | null = null
-function loadMermaid(): Promise<Mermaid> {
-  mermaidLoad ??= new Promise<Mermaid>((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = mermaidUrl
-    script.async = true
-    script.onload = () => {
-      const mermaid = (globalThis as { mermaid?: Mermaid }).mermaid
-      if (mermaid) resolve(mermaid)
-      else reject(new Error('mermaid did not load'))
+/** The frame's policy: nothing leaves it. 'self' is the app's own files (the mermaid file); styles inline only. */
+const DIAGRAM_FRAME_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+
+let mermaidLoad: Promise<{ mermaid: Mermaid; doc: Document }> | null = null
+function loadMermaid(): Promise<{ mermaid: Mermaid; doc: Document }> {
+  mermaidLoad ??= new Promise((resolve, reject) => {
+    const frame = document.createElement('iframe')
+    const failed = () => { mermaidLoad = null; frame.remove(); reject(new Error('mermaid did not load')) }
+    frame.setAttribute('aria-hidden', 'true')
+    frame.tabIndex = -1
+    // Laid out (mermaid measures text) but never seen or reached.
+    frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1600px;height:1200px;border:0;visibility:hidden;pointer-events:none'
+    frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${DIAGRAM_FRAME_CSP}"></head><body></body></html>`
+    frame.onload = () => {
+      const win = frame.contentWindow as (Window & { mermaid?: Mermaid }) | null
+      const doc = frame.contentDocument
+      if (!win || !doc) return failed()
+      const script = doc.createElement('script')
+      script.src = new URL(mermaidUrl, document.baseURI).href
+      script.onload = () => (win.mermaid ? resolve({ mermaid: win.mermaid, doc }) : failed())
+      script.onerror = failed
+      doc.head.appendChild(script)
     }
-    script.onerror = () => { mermaidLoad = null; reject(new Error('mermaid did not load')) }
-    document.head.appendChild(script)
+    document.body.appendChild(frame)
   })
   return mermaidLoad
 }
@@ -110,12 +128,15 @@ function loadMermaid(): Promise<Mermaid> {
 const SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'suppressErrorRendering',
   'htmlLabels', 'flowchart', 'themeCSS', 'themeVariables', 'fontFamily', 'theme', 'darkMode', 'dompurifyConfig']
 
+/** A drawing not finished by then is given up, so the next diagram does not wait behind it for ever. */
+const MERMAID_TIMEOUT_MS = 15_000
+
 let renderCount = 0
-// mermaid draws one diagram at a time (it measures text in the page).
+// mermaid draws one diagram at a time (its settings are global, and it measures in one document).
 let mermaidQueue: Promise<unknown> = Promise.resolve()
 
 async function renderMermaid(source: string, dark: boolean): Promise<string> {
-  const mermaid = await loadMermaid()
+  const { mermaid, doc } = await loadMermaid()
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
@@ -127,12 +148,15 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
     secure: SECURE_KEYS,
   })
   const id = `acb-diagram-${++renderCount}`
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    return (await mermaid.render(id, mermaidWithoutConfig(source))).svg
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('mermaid took too long')), MERMAID_TIMEOUT_MS) })
+    return (await Promise.race([mermaid.render(id, mermaidWithoutConfig(source)), timeout])).svg
   } finally {
+    clearTimeout(timer)
     // A failed render may leave its measuring element behind.
-    document.getElementById(id)?.remove()
-    document.getElementById(`d${id}`)?.remove()
+    doc.getElementById(id)?.remove()
+    doc.getElementById(`d${id}`)?.remove()
   }
 }
 

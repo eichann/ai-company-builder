@@ -478,10 +478,13 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   stop; rows, states, errors, answer text and data parts are untouched.
 - **Diagrams in a reply** (owner decision 2026-11-28, step ① of 「図とページで返す」; ② — a page card through the HTML
   viewer — is next). A closed ```` ```mermaid ```` block, or a ```` ```svg ```` / ```` ```xml ```` / unlabelled block that is one
-  whole `<svg>` (`diagrams.ts` `diagramOf`; ```` ```html ```` stays code; over 60,000 characters stays code), is drawn as a
+  whole `<svg>` (`diagrams.ts` `diagramOf`; ```` ```html ```` stays code; over 60,000 characters — mermaid 20,000 — stays code), is drawn as a
   picture (`components/ChatDiagram.tsx`) with 「図のもとの書き方」 folded under it; while drawing, 「図を描いています…」; a block
-  that cannot be drawn is the code it was. **Nothing in a diagram runs or reaches the network** (the text is the AI's,
-  which may have read a planted instruction; `diagramRenderer.ts`): mermaid runs with `securityLevel: 'strict'`, no HTML
+  that cannot be drawn (or takes over 15 s) is the code it was. **Nothing in a diagram runs or reaches the network** (the text is the AI's,
+  which may have read a planted instruction; `diagramRenderer.ts`): **mermaid runs in a hidden same-origin frame whose
+  own CSP allows scripts from the app's files and images from `data:` only** (review of this change: mermaid draws in a
+  live document before anything is sanitised, and a node's `img:` runs `new Image()`, a sequence actor's icon inserts an
+  `<image>` — the app page's CSP still lets some image hosts in), with `securityLevel: 'strict'`, no HTML
   labels, its `%%{init}%%` directives and front matter removed (`mermaidWithoutConfig`) and its settings `secure`; every
   SVG — mermaid's and the AI's — keeps only drawing elements (no script, foreignObject, image, a — unwrapped to a group —,
   animate / set, feImage), no `on*`, no reference but `#id`, no outside `url()`, no CSS with `@import`, fonts or
@@ -490,15 +493,16 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   AI is told they are welcome: `client/shared/reply-style.ts`; `chat-and-agents.md` "What ACB tells the AI"). Each
   picture is drawn once per text and theme and kept (`watchDiagram`, ≤ 100 unwatched kept), one mermaid at a time.
   **mermaid is not in the renderer bundle**: `@mermaid-js/tiny` (~2.8 MB, one file) goes to `dist/vendor/` (`vite.config.ts`
-  `assetFileNames`) and is loaded by a `<script>` only when the first mermaid diagram is drawn; `scripts/check-bundle-size.mjs`
+  `assetFileNames`) and is loaded (into that frame) only when the first mermaid diagram is drawn; `scripts/check-bundle-size.mjs`
   measures it against its own budget and fails on any other file there (`testing.md` "Performance baselines").
   「返事の形」 is stored with the consultation (`replyStyle: 'rich'`, absent = ふつう; saved by the renderer with the
   draft, `useChatHistory`), read by each request through a ref (`chatRequestBody.ts`), offered only to an agent with
   `capabilities.richReplies` (Claude Code, Codex), and may change while a turn runs (it is for the next message).
   Tests: `src/features/chat/diagrams.test.ts` (which blocks are diagrams; directives removed),
   `tests/ui/chat-diagrams.spec.ts` (drawn as pictures and mermaid loaded only then; a planted SVG and mermaid run nothing,
-  make no outside request, and leave no script, handler, link, foreignObject or outside reference in the picture —
-  mutation-checked with the sanitiser off and with mermaid's directives honoured; an undrawable block stays code; the
+  make no outside request — a mermaid image node and actor icon included —, and leave no script, handler, link,
+  foreignObject or outside reference in the picture — mutation-checked with the sanitiser off, with the frame's CSP off
+  and with mermaid's directives honoured; an undrawable block stays code; the
   switch and the request; `SCREENSHOTS=<dir>`), `tests/chat-panel-helpers.test.ts` (the request reads it per request),
   `tests/chat-standing-instructions.test.ts` (the one line with the turn, only for リッチ and an agent that takes it).
 - Preview `client/tests/chat-header-ui.html?history=long` (a restored 240-message conversation);

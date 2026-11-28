@@ -12,6 +12,8 @@
     // The manual's screenshot scenes (pnpm manual:shoot) use the same helpers.
     "../manual/*.ts",
     // Declares Window['electronAPI'] (the typed fake in fixtures/electron-api.ts).
-    "../../src/shared/ipc/electron-api.ts"
+    "../../src/shared/ipc/electron-api.ts",
+    // Declares the `?url` import of the chat's diagram renderer (mermaid's file).
+    "../../src/features/chat/mermaid-url.d.ts"
   ]
 }

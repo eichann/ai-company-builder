@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DIAGRAM_MAX_CHARS, diagramOf, mermaidWithoutConfig } from './diagrams'
+import { DIAGRAM_MAX_CHARS, MERMAID_MAX_CHARS, diagramOf, mermaidWithoutConfig } from './diagrams'
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'
 
@@ -18,8 +18,10 @@ test('only ```mermaid and a block that is one whole <svg> are drawn; HTML, parti
   assert.equal(diagramOf('mermaid', '   \n'), null)
 })
 
+// mermaid lays out on the page's thread: a huge one would freeze the app.
 test('a block too large to be worth drawing stays code', () => {
-  assert.equal(diagramOf('mermaid', `graph TD\n${'A-->B\n'.repeat(DIAGRAM_MAX_CHARS / 6 + 1)}`), null)
+  assert.equal(diagramOf('mermaid', `graph TD\n${'A-->B\n'.repeat(MERMAID_MAX_CHARS / 6 + 1)}`), null)
+  assert.equal(diagramOf('svg', `<svg>${'<g/>'.repeat(DIAGRAM_MAX_CHARS / 4)}</svg>`), null)
 })
 
 // mermaid's own settings in the text could ask for 'loose' security or HTML labels: they never reach mermaid.
@@ -29,4 +31,7 @@ test('a diagram cannot change how mermaid is set up: init directives and front m
   assert.doesNotMatch(cleaned, /securityLevel|htmlLabels|init/)
   assert.match(cleaned, /graph TD\n {2}A-->B/)
   assert.match(cleaned, /%% a comment stays/)
+  // Slipped-in spellings: spaces after the front matter's dashes, a directive rebuilt by taking another out.
+  assert.doesNotMatch(mermaidWithoutConfig('---  \nconfig:\n  securityLevel: loose\n---\ngraph TD\n  A-->B'), /securityLevel/)
+  assert.doesNotMatch(mermaidWithoutConfig('%%%%{x}%%{init: {"securityLevel": "loose"}}%%\ngraph TD'), /init|securityLevel/)
 })

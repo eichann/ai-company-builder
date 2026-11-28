@@ -4,8 +4,9 @@
 export type DiagramKind = 'mermaid' | 'svg'
 export interface Diagram { kind: DiagramKind; source: string }
 
-/** Larger blocks stay code: drawing them would cost more than the picture is worth. */
+/** Larger blocks stay code: drawing them would cost more than the picture is worth (mermaid lays out on the page's thread). */
 export const DIAGRAM_MAX_CHARS = 60_000
+export const MERMAID_MAX_CHARS = 20_000
 
 const WHOLE_SVG = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>][\s\S]*<\/svg>\s*$/i
 
@@ -16,7 +17,7 @@ const WHOLE_SVG = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>][\s
 export function diagramOf(language: string | undefined, code: string): Diagram | null {
   if (!code.trim() || code.length > DIAGRAM_MAX_CHARS) return null
   const lang = (language ?? '').toLowerCase()
-  if (lang === 'mermaid') return { kind: 'mermaid', source: code }
+  if (lang === 'mermaid') return code.length <= MERMAID_MAX_CHARS ? { kind: 'mermaid', source: code } : null
   if ((lang === 'svg' || lang === 'xml' || lang === '') && WHOLE_SVG.test(code)) return { kind: 'svg', source: code }
   return null
 }
@@ -26,6 +27,11 @@ export function diagramOf(language: string | undefined, code: string): Diagram |
  * `---` front matter (its `config:`). The app's settings (strict security, no HTML labels) are then the only ones.
  */
 export function mermaidWithoutConfig(source: string): string {
-  const withoutFrontMatter = source.replace(/^\s*---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '')
-  return withoutFrontMatter.replace(/%%\{[\s\S]*?\}%%/g, '')
+  let text = source.replace(/^\s*---[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*---[ \t]*(?:\r?\n|$)/, '')
+  // Again until nothing changes: taking one out must not join its neighbours into a new one (`%%%%{x}%%{init…}%%`).
+  for (let before = ''; before !== text;) {
+    before = text
+    text = text.replace(/%%\{[\s\S]*?\}%%/g, '')
+  }
+  return text
 }
