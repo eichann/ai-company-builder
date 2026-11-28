@@ -792,7 +792,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   outboundMail.onAwaitingReply(a => { inboxLane.inbox.awaitOwnMessage({ ...a, channel: 'email' }) })
   // lane B ▼
   const inboxLane = wireInboxLane({
-    conn, ...shared, memberships: repos.memberships, serviceRecords,
+    conn, ...shared, memberships: repos.memberships, serviceRecords, contactEngine: recordEngine,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     taskSettings: companyId => taskSettings.settingsOf(companyId),
     inboxOn: featureOn('inbox'),

@@ -11,16 +11,23 @@
  *   GET  /inbox/set-aside                     「やることにしなかった一覧」 (own)
  *   GET  /inbox/department                    部署の番: shared-address messages the member reads, untaken
  *   POST /inbox/items/:recordId/claim         { expectedVersion } 引き受ける
+ *   GET  /inbox/items/:recordId/contact       「連絡」1枚: the contact, its 返事のお願い and やること as the member reads them
+ *   POST /inbox/items/:recordId/finish        { interaction, replyRequest } the 返事のお願い's end + 「済んだ」, both or neither
+ *   POST /inbox/items/:recordId/finish/undo   { interaction?, replyRequest } that finish taken back, both or neither
+ *                                             (inbox.md "One contact"; services/contact-threads.ts)
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { services } from '../composition'
+import { selfReportedProvenance } from '../services/record-engine'
 import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const inboxRoute = new Hono()
-const { inbox } = services
+const { inbox, contactThreads } = services
+/** A person on their own screen (the session): actor kind human; provenance as the app reports it, never authorizing. */
+const person = (body: unknown) => ({ kind: 'human' as const, ...selfReportedProvenance(body) })
 
 function answer<T>(c: Context, r: Outcome<T>) {
   if (!r.ok) return refusal(c, r)
@@ -60,4 +67,19 @@ inboxRoute.get('/inbox/department', companyMember, async (c) => {
 inboxRoute.post('/inbox/items/:recordId/claim', companyMember, serviceBody, async (c) => {
   const m = c.var.member
   return answer(c, inbox.claim(m, c.req.param('recordId'), c.var.body))
+})
+
+inboxRoute.get('/inbox/items/:recordId/contact', companyMember, async (c) => {
+  const m = c.var.member
+  return answer(c, contactThreads.view(m, c.req.param('recordId')))
+})
+
+inboxRoute.post('/inbox/items/:recordId/finish', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, await contactThreads.finish(m, person(c.var.body), c.req.param('recordId'), c.var.body))
+})
+
+inboxRoute.post('/inbox/items/:recordId/finish/undo', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, contactThreads.undo(m, person(c.var.body), c.req.param('recordId'), c.var.body))
 })
