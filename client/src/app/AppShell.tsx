@@ -861,6 +861,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
                         arrangement={arrangement}
                         notice={<TabTidyingNotice tidying={tidying} />}
                         tabsEnd={<TabTidyingMenu tidying={tidying} arrangement={arrangement} activeKey={activeFilePath} looks={recordLooks} />}
+                        inPlaceEditing
                       />
                     )}
                   />

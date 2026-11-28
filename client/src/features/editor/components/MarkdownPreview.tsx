@@ -4,7 +4,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { LocalImage } from './BinaryPreviews'
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
-import { previewFrontmatter } from '../markdownFrontmatter'
+import { previewFrontmatter, type PreviewFrontmatter } from '../markdownFrontmatter'
 
 export interface HighlightRange {
   text: string
@@ -100,7 +100,34 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
 
     return (
       <div ref={setRefs} className="h-full overflow-auto px-8 py-6 relative">
-        {search.searchOpen && (
+        <PreviewSearchBar search={search} />
+        <div ref={bodyRef} className="max-w-3xl mx-auto markdown-body">
+          {/* Inside the searched body: ⌘F finds the name and description too. */}
+          <FrontmatterNote info={front.info} />
+          <Markdown remarkPlugins={[remarkGfm]} components={components}>
+            {front.body}
+          </Markdown>
+        </div>
+      </div>
+    )
+  }
+)
+
+/** A file's frontmatter block, shown as a small quiet box: its name and description. */
+export function FrontmatterNote({ info }: { info: PreviewFrontmatter['info'] }) {
+  if (!info) return null
+  return (
+    <div className="mb-4 rounded-control border border-[color:var(--color-border)] bg-surface-sunken px-3 py-2 text-small text-text-muted" role="note" aria-label="このファイルの情報" data-frontmatter>
+      {info.name && <div className="font-strong text-text">{info.name}</div>}
+      {info.description && <div className="mt-0.5 whitespace-pre-wrap">{info.description}</div>}
+    </div>
+  )
+}
+
+/** The ⌘F box over a preview or a document edited in place. */
+export function PreviewSearchBar({ search }: { search: ReturnType<typeof usePreviewSearch> }) {
+  if (!search.searchOpen) return null
+  return (
           <div className="sticky top-0 z-10 mb-4 flex items-center gap-2 px-3 py-2 rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-md max-w-md mx-auto">
             <MagnifyingGlass size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
             <input
@@ -132,20 +159,5 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
               <X size={14} />
             </button>
           </div>
-        )}
-        <div ref={bodyRef} className="max-w-3xl mx-auto markdown-body">
-          {/* Inside the searched body: ⌘F finds the name and description too. */}
-          {front.info && (
-            <div className="mb-4 rounded-control border border-[color:var(--color-border)] bg-surface-sunken px-3 py-2 text-small text-text-muted" role="note" aria-label="このファイルの情報" data-frontmatter>
-              {front.info.name && <div className="font-strong text-text">{front.info.name}</div>}
-              {front.info.description && <div className="mt-0.5 whitespace-pre-wrap">{front.info.description}</div>}
-            </div>
-          )}
-          <Markdown remarkPlugins={[remarkGfm]} components={components}>
-            {front.body}
-          </Markdown>
-        </div>
-      </div>
-    )
-  }
-)
+  )
+}
