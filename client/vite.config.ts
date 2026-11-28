@@ -72,6 +72,11 @@ export default defineConfig(({ command }) => ({
         assetFileNames: (asset) => (asset.names ?? []).some(name => name.startsWith('mermaid.tiny'))
           ? 'vendor/[name]-[hash][extname]'
           : 'assets/[name]-[hash][extname]',
+        // The in-place document editor (Milkdown, src/features/editor/milkdownSurface.ts) is imported only when a
+        // Markdown document is first shown: its chunk goes to dist/vendor/ too, under its own budget.
+        chunkFileNames: (chunk) => (chunk.facadeModuleId ?? '').endsWith('/src/features/editor/milkdownSurface.ts')
+          ? 'vendor/[name]-[hash].js'
+          : 'assets/[name]-[hash].js',
       },
     },
   },

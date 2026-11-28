@@ -44,6 +44,7 @@ paths:
   - "client/tests/company-watcher.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
+  - "client/scripts/check-bundle-size.mjs"
   - "client/tests/doc-review-ui.*"
   - "client/tests/file-tree-ui.*"
   - "client/tests/ui/file-tree.spec.ts"
@@ -335,6 +336,66 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   background; any `leftTab` string is kept and one no registered panel has opens the default tab
   (`renderer-structure.md`, panel registry). Existing installs hold this shape:
   keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
+
+## Editing a document in place (UX check 9, owner decision 2026-11-28, 案A)
+
+A Markdown document is read and edited in the same view (Milkdown, WYSIWYG): no switch to a page
+of symbols to fix a word. **What was not edited never changes by one byte.**
+
+- **Behind one small door** (`features/editor/inPlaceEditing.ts`): a document goes in, the file's
+  whole new text comes out after each change (`InPlaceEngine.open(host, text, { folder, onChange,
+  onChangeTakenBack })`). Milkdown (`milkdownSurface.ts`) and the write-back (`markdownSplice.ts`)
+  are behind it; replacing either changes nothing outside. The screen (`components/InPlaceMarkdownEditor.tsx`)
+  knows only the door. It is shown where the screen passes `inPlaceEditing` to `TabbedEditorPanel`
+  (`AppShell` does; a preview page without it keeps the read-only preview).
+- **The write-back** (`SplicedDocument`): the file is cut into its top-level blocks by Milkdown's
+  own reader (source offsets), each read alone (link reference definitions handed to every block);
+  the `---` block (`splitFront`, BOM / trailing spaces / `...` accepted) never reaches the editor.
+  A change is written as the smallest edit that **reads back as exactly what the screen shows**:
+  (1) the same text change in the file's own bytes (located by its unique surroundings), or whole
+  new lines in the source's own indentation and marker; (2) a table's changed cells / one row / one
+  column in its own padding; (3) only the changed blocks rewritten by the editor (reference links
+  kept as references). Each candidate is accepted only when the written region reads back equal
+  (a heading's derived `id` aside) **and** the blocks right before and after it still read as the
+  same blocks from the same bytes; changes in several places at once are written run by run; a
+  written change becomes the baseline (the next one is placed against it). CRLF files keep CRLF.
+  Measured (demo, 2026-11-28): opening and leaving 0 lines, one character 1 line, Enter in a list
+  one new line, bold / a heading level 1 line; a column added changes every row (accepted, owner).
+- **Never written approximately**: a document with a block kind it does not hold (footnotes, …:
+  `unsupported`), whose text the editor would lose on reading (`lossy`: visible text of each block
+  vs the editor's), that the editor tidies when shown, or whose unchanged write-back is not the file
+  byte for byte, stays in the reading view (`MarkdownPreview`) with a callout and
+  ［もとの書き方で直す］ (the source); nothing is written. A change that cannot be written faithfully
+  is taken back on screen (the last written state shown again) with a callout — the screen never
+  shows what the file does not hold. The editor failing to load → the same reading view.
+- **Saving, external changes and leaving are the editor's as before**: each written change goes
+  through `handleContentChange` (the tab's text, its dot, the preview tab pinned on the first edit),
+  so autosave, ⌘S, the external-change band (it pauses autosave; the member's text stays on screen),
+  「ディスクの内容を読み込む」 and saving before leaving / closing apply unchanged. A change of the
+  tab's text that did not come from the editor (the disk followed, the disk version loaded, the
+  source edited) opens the document afresh.
+- **The source** is the same `CodeEditor` (記号の画面): the toggle's エディタ button and ⌘⇧V
+  (`mdViewMode`; nothing chosen yet → the document view where in-place editing is on — a member who
+  chose エディタ before keeps it). Reading view instead of editing: 閲覧のみ files, a review being
+  made or read (its quotes are marked in the text), the snapshot diff. Someone else's review in
+  progress: one line says comments may lose their place (they are never deleted) — no confirm.
+- Raw HTML is shown as written, quietly (kept byte for byte); images load from the document's folder
+  (`local-file://`); ⌘-click opens an `http(s)` / `mailto` link; ⌘F uses the browser's highlights
+  (`usePreviewSearch` `marking: 'highlights'`: a `<mark>` in the editor's DOM would be read as an
+  edit).
+- **Bundle**: Milkdown is imported only when a document is first shown in place; `vite.config.ts`
+  puts that chunk in `dist/vendor/` under its own budget (`check-bundle-size.mjs`
+  `ON_DEMAND_VENDOR`, 430 KB; 358 KB today). Versions pinned (`@milkdown/*` 7.23.0).
+- Tests: `src/features/editor/markdownSplice.test.ts` (the real Milkdown under jsdom: unchanged
+  write-back byte for byte on frontmatter, `*` lists indented by 4, aligned / unpadded tables, HTML,
+  comments, `***`, escapes, code fences, reference links, `===` / `---` headings, Japanese, CRLF;
+  one typed character exactly; two far edits each their own line; a new list item; bold, a heading
+  level, a table row; the refusals; read-back and neighbour checks — each guard mutation-checked),
+  `tests/ui/editor-in-place.spec.ts` on `tests/editor-in-place-ui.html` (real keys, autosave, Enter in
+  a list, ⌘⇧V, the AI writing the file with and without edits, closing the window, a refused
+  document, ⌘F).
+- Next (PR2–5): the selection bubble (marks, size, link, ［コメント］ through the slot `app/` fills),
+  「/」 and line starts, empty-line hint and table bar, pasting images into `images/`, ［AI に直してもらう］.
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
 

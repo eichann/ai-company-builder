@@ -53,6 +53,8 @@ interface TabbedEditorPanelProps {
   tabsEnd?: ReactNode
   /** One line above the tabs (what a tidy did). */
   notice?: ReactNode
+  /** A Markdown document is read and edited in the same view; without it the preview reads only (the source edits). */
+  inPlaceEditing?: boolean
 }
 
 export function TabbedEditorPanel({
@@ -76,6 +78,7 @@ export function TabbedEditorPanel({
   arrangement,
   tabsEnd,
   notice: topNotice,
+  inPlaceEditing = false,
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
@@ -91,7 +94,7 @@ export function TabbedEditorPanel({
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   // Another company is another document view (its Drive videos play with that company's session).
   const companyId = useAppStore(s => s.currentCompany?.id ?? null)
-  const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode()
+  const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode(inPlaceEditing ? 'preview' : 'editor')
   const scroll = useScrollMemory(fileTabs, shownFile, mdViewMode)
   const { saveCurrentScrollPosition } = scroll
   const isActivePreviewTab = shownFile === previewFilePath
@@ -322,6 +325,7 @@ export function TabbedEditorPanel({
             previewRef={scroll.mdPreviewRef}
             initialScrollRatio={scroll.ratioOf(activeFilePath)}
             onShowEditor={() => handleSetMdViewMode('editor')}
+            inPlace={inPlaceEditing && !isReadOnly(activeFilePath) ? { onChange: handleContentChange } : null}
             onEdit={() => {
               handleSetMdViewMode('editor')
               if (isActivePreviewTab && onPinFile && activeFilePath) {

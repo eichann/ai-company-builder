@@ -156,7 +156,9 @@ its latest window (#154); the renderer bundle ≤ 3.2 MiB JS (raised from 2.2 �
   mermaid for a reply's diagrams (`chat-ui-and-history.md` "Diagrams in a reply") is one file there, loaded only when a
   diagram is drawn, never at start. `check-bundle-size.mjs` does not add it to the renderer JS above; it measures each
   such file against its own budget in `ON_DEMAND_VENDOR` (`[perf] bundle.onDemand.<name>`) and fails on any file there
-  that is not listed, so the folder is no way around the budget.
+  that is not listed, so the folder is no way around the budget. The in-place document editor (Milkdown, its chunk
+  named after `src/features/editor/milkdownSurface.ts`, `files-and-editor.md` "Editing a document in place") is the
+  second, 430 KB (2026-11-28, owner decision asked in its pull request).
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.
 - Run one: `cd client && npx tsx --test tests/perf/git-search.perf.test.ts`; bundle:

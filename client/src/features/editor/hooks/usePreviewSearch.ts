@@ -4,17 +4,31 @@ import { useCommandHandler } from '../../../shared/commands/commands'
 const MATCH_CLASS = 'bg-yellow-200 dark:bg-yellow-500/40 rounded-sm'
 const CURRENT_MATCH_CLASS = 'bg-orange-300 dark:bg-orange-500/60 rounded-sm ring-2 ring-orange-400'
 
+/** The browser's own highlights (`::highlight(acb-find)`, index.css): they draw over the text without changing it. */
+const FIND = 'acb-find'
+const FIND_CURRENT = 'acb-find-current'
+
+function clearHighlights() {
+  if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
+  CSS.highlights.delete(FIND)
+  CSS.highlights.delete(FIND_CURRENT)
+}
+
 /**
  * Search inside a rendered Markdown preview (`editor.find`, ⌘F in the focused
- * editor): marks every match in the DOM under `bodyRef` (skipping review
- * highlights) and scrolls to the current one.
+ * editor): marks every match under `bodyRef` (skipping review highlights) and
+ * scrolls to the current one. `marking: 'highlights'` marks without touching the
+ * DOM — for a document edited in place, whose DOM belongs to the editor (a
+ * `<mark>` put in there would be read as an edit).
  */
 export function usePreviewSearch(
   innerRef: React.MutableRefObject<HTMLDivElement | null>,
   bodyRef: React.MutableRefObject<HTMLDivElement | null>,
   content: string,
   paneId: string,
+  marking: 'dom' | 'highlights' = 'dom',
 ) {
+  const rangesRef = useRef<Range[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [matchCount, setMatchCount] = useState(0)
@@ -30,6 +44,28 @@ export function usePreviewSearch(
   // Apply search highlights
   useEffect(() => {
     if (!bodyRef.current) return
+    if (marking === 'highlights') {
+      clearHighlights()
+      rangesRef.current = []
+      const query = searchText.trim().toLowerCase()
+      if (!query) { setMatchCount(0); setCurrentMatch(0); return }
+      const walker = document.createTreeWalker(bodyRef.current, NodeFilter.SHOW_TEXT)
+      const ranges: Range[] = []
+      for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+        const lower = (node.textContent || '').toLowerCase()
+        for (let i = lower.indexOf(query); i !== -1; i = lower.indexOf(query, i + query.length)) {
+          const range = document.createRange()
+          range.setStart(node, i)
+          range.setEnd(node, i + query.length)
+          ranges.push(range)
+        }
+      }
+      rangesRef.current = ranges
+      if (ranges.length > 0 && 'highlights' in CSS) CSS.highlights.set(FIND, new Highlight(...ranges))
+      setMatchCount(ranges.length)
+      setCurrentMatch(prev => ranges.length > 0 ? Math.min(prev, ranges.length - 1) : 0)
+      return clearHighlights
+    }
 
     // Clear existing search highlights
     bodyRef.current.querySelectorAll('mark[data-search-highlight]').forEach(el => {
@@ -88,11 +124,18 @@ export function usePreviewSearch(
 
     setMatchCount(matches.length)
     setCurrentMatch(prev => matches.length > 0 ? Math.min(prev, matches.length - 1) : 0)
-  }, [searchText, content, bodyRef])
+  }, [searchText, content, bodyRef, marking])
 
   // Scroll to current match and highlight it
   useEffect(() => {
     if (!bodyRef.current || matchCount === 0) return
+    if (marking === 'highlights') {
+      const range = rangesRef.current[currentMatch]
+      if (!range || !('highlights' in CSS)) return
+      CSS.highlights.set(FIND_CURRENT, new Highlight(range))
+      range.startContainer.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     bodyRef.current.querySelectorAll('mark[data-search-highlight]').forEach(el => {
       (el as HTMLElement).className = MATCH_CLASS
     })
@@ -101,7 +144,7 @@ export function usePreviewSearch(
       (current as HTMLElement).className = CURRENT_MATCH_CLASS
       current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [currentMatch, matchCount, bodyRef])
+  }, [currentMatch, matchCount, bodyRef, marking])
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false)

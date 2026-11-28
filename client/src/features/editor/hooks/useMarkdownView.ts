@@ -44,13 +44,14 @@ export function useScrollMemory(openFiles: string[], activeFilePath: string | nu
 }
 
 /**
- * Markdown files open as source or as a rendered preview; the choice is one
- * for all files and survives restarts (localStorage `mdViewMode`).
+ * Markdown files open as source or as the document ('preview': read, and edited in place where the
+ * screen allows it); the choice is one for all files and survives restarts (localStorage
+ * `mdViewMode`). Nothing chosen yet → `initial`.
  */
-export function useMarkdownViewMode() {
+export function useMarkdownViewMode(initial: MdViewMode = 'editor') {
   const [mdViewMode, setMdViewMode] = useState<MdViewMode>(() => {
     const saved = localStorage.getItem('mdViewMode')
-    return saved === 'preview' || saved === 'editor' ? saved : 'editor'
+    return saved === 'preview' || saved === 'editor' ? saved : initial
   })
   const setMdViewModePersisted = useCallback((mode: MdViewMode) => {
     setMdViewMode(mode)

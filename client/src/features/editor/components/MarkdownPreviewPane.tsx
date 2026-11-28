@@ -9,6 +9,8 @@ import { CommentPopover } from '../../doc-review/components/CommentPopover'
 import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
 import { MarkdownPreview } from './MarkdownPreview'
+import { InPlaceMarkdownEditor } from './InPlaceMarkdownEditor'
+import { Callout } from '../../../shared/ui/primitives'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface Props {
@@ -24,13 +26,17 @@ interface Props {
   onShowEditor: () => void
   /** 編集: to the source, keeping a preview tab. */
   onEdit: () => void
+  /** Edit the document right here (files-and-editor.md "Editing a document in place"); absent: read only. */
+  inPlace?: { onChange: (text: string) => void } | null
 }
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit,
+  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
+  // A review being made or read shows the document as it reads (its quotes are marked in the text).
+  const editingHere = !!inPlace && !showDiff && !review.isReviewing && !review.isViewingCompleted
   const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
   return (
     <div className="h-full flex flex-col">
@@ -50,6 +56,13 @@ export function MarkdownPreviewPane({
           onToggleDiff={() => setShowDiff(prev => !prev)}
         />
       )}
+      {editingHere && review.otherInProgressReviews.length > 0 && (
+        <div className="px-4 pt-2">
+          <Callout tone="info">
+            {review.otherInProgressReviews.map(r => r.reviewerName).join('、')} がレビュー中です。直すと、コメントの付いた言葉が見つからなくなることがあります（コメントは消えません）。
+          </Callout>
+        </div>
+      )}
       <div className="flex-1 flex overflow-hidden">
         {/* Markdown content or diff view */}
         <div
@@ -62,6 +75,16 @@ export function MarkdownPreviewPane({
               ref={diffViewRef}
               snapshot={review.activeReview.snapshot}
               current={content}
+            />
+          ) : editingHere ? (
+            <InPlaceMarkdownEditor
+              paneId={paneId}
+              filePath={filePath}
+              content={content}
+              onChange={inPlace.onChange}
+              onShowSource={onShowEditor}
+              previewRef={previewRef}
+              initialScrollRatio={initialScrollRatio}
             />
           ) : (
           <MarkdownPreview
@@ -117,8 +140,8 @@ export function MarkdownPreviewPane({
               </button>
             </div>
           </div>
-          {/* Floating edit button (hide during review) */}
-          {!review.isReviewing && (
+          {/* Floating edit button (hide during review; the document edited in place needs none) */}
+          {!review.isReviewing && !editingHere && (
             <button
               onClick={onEdit}
               className={`absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-control text-xs font-medium shadow-lg transition-colors ${PRIMARY_ACTION}`}
