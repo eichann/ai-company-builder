@@ -849,7 +849,7 @@ test('raw HTML is judged as the Markdown reader reads it: a tag broken over line
   for (const [what, fix] of cases) assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, fix), refused, what)
   // The passage's own HTML may stay, and a tag written as code is words, not HTML.
   assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります。<!-- 確認中 --> <br>').ok)
-  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります（`<br>` で改行）。').ok)
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります（`<img src="https://example.com/t.png">` は書きません）。').ok)
   assert.equal(saved(spliced, view), text, 'nothing was written')
 })
 

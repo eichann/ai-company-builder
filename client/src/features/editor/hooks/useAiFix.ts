@@ -111,7 +111,7 @@ export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceR
   }, [fixRef, surfaceRef, putAway, outside])
 
   /** Whether a request is still open (its answer would be lost if the document were opened afresh). */
-  const open = useCallback(() => fixRef.current !== null && fixRef.current.phase.kind !== 'refused', [fixRef])
+  const open = useCallback(() => fixRef.current !== null && fixRef.current.phase.kind !== 'refused' && !staleAt(fixRef.current, outside.current), [fixRef, outside])
 
   // A change from outside since it was asked shows it refused at once, whatever the AI answered (no ［採用］).
   const shown = fix && staleAt(fix, outsideChanges) ? { ...fix, phase: { kind: 'refused' as const, message: REFUSED.outside } } : fix

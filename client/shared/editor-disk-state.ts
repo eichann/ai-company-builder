@@ -66,6 +66,18 @@ export function decideOnDiskEvent(file: EditorFileState, disk: string | null): D
   return { action: 'conflict', external: { kind: 'changed', diskContent: disk } }
 }
 
+const sameExternal = (a: ExternalChange | undefined, b: ExternalChange) =>
+  !!a && a.kind === b.kind && (a.kind !== 'changed' || b.kind !== 'changed' || a.diskContent === b.diskContent)
+
+/**
+ * The tab marked with what is on disk now (the watcher saw it, or a save or a compare button read it first):
+ * the one place that sets `external`, counting it in `outsideChanges` when it is news.
+ */
+export function withExternal<T extends EditorFileState>(file: T, external: ExternalChange): T {
+  const news = !sameExternal(file.external, external)
+  return { ...file, external, missing: external.kind === 'deleted', outsideChanges: (file.outsideChanges ?? 0) + (news ? 1 : 0) }
+}
+
 /** Apply a decision to the tab state (pure). */
 export function applyDiskDecision<T extends EditorFileState>(file: T, decision: DiskEventDecision): T {
   // Another version or a delete arrived (not our own save, not the loaded version back).
@@ -74,7 +86,7 @@ export function applyDiskDecision<T extends EditorFileState>(file: T, decision: 
     case 'none': return file
     case 'reload': return { ...file, content: decision.content, originalContent: decision.content, missing: false, external: undefined, outsideChanges }
     case 'mark-missing': return { ...file, missing: true, outsideChanges }
-    case 'conflict': return { ...file, external: decision.external, missing: decision.external.kind === 'deleted', outsideChanges }
+    case 'conflict': return withExternal(file, decision.external)
     case 'clear': return { ...file, external: undefined, missing: false }
     case 'adopt': return { ...file, originalContent: decision.content, missing: false, external: undefined }
   }

@@ -641,8 +641,9 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   it. The tracker writes it like typing, with the write chosen for exactly that document (`adopted`); saving, ⌘S and the
   external-change band as for typing. **With edits not saved yet**, a change or a delete from outside keeps the member's
   text on screen (only the external-change band shows), so the text check cannot see it: the tab counts every change and
-  delete from outside it sees (`outsideChanges`, `applyDiskDecision` in `client/shared/editor-disk-state.ts`: a reload, a
-  missing mark or a conflict, never our own save or the same version again), the request keeps the count it was asked at
+  delete from outside it sees (`outsideChanges` in `client/shared/editor-disk-state.ts`: `applyDiskDecision` for the
+  watcher's reload, missing mark or conflict, and `withExternal` — the one place that sets `external` — also for a change a
+  save or a compare button reads first; never our own save or the same version seen again), the request keeps the count it was asked at
   (`useAiFix`), and a request asked before another one shows refused at once, whatever the AI answered — no ［採用］, adopting
   refused too — with 「AI に頼んでいる間にこのファイルがほかで変わったか消されたため…」. The file changed from outside while asked with no edits (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
   変わったため…」 above it; the answer is dropped. `〔〕` in the answer become the passage's `【】` again when the passage had

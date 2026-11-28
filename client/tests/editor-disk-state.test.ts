@@ -8,6 +8,7 @@ import {
   decideOnDiskEvent,
   decideSave,
   editorOverwriteBackupPlan,
+  withExternal,
   type EditorFileState,
 } from '../shared/editor-disk-state'
 
@@ -66,6 +67,20 @@ test('every change or delete from outside counts once (an AI fix asked before it
   assert.equal(seen(c), 1, 'deleted with no edits')
   c = applyDiskDecision(c, decideOnDiskEvent(c, 'v2'))
   assert.equal(seen(c), 2, 'back with other text')
+})
+
+test('a change a save or a compare button reads first counts too, and the watcher\'s event of it after does not count it again', () => {
+  const seen = (f: EditorFileState) => f.outsideChanges ?? 0
+  let f = dirty('v1', 'mine')
+  f = withExternal(f, { kind: 'changed', diskContent: 'ai' })
+  assert.equal(seen(f), 1)
+  f = applyDiskDecision(f, decideOnDiskEvent(f, 'ai'))
+  assert.equal(seen(f), 1, 'the same version, seen again by the watcher')
+  f = withExternal(f, { kind: 'changed', diskContent: 'ai' })
+  assert.equal(seen(f), 1)
+  f = withExternal(f, { kind: 'deleted' })
+  assert.equal(seen(f), 2)
+  assert.equal(f.missing, true)
 })
 
 test('dirty + our own save event (disk = base or = my edits) is not a conflict', () => {

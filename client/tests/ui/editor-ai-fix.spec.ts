@@ -154,7 +154,9 @@ test('a document changed while the AI was asked is never fixed: typed into, or c
 
 test('with edits not saved yet, a change or a delete from outside while asked makes the fix unusable (the edits stay)', async ({ page }) => {
   await open(page)
-  // Typed and not saved yet (autosave waits a second): a change from outside then keeps these edits on screen.
+  // Typed and not saved yet (the clock stands still, so autosave's second never passes): a change from outside then
+  // keeps these edits on screen.
+  await page.clock.pauseAt(new Date('2026-01-01T00:10:00'))
   await doc(page).getByText('最後の段落はそのままです。').click()
   await page.keyboard.press('End')
   await page.keyboard.type('追記')
