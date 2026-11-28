@@ -661,8 +661,11 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     that folder only). **［ページとして残す］** keeps the same page and shows it under the reply as a page card
     (「ページとして残しました」, 「ページ・あなただけに見えます・<name>」), which opens it the same way. The same reply in the
     same conversation keeps one file (remembered per conversation and text, ≤ 100) while it is still there (`fs:exists`;
-    moved or deleted → kept again under a free name); while the reply is still being written the two are disabled; a
-    refusal shows as an alert line.
+    moved or deleted → kept again under a free name); a refusal shows as an alert line. **Every way to keep the page — the
+    two buttons and the long reply's line 「続きは［大きく見る］で」 — goes through one entry**, `replyPages.ts`
+    `keepReplyPage`: nothing is kept while the reply is still being written, and one keep runs at a time per reply (a
+    press meanwhile, from any button or view of it, keeps nothing more), so a half-written page or a second copy is never
+    made; all three buttons are disabled meanwhile (Codex review of 段4).
   - **The page is the AI's HTML as written** (owner ④): `richReplyPage.ts` `replyPageDocument` — the reply's Markdown as
     the chat draws it, each ```` ```acb-html ```` / ```` ```acb-slide ```` block uncleaned, the app's tokens, typography and
     ready-made boxes (`appCss`, `FRAME_CSS`); a small script of its own sets `.dark` from the computer's setting (the
@@ -688,9 +691,12 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   there; not a page refused; the name rule; mutation-checked: `wx`, the folder shape, the real-location check, the link
   check), `tests/ipc-path-guard.test.ts` (`rootPath`
   GUARDED), `tests/ui/chat-rich-reply.spec.ts` 「the reply's buttons」 (`chat-header-ui.html?pages=1`: hidden until
-  hover or focus, three buttons only with a today folder; disabled while written; ［大きく見る］ asks main once with the
+  hover or focus, three buttons only with a today folder; disabled while written; the line's ［大きく見る］ disabled while
+  written and one page however many presses of all of them; ［大きく見る］ asks main once with the
   uncleaned block and opens the viewer, the chat's frame still without the script, and a deleted page is kept again; ［ページとして残す］'s card and a refusal; ［コードとして見る］;
-  the 20,000 px line's button; mutation-checked: the focus rule, the one file per reply).
+  the 20,000 px line's button; mutation-checked: the focus rule, the one file per reply), `src/features/chat/replyPages.test.ts`
+  (`keepReplyPage`: never while written, a press while one keeps keeps nothing, the same file after, a deleted page kept
+  again, a refusal then a retry; mutation-checked: the written check, the one-at-a-time check).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

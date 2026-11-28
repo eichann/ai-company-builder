@@ -54,12 +54,14 @@ function watchNear(element: Element, onChange: (near: boolean) => void): () => v
   }
 }
 
-export function ChatRichReply({ content, fallback, onOpenLarge }: {
+export function ChatRichReply({ content, fallback, onOpenLarge, openLargeDisabled = false }: {
   content: string
   /** The reply as the chat draws it otherwise, shown until the frame has drawn once (no blank moment). */
   fallback: ReactNode
   /** ［大きく見る］ (PR4): with it, the over-height line offers the button. */
   onOpenLarge?: () => void
+  /** As the reply's other ［大きく見る］ (still written, being kept): pressing it does nothing then. */
+  openLargeDisabled?: boolean
 }) {
   const isDark = useAppStore(s => s.theme) === 'dark'
   const follow = useContext(ChatFollowContext)
@@ -177,7 +179,7 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
         <p role="status" className="mt-2 text-small text-text-muted" data-rich-reply-over>
           この返事は長いため、途中までを表示しています。続きは［大きく見る］で見られます。
           {onOpenLarge && (
-            <button type="button" onClick={onOpenLarge} className="ml-1 text-link underline underline-offset-2">大きく見る</button>
+            <button type="button" onClick={onOpenLarge} disabled={openLargeDisabled} className="ml-1 text-link underline underline-offset-2 disabled:opacity-disabled">大きく見る</button>
           )}
         </p>
       )}

@@ -566,4 +566,30 @@ test.describe('the reply\'s buttons', () => {
     await expect.poll(() => chat(page, c => c.viewed)).toHaveLength(1)
     expect((await chat(page, c => c.pagesSaved))[0].html).toContain('height: 30000px')
   })
+
+  test('every way to keep the page passes one gate: nothing kept while the reply is written, one page however many presses', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, 'もっと長く')
+    await reply(page, 'とても長い返事です。\n\n```acb-html\n<div style="height: 30000px">高い</div>\n```\n\n続きを書いています')
+    // Still being written (the block closed, the reply not): the line's ［大きく見る］ keeps nothing either.
+    const lineButton = page.locator('[data-rich-reply-over]').getByRole('button', { name: '大きく見る' })
+    await expect(lineButton).toBeVisible()
+    await expect(lineButton).toBeDisabled()
+    await lineButton.evaluate(el => (el as HTMLButtonElement).click())
+    await page.waitForTimeout(300)
+    expect(await chat(page, c => c.pagesSaved.length), 'a half-written reply is never kept').toBe(0)
+    await finish(page)
+    await expect(lineButton).toBeEnabled()
+    // Pressed again and again before the first keep answers — the line's button and the top ones alike: one page.
+    await lineButton.evaluate(el => {
+      const top = [...document.querySelectorAll('[role="toolbar"][aria-label="この返事の表示"] button')] as HTMLButtonElement[]
+      ;(el as HTMLButtonElement).click()
+      ;(el as HTMLButtonElement).click()
+      top[0].click()
+      top[1].click()
+    })
+    await expect.poll(() => chat(page, c => c.viewed)).toHaveLength(1)
+    await page.waitForTimeout(300)
+    expect(await chat(page, c => c.pagesSaved.length), 'one page for the one reply').toBe(1)
+  })
 })

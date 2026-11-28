@@ -4,23 +4,16 @@
 // member's 今日のフォルダ (main decides where, ReplyPagesContext); the first then opens it in the HTML viewer
 // (`editor.viewDocument`, the command: the editor is not imported), the second shows it as a page card.
 // ［コードとして見る］ shows the reply as the chat's ordinary Markdown, its blocks as code.
-import { useContext, useState } from 'react'
+import { useContext, useRef, useState } from 'react'
 import { ArrowsOut, BookmarkSimple, Code, TextAa } from '@phosphor-icons/react'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useAppStore } from '../../../stores/appStore'
-import { ReplyPagesContext } from '../replyPages'
+import { ReplyPagesContext, keepReplyPage, type KeptPage } from '../replyPages'
 import { replyPageDocument } from '../richReplyPage'
 import { ChatRichReply } from './ChatRichReply'
 import { ChatPageCard } from './ChatPageCard'
 import { MarkdownMessage } from './MarkdownMessage'
-
-interface KeptPage { path: string; name: string }
-/** Pages already kept, per conversation and reply text: the same reply opens the same file (≤ 100 kept). */
-const keptPages = new Map<string, KeptPage>()
-function remember(key: string, page: KeptPage) {
-  keptPages.set(key, page)
-  if (keptPages.size > 100) keptPages.delete(keptPages.keys().next().value as string)
-}
 
 const BUTTON = 'inline-flex h-7 w-7 items-center justify-center rounded-control text-text-muted hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring'
 
@@ -32,26 +25,23 @@ export function ChatRichReplyView({ text, writing = false }: { text: string; /**
   const [card, setCard] = useState<KeptPage | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const writingNow = useLatestRef(writing)
+  // What the buttons show; `keepReplyPage` decides again for every press (it is the one way in).
+  const blocked = busy || writing
+  const running = useRef(0)
 
   const keep = async (): Promise<KeptPage | null> => {
     if (!pages) return null
-    const key = `${pages.scope()}|${text}`
+    running.current++
     setBusy(true)
     try {
-      // Kept before and still there: the same file (moved or deleted by the member: kept again).
-      const known = keptPages.get(key)
-      if (known && await pages.stillThere(known.path)) return known
-      const saved = await pages.save(replyPageDocument(text, 'AI の返事', isDark))
-      if (!saved.success) { setProblem(saved.error); return null }
-      const page = { path: saved.path, name: saved.name }
-      remember(key, page)
+      const outcome = await keepReplyPage(pages, text, writingNow.current, () => replyPageDocument(text, 'AI の返事', isDark))
+      if (outcome.kind === 'failed') setProblem(outcome.error)
+      if (outcome.kind !== 'kept') return null
       setProblem(null)
-      return page
-    } catch {
-      setProblem('ページを保存できませんでした。もう一度試してください。')
-      return null
+      return outcome.page
     } finally {
-      setBusy(false)
+      if (--running.current === 0) setBusy(false)
     }
   }
   const openLarge = async () => {
@@ -67,7 +57,7 @@ export function ChatRichReplyView({ text, writing = false }: { text: string; /**
     <div className="group/rich relative" data-rich-reply-view>
       {asCode
         ? <MarkdownMessage content={text} />
-        : <ChatRichReply content={text} fallback={<MarkdownMessage content={text} />} onOpenLarge={pages ? () => void openLarge() : undefined} />}
+        : <ChatRichReply content={text} fallback={<MarkdownMessage content={text} />} onOpenLarge={pages ? () => void openLarge() : undefined} openLargeDisabled={blocked} />}
       {/* After the reply in the page's order: drawn over its frame without a z-index of its own. Tab reaches it after the reply. */}
       <div
         role="toolbar"
@@ -76,10 +66,10 @@ export function ChatRichReplyView({ text, writing = false }: { text: string; /**
       >
         {pages && (
           <>
-            <button type="button" className={BUTTON} disabled={busy || writing} onClick={() => void openLarge()} aria-label="大きく見る" title="大きく見る（真ん中のタブで開きます）">
+            <button type="button" className={BUTTON} disabled={blocked} onClick={() => void openLarge()} aria-label="大きく見る" title="大きく見る（真ん中のタブで開きます）">
               <ArrowsOut size={15} aria-hidden />
             </button>
-            <button type="button" className={BUTTON} disabled={busy || writing} onClick={() => void keepAsPage()} aria-label="ページとして残す" title="ページとして残す（今日のフォルダに置きます。あなただけに見えます）">
+            <button type="button" className={BUTTON} disabled={blocked} onClick={() => void keepAsPage()} aria-label="ページとして残す" title="ページとして残す（今日のフォルダに置きます。あなただけに見えます）">
               <BookmarkSimple size={15} aria-hidden />
             </button>
           </>
