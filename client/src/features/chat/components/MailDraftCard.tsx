@@ -121,7 +121,12 @@ function localDay(): string {
  * button is the person's own, sent with their session; 「確かめて送る」 shows everything once more
  * and sends the hash of exactly what was shown, so a changed draft is never sent unseen.
  */
-export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mailOutbound() }: { card: Card; outbound?: MailOutbound }) {
+export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mailOutbound(), onDone }: {
+  card: Card
+  outbound?: MailOutbound
+  /** Sent (its result known) or thrown away here: where the card is worked through a list, the next one. */
+  onDone?: () => void
+}) {
   const [draft, setDraft] = useState(card.draft)
   const [step, setStep] = useState<Step>('view')
   const [busy, setBusy] = useState(false)
@@ -199,12 +204,14 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     setDraft(r.draft)
     setStep('view')
     setNotice(r.outcome === 'unknown' ? { tone: 'warn', text: r.message ?? MAIL_WORDS.unknown } : { tone: 'ok', text: slack ? MAIL_WORDS.slackSent : 'メールを送りました。' })
+    // A send whose result nobody knows stays on screen: the member must read what to do about it.
+    if (r.outcome !== 'unknown') onDone?.()
   })
   const resolve = (sent: boolean) => run(() => outbound.resolveOutboundMail(card.companyId, draft.id, sent), r => {
     setDraft(r.draft)
     setNotice(sent ? { tone: 'ok', text: '送られていたと記録しました。' } : { tone: 'ok', text: '下書きに戻しました。送るときは、もう一度「確かめて送る」を押してください。' })
   })
-  const discard = () => run(() => outbound.discardOutboundMail(card.companyId, draft.id), r => setDraft(r.draft))
+  const discard = () => run(() => outbound.discardOutboundMail(card.companyId, draft.id), r => { setDraft(r.draft); onDone?.() })
   const openFile = async (f: MailAttachmentView) => {
     if (busy) return
     setBusy(true)

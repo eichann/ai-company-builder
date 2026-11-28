@@ -164,7 +164,27 @@ export const NEXT_STEP = {
   endReply: '終わりにする',
   /** A 返事のお願い answered where ACB cannot see (the phone, another channel). */
   repliedElsewhere: 'もう返した',
+  /** 「連絡」1枚 (owner decision 2026-11-28 「5番」): the reply is needed — the 返事のお願い and the 連絡 end together. */
+  replied: '返した',
+  /** …while a draft waits: the same end, the draft not sent (in 「…」). */
+  repliedWithoutDraft: '返した（下書きは送らない）',
+  /** …a draft the AI prepared: the main button opens it to check and send. */
+  checkDraftAndSend: '下書きを確かめて送る',
+  /** …waiting for their answer: stop waiting. */
+  doneWaiting: '済んだ（もう待たない）',
+  /** …their answer came and is being checked. */
+  doneChecking: '済んだ',
+  /** …no reply after all (返事をしない, a reason asked). */
+  noReplyNeeded: '返事は要らなくなった',
+  /** Taking 「返した」/「済んだ」 back, both records together. */
+  undoFinish: '取り消す',
 } as const
+
+/**
+ * What a member sees of a 来た連絡 and its 返事のお願い together (「連絡」1枚, owner decision 2026-11-28 「5番」): one card,
+ * one row of the inbox. The two records keep their own names where they are shown apart (the task list, 探す).
+ */
+export const CONTACT_NAME = '連絡'
 
 /** Whose turn it is, for a row's small line: 「あなたの番」「田中さんの番」「相手の番」「AI の番」. */
 export function turnWords(turn: { kind: 'me' } | { kind: 'ai' } | { kind: 'outside' } | { kind: 'person'; name: string }): string {

@@ -222,8 +222,8 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
 - **Where it shows** (one component, `ApprovalCard`, owned by `chat`; other places get it through `app/`): a reply
   (`MessageParts.tsx`, with ［大きく開く（タブ）］ — `record.open` of the request, offered only where something handles it,
   so not in a consultation's own window), the request's record tab and a task's prepared things (`AppShell`
-  `approvalCard`), and the inbox (`renderApprovalCard`; the stage-2 inbox, #938, passes `onDone` there — until it
-  lands no caller does). `onDone` is called only when the
+  `approvalCard`), and the inbox (`renderApprovalCard`, beside its list; the inbox passes `onDone` there, which reaches the list through
+  `finishBeside` and its company-era gate — `notifications.md` "Another company"). `onDone` is called only when the
   server's answer to a press here finished the request (`pressFinished`: approved / sent back / withdrawn / 「同じ」 —
   a write that failed or went stale stays; a press whose answer never came and that a later read shows done does not
   call it either — the card stays, saying what happened), so a list worked through (the inbox, UX 11番) goes on to the next one. The

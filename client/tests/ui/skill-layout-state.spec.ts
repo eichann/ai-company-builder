@@ -640,7 +640,7 @@ test.describe('the bottom panel', () => {
     const row = panel(page).locator('[data-inbox-row="record:approval-0000aa"]')
     await expect(row).toContainText('承認を待っています')
     await row.getByRole('button', { name: '承認する…' }).click()
-    await expect(page.getByRole('dialog', { name: '承認のお願い' })).toBeVisible()
+    await expect(page.getByRole('region', { name: '承認のお願い', exact: true })).toBeVisible()
     const calls = await (await layout(page)).evaluate(l => l.calls.map(c => c.name))
     expect(calls.filter(name => /approve|send/i.test(name))).toEqual([])
     // 「ブラウザ操作」 switched off on this PC: the inbox may ask main for the plans (the switch is per PC, main

@@ -7,9 +7,9 @@ import { MailDraftCard } from './MailDraftCard'
  * latest version, checked and sent with the same card as in the consultation (the person sends).
  * The caller keys it by the draft's id.
  */
-export function PreparedMailCard({ companyId, messageId }: { companyId: string; messageId: string }) {
+export function PreparedMailCard({ companyId, messageId, onDone }: { companyId: string; messageId: string; onDone?: () => void }) {
   const result = useOutboundMail(companyId, messageId)
   if (result === null) return <p className="flex items-center gap-1.5 text-caption font-normal text-gray-400"><CircleNotch size={12} className="animate-spin" />下書きを読み込んでいます...</p>
   if (!result.success) return <p role="alert" className="text-caption font-normal text-gray-500">{result.error}</p>
-  return <MailDraftCard card={{ id: `task-${messageId}`, companyId, conversationId: null, draft: result.draft, byAi: true, at: result.draft.updatedAt }} />
+  return <MailDraftCard card={{ id: `task-${messageId}`, companyId, conversationId: null, draft: result.draft, byAi: true, at: result.draft.updatedAt }} onDone={onDone} />
 }
