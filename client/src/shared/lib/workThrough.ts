@@ -1,5 +1,5 @@
 // ACB foundation: working through a list one item after another — the やること list (features/tasks, shown by app/), a
-// 案件's やること (features/records) and next the inbox (features/inbox) — kept in one place so they behave alike.
+// 案件's やること (features/records) and the inbox (features/inbox) — kept in one place so they behave alike.
 // Rules: .claude/rules/tasks-ui.md "Working through a list". Memory only: nothing here is saved or sent.
 import { currentCompanyEra, inEra } from './companyEra'
 
@@ -93,21 +93,25 @@ export function noticeOf(listKey: string): WorkNotice | null {
 }
 
 /**
- * 取り消す of the item `id` done with in `listKey`: says it is being put back, runs `undo` (a refusal's words, or null),
+ * 取り消す of the item `id` done with in `listKey`: says it is being put back, runs `undo` (a refusal's words, null, or
+ * `{ done }` — the words of a put-back that has more to say, such as the inbox's 「メールは Gmail でアーカイブされたままです」),
  * then shows the item again (`show`) and says so, or says the refusal. Bound to the company era it is made in: pressed,
  * or answered, after another company or a sign-out, it changes nothing on the screen (the 件名 never reaches the next
  * company's list).
  */
-export function undoOfEnded(listKey: string, id: string, title: string, undo: () => Promise<string | null>, show: (id: string) => void): () => void {
+/** What an undo answers: a refusal's words, null (put back), or the words a put-back says instead of the usual line. */
+export type WorkUndoAnswer = string | null | { done: string }
+
+export function undoOfEnded(listKey: string, id: string, title: string, undo: () => Promise<WorkUndoAnswer>, show: (id: string) => void): () => void {
   const era = currentCompanyEra()
   return () => {
     if (!inEra(era)) return
     setWorkNotice(listKey, { text: `「${title}」を元に戻しています…`, undo: null })
     void undo().then(failure => {
       if (!inEra(era)) return
-      if (failure !== null) { setWorkNotice(listKey, { text: failure, undo: null }); return }
+      if (typeof failure === 'string') { setWorkNotice(listKey, { text: failure, undo: null }); return }
       show(id)
-      setWorkNotice(listKey, { text: `「${title}」を元に戻しました`, undo: null })
+      setWorkNotice(listKey, { text: failure?.done ?? `「${title}」を元に戻しました`, undo: null })
     }, () => {
       if (inEra(era)) setWorkNotice(listKey, { text: '元に戻せませんでした。', undo: null })
     })

@@ -1,11 +1,14 @@
-// 「連絡」1枚 (inbox.md "One contact", owner decision 2026-11-28 「5番」) in the real inbox and its card window
+// 「連絡」1枚 (inbox.md "One contact", owner decision 2026-11-28 「5番」) in the real inbox and its card beside the list
 // (tests/inbox-ui.html?contact=<scene>, a fake server keeping the two records): one row per contact, only the buttons the
-// server allows, one press ends both records, ［取り消す］ brings both back, a refusal says nothing changed.
+// server allows, one press ends both records and the next row takes its place (UX 11番), the list's ［取り消す］ brings
+// both back, a refusal says nothing changed.
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
 const row = (page: Page) => page.locator('[data-inbox-row="contact:interaction-prev01a"]')
-const card = (page: Page) => page.getByRole('dialog', { name: '連絡' })
+const card = (page: Page) => page.getByRole('region', { name: '連絡', exact: true })
+/** The list's line after the card moved on (「…を片づけました。次の件です」 ［取り消す］). */
+const notice = (page: Page) => page.locator('[data-work-notice]')
 async function openCard(page: Page) {
   await row(page).getByRole('button', { name: '開く', exact: true }).click()
   await expect(card(page).locator('[data-contact-card]')).toBeVisible()
@@ -47,7 +50,7 @@ test('with a draft the main button checks and sends it; ［返した（下書き
   await card(page).getByRole('button', { name: 'その他の操作' }).click()
   await card(page).getByRole('button', { name: '下書きを確かめて送る' }).click()
   // The draft's own card (only it sends); nothing was finished.
-  await expect(page.getByRole('dialog', { name: '送るメールの下書き' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '送るメールの下書き', exact: true })).toBeVisible()
   await expect(page.locator('#acted')).toHaveText('')
 })
 
@@ -56,25 +59,26 @@ test('［取り消す］ of a contact ACB archived in Gmail says the mail stays 
     await openPreview(page, 'inbox', { contact: scene })
     await openCard(page)
     await card(page).getByRole('button', { name: '返した', exact: true }).click()
-    await card(page).getByRole('button', { name: '取り消す' }).click()
-    await expect(card(page).getByRole('status')).toContainText('元に戻しました（返事のお願いも連絡も）')
-    if (stays) await expect(card(page).getByRole('status')).toContainText('メールは Gmail でアーカイブされたままです')
-    else await expect(card(page).getByRole('status')).not.toContainText('Gmail')
+    await notice(page).getByRole('button', { name: '取り消す' }).click()
+    await expect(notice(page)).toContainText('元に戻しました（返事のお願いも連絡も）')
+    if (stays) await expect(notice(page)).toContainText('メールは Gmail でアーカイブされたままです')
+    else await expect(notice(page)).not.toContainText('Gmail')
   }
 })
 
-test('one press of ［返した］ ends both records; ［取り消す］ brings both back', async ({ page }) => {
+test('one press of ［返した］ ends both records and the next row takes its place; the list\'s ［取り消す］ brings both back and the contact again', async ({ page }) => {
   const state = await openPreview(page, 'inbox', { contact: 'own' })
   await openCard(page)
   await card(page).getByRole('button', { name: '返した', exact: true }).click()
   await expect(page.locator('#acted')).toHaveText('finish {"interaction":{"expectedVersion":7},"replyRequest":{"id":"reply_request-prev01a","expectedVersion":4,"action":"replied_elsewhere"}}')
-  await expect(card(page).getByRole('status')).toContainText('返したことにしました（連絡も済んだにしました）')
-  await expect(card(page).getByText('済んだ', { exact: true })).toBeVisible()
-  await expect(card(page).getByRole('button', { name: '返した', exact: true })).toHaveCount(0)
+  // The next row of 新着 (a task: it opens in the middle) and the line with ［取り消す］.
+  await expect(notice(page)).toContainText('「A社 見積のご相談」を片づけました。次の件です')
+  await expect(page.locator('#opened')).toHaveText('record task-asked0001')
+  await expect(card(page)).toHaveCount(0)
 
-  await card(page).getByRole('button', { name: '取り消す' }).click()
+  await notice(page).getByRole('button', { name: '取り消す' }).click()
   await expect(page.locator('#acted')).toHaveText('undo {"interaction":{"version":8,"expectedVersion":8},"replyRequest":{"id":"reply_request-prev01a","version":5,"expectedVersion":5}}')
-  await expect(card(page).getByRole('status')).toContainText('元に戻しました（返事のお願いも連絡も）')
+  await expect(notice(page)).toContainText('元に戻しました（返事のお願いも連絡も）')
   await expect(card(page).getByText('返事が要る（期限 12/2）')).toBeVisible()
   await expect(card(page).getByRole('button', { name: '返した', exact: true })).toBeVisible()
   expectNoPageErrors(state)
@@ -89,16 +93,16 @@ test('refused because someone changed it first: says neither was changed, and of
   await expect(card(page).getByRole('button', { name: '返した', exact: true })).toBeVisible()
 })
 
-test('［取り消す］ after someone else changed the contact is refused: the card sends the versions the finish answered, never the ones it read later', async ({ page }) => {
+test('［取り消す］ after someone else changed the contact is refused: it sends the versions the finish answered, never the ones read later', async ({ page }) => {
   await openPreview(page, 'inbox', { contact: 'changed' })
   await openCard(page)
   await card(page).getByRole('button', { name: '返した', exact: true }).click()
-  await expect(card(page).getByRole('status')).toContainText('返したことにしました')
-  // The card has read the contact again (version 9 now); the undo still names 8, so the change in between is not taken back.
-  await card(page).getByRole('button', { name: '取り消す' }).click()
+  await expect(notice(page)).toContainText('を片づけました')
+  // The contact was read again (version 9 now); the undo still names 8, so the change in between is not taken back.
+  await notice(page).getByRole('button', { name: '取り消す' }).click()
   await expect(page.locator('#acted')).toHaveText('undo {"interaction":{"version":8,"expectedVersion":8},"replyRequest":{"id":"reply_request-prev01a","version":5,"expectedVersion":5}}')
-  await expect(card(page).getByRole('alert')).toContainText('ほかの人か AI が先に変えたため、取り消せませんでした（どちらもそのままです）')
-  await expect(card(page).getByRole('button', { name: '取り消す' })).toHaveCount(0)
+  await expect(notice(page)).toContainText('ほかの人か AI が先に変えたため、取り消せませんでした（どちらもそのままです）')
+  await expect(notice(page).getByRole('button', { name: '取り消す' })).toHaveCount(0)
 })
 
 test('a contact whose reply is over with a やること left is in 「確認したもの」 and its card lists the やること', async ({ page }) => {

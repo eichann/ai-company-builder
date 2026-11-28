@@ -51,6 +51,16 @@ test('取り消す kept on screen past a company change does nothing when presse
   forgetAllWork()
 })
 
+test('取り消す whose put-back has more to say (the inbox\'s 「メールは Gmail でアーカイブされたままです」) shows those words, the item again', async () => {
+  const shown: string[] = []
+  const said = '元に戻しました（返事のお願いも連絡も）。メールは Gmail でアーカイブされたままです'
+  undoOfEnded('inbox', 'contact:x', 'A社 見積のご相談', async () => ({ done: said }), id => shown.push(id))()
+  await settle()
+  assert.deepEqual(shown, ['contact:x'])
+  assert.equal(noticeOf('inbox')?.text, said)
+  forgetAllWork()
+})
+
 const ORDER = ['a', 'b', 'c', 'd']
 
 test('「3 / 11」: counted from 1 over the items listed; an item not listed has no place', () => {

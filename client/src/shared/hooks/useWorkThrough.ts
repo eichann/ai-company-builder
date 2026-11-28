@@ -1,8 +1,8 @@
 // ACB foundation: the side that shows a list's items — AppShell for the やること list (its card in the middle), the
-// records feature for a 案件's やること (its card beside the list), next the inbox. Rules: tasks-ui.md "Working through a list".
+// records feature for a 案件's やること (its card beside the list), the inbox (its card beside its list). Rules: tasks-ui.md "Working through a list".
 import { useSyncExternalStore } from 'react'
 import { useCommandHandler } from '../commands/commands'
-import { nextAfterLeaving, orderOf, placeOf, positionIn, rememberPlace, setWorkNotice, stepIn, subscribeWork, undoOfEnded, type WorkPosition } from '../lib/workThrough'
+import { nextAfterLeaving, orderOf, placeOf, positionIn, rememberPlace, setWorkNotice, stepIn, subscribeWork, undoOfEnded, type WorkPosition, type WorkUndoAnswer } from '../lib/workThrough'
 import { useLatestRef } from './useLatestRef'
 
 /** A field, a menu or a dialog keeps its own keys (↑ ↓ Enter Esc mean something there). */
@@ -21,7 +21,7 @@ export interface WorkThrough {
    * shown now), `last` (none is left: the caller puts the item away) or null (not the item shown: the caller does what
    * it did before).
    */
-  ended: (id: string, title: string, undo?: () => Promise<string | null>) => 'next' | 'last' | null
+  ended: (id: string, title: string, undo?: () => Promise<WorkUndoAnswer>) => 'next' | 'last' | null
 }
 
 /**
@@ -81,7 +81,7 @@ export function useWorkThrough({ listKey, shownId, open }: { listKey: string; sh
     if (id) focusRow(id)
   }, { target, acceptsKey: () => inCard() && !keepsKeys() })
 
-  const ended = (id: string, title: string, undo?: () => Promise<string | null>) => {
+  const ended = (id: string, title: string, undo?: () => Promise<WorkUndoAnswer>) => {
     const { order: now, shown: at } = latest.current
     if (id !== at) return null
     const next = nextAfterLeaving(now, id)

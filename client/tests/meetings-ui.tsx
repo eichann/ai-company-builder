@@ -26,6 +26,7 @@ import { useMeetingArrivals } from '../src/features/minutes/hooks/useMeetingArri
 import { useMeetingInboxRows } from '../src/features/minutes/hooks/useMeetingInboxRows'
 import { InboxList } from '../src/features/inbox/components/InboxList'
 import { inboxView } from '../src/features/inbox/model'
+import { sectionsOf } from '../src/features/inbox/workModel'
 import { RecordCard } from '../src/features/records/components/RecordCard'
 import { useCommandHandler } from '../src/shared/commands/commands'
 import { renderMeetingPanel } from '../src/app/meetingCard'
@@ -212,7 +213,7 @@ function Preview() {
       {/* The inbox's list as the bottom panel shows it (the meetings' rows since 2026-11-26), and the log. */}
       <aside style={{ width: 520 }} className="flex h-screen min-w-0 shrink-0 flex-col overflow-y-auto border-r" aria-label="受け箱">
         {(['new', 'seen'] as const).map(filter => (
-          <InboxList key={filter} view={view} filter={filter} meetingButtons={id => rows.rows.find(r => r.id === id)?.actions ?? []}
+          <InboxList key={filter} sections={sectionsOf(view, filter, new Map())} totals={view.counts} filter={filter} meetingButtons={id => rows.rows.find(r => r.id === id)?.actions ?? []}
             onOpen={i => { see(i.unreadNoticeIds); if (i.meetingNews && i.meetingId) rows.markSeen(i.meetingId); if (i.meetingId) setOpen(i.meetingId) }}
             onSeen={i => { see(i.unreadNoticeIds); if (i.meetingNews && i.meetingId) rows.markSeen(i.meetingId) }}
             onButton={(i, b) => { see(i.unreadNoticeIds); b.run() }} onUndo={() => {}} undone={new Set()} onAllSeen={() => { see(view.newsNoticeIds); view.newsMeetingIds.forEach(rows.markSeen) }}

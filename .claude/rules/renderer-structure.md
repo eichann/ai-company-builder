@@ -297,7 +297,7 @@ D7–D9, confirmed 2026-10-30).
   the preview a sample, `?inbox=1` the real inbox (`skill-layout-state.spec.ts` 「the bottom panel」).
   **The inbox (受け箱, I1, owner design 2026-11-22)**: `features/inbox` — `model.ts` (`inboxView`,
   pure), `hooks/useInboxSlot.tsx` (its slot, `APP_SHELL_SLOTS`), `components/InboxList.tsx`,
-  `InboxCardDialog.tsx`, `InboxButton.tsx` (the title bar's ［受け箱］, I2: opens and closes this panel like ⌘J),
+  `workModel.ts` (pure: the chips, kinds, paging and the rows kept in place, UX 11), `InboxButton.tsx` (the title bar's ［受け箱］, I2: opens and closes this panel like ⌘J),
   `NoticeSettingsDialog.tsx`, and 「連絡」1枚 (`contactModel.ts`, `contactStore.ts`, `contactPress.ts`,
   `hooks/useContacts.ts`, `components/ContactCard.tsx`: a part that knows no frame, `inbox.md` "One contact in the app"); what it shows and its guards are `notifications.md` "The inbox". A tree added later is optional within a version (missing → its first look; `trees.middle`
   arrived in version 2, so an app without it reads the other trees unchanged and keeps working);

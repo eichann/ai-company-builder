@@ -11,6 +11,9 @@
 // `listBrowserPlans` reaching main counts in `#plan-reads`; a run, cancel or confirm shows in `#acted`.
 // `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
 // `&chatcard=1`: the draft's card as a consultation shows it, outside the inbox (its ［任せる］ runs it there).
+// `?many=N` (working through the inbox, notifications.md "Working through the inbox"): N more 新着 on a fixed clock
+// (2026-11-27), so the list has more than its first 15 rows; `&approvals=N` N more approvals waiting. `?narrow=1`: the
+// panel 360 px wide (the kind chips fold into 「その他」). The keys ↑ ↓ Enter Esc are the app's (`useKeybindings`).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -30,6 +33,7 @@ import type { NotificationItem } from '../../shared/types/notifications'
 import type { ApprovalView } from '../../shared/types/approvals'
 import type { ContactFinishAnswer, ContactFinishRequest, ContactUndoAnswer, ContactUndoRequest, ContactView } from '../shared/contact-card'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
+import { useKeybindings } from '../src/shared/commands/commands'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -94,6 +98,17 @@ let state: NoticesState = MANUAL ? manualState : {
     ],
   },
 }
+// A fixed clock for the rows added below (never the real date: a test must not change with the day it runs).
+const FIXED = (minute: number) => new Date(Date.UTC(2026, 10, 27, 0, 0) + minute * 60_000).toISOString()
+const MANY = Number(params.get('many') ?? 0)
+const APPROVALS = Number(params.get('approvals') ?? 0)
+if (MANY > 0 || APPROVALS > 0) {
+  const more = Array.from({ length: MANY }, (_, i) => note(`n-many${i + 1}`, 'request_done', `task-many${String(i + 1).padStart(4, '0')}`, 'task', `報告 ${i + 1}`, `高橋さんが「報告 ${i + 1}」を完了にしました`, FIXED(-i)))
+  const approvals = Array.from({ length: APPROVALS }, (_, i) => ({ id: `approval-more${String(i + 1).padStart(4, '0')}`, type: 'approval', title: `値引きの承認 ${i + 1}`, state: 'pending', due: null }))
+  const items = [...state.notices.items, ...more]
+  state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total + approvals.length, items: [...state.myTurn.items, ...approvals] }, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
+}
+
 const HASH = `sha256:${'9c1e'.repeat(16)}`
 const view: ApprovalView = {
   id: 'approval-preview0001', state: 'pending', recordVersion: 1, pluginId: 'hubspot', operation: 'update_deal',
@@ -195,6 +210,8 @@ function Preview() {
   const [read, setRead] = useState('')
   const [acted, setActed] = useState('')
   const [planReads, setPlanReads] = useState(0)
+  // Every read of the notices main hands over (`#state-reads`): going down the list must ask nothing more.
+  const [stateReads, setStateReads] = useState(0)
   installElectronAPI({
     listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
     getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: MANUAL ? 'haishin.example.net' : 'manager.linestep.net' } }),
@@ -208,7 +225,7 @@ function Preview() {
     cancelBrowserPlan: async () => { setActed('cancel'); return { ok: false, offline: true, message: '（見本）' } },
     confirmBrowserExecution: async () => { setActed('confirm'); return { ok: false, offline: true, message: '（見本）' } },
     watchNotifications: async () => {},
-    getNotificationsState: async () => state,
+    getNotificationsState: async () => { setStateReads(n => n + 1); return state },
     onNotificationsChanged: changed.subscribe,
     markNotificationsRead: async (companyId, ids) => {
       if (params.get('offline') === '1') throw new Error('offline')
@@ -219,8 +236,15 @@ function Preview() {
       setTimeout(() => changed.emit({ companyId }), 0)
       return { success: true }
     },
-    getApproval: async () => ({ success: true, approval: approved ? { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: at(0, 11), by: 'u-tanaka', onBehalfOf: null, note: '承認します', resultOperationId: 'op-1' } } : view, names: { 'u-yamada': '山田', 'u-me': '阿部', 'u-tanaka': '田中' } }),
-    approveApproval: async () => { setActed('approve'); return { success: false, offline: true, error: '（見本）' } as never },
+    getApproval: async (_companyId, id) => ({ success: true, approval: approved && id === view.id ? { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: at(0, 11), by: 'u-tanaka', onBehalfOf: null, note: '承認します', resultOperationId: 'op-1' } } : { ...view, id, recordTitle: state.myTurn.items.find(i => i.id === id)?.title ?? view.recordTitle }, names: { 'u-yamada': '山田', 'u-me': '阿部', 'u-tanaka': '田中' } }),
+    // `&approvals=N`: an approve lands (the request leaves the turn, as the server's next read says); otherwise offline.
+    approveApproval: async (companyId, id) => {
+      setActed(a => [a, `approve ${id}`].filter(Boolean).join('|'))
+      if (APPROVALS === 0) return { success: false, offline: true, error: '（見本）' } as never
+      state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total - 1, items: state.myTurn.items.filter(i => i.id !== id) } }
+      setTimeout(() => changed.emit({ companyId }), 0)
+      return { success: true, approval: { ...view, id, state: 'approved', viewerMayApprove: false, outcome: { at: FIXED(1), by: 'u-me', onBehalfOf: null, note: '承認します', resultOperationId: 'op-2' } } } as never
+    },
     getOutboundMail: async () => ({ success: false, offline: false, code: null, error: '（見本）下書きは、このページでは読み込みません。' }),
     sendOutboundMail: async () => { setActed('send'); return { success: false, offline: true, error: '（見本）' } as never },
     getContact: async (_companyId, id) => (contactNow && (id === IID || id === RID) ? { success: true, contact: contactNow } : { success: false, gone: true }),
@@ -229,15 +253,16 @@ function Preview() {
     // `?contact=archived`: ACB archived the mail in Gmail right after the 「済んだ」 (its note follows the finish's entry 8).
     getContactArchived: async (_companyId, _id, afterVersion) => ({ success: true, stays: CONTACT === 'archived' && afterVersion === 8 }),
   })
+  useKeybindings()
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({
     companyId: 'co-preview', notices, open: true, onToggle: () => setOpened('toggled'),
     // The manual's fixed clock (2026-11-20) is before the inbox's first day: its notices count as 新着 here.
     newsSince: '2026-01-01T00:00:00.000Z',
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
-    renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
-    renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
-    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} />, planStates: PLAN_STATES } : undefined,
+    renderApprovalCard: (id, onDone) => <ApprovalCard key={id} card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} onDone={onDone} />,
+    renderMailDraft: (id, onDone) => <PreparedMailCard key={id} companyId="co-preview" messageId={id} onDone={onDone} />,
+    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: (id, onDone) => <BrowserPlanCard key={id} companyId="co-preview" planId={id} onDone={onDone} />, planStates: PLAN_STATES } : undefined,
     memberName: id => (id === 'u-tanaka' ? '田中' : null),
   })
   return (
@@ -247,8 +272,9 @@ function Preview() {
       <pre id="read">{read}</pre>
       <pre id="acted">{acted}</pre>
       <pre id="plan-reads">{planReads}</pre>
+      <pre id="state-reads">{stateReads}</pre>
       {params.get('chatcard') === '1' && <section aria-label="相談のカード"><BrowserPlanCard companyId="co-preview" planId={DRAFT} /></section>}
-      <div className="mt-auto h-[480px]">{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
+      <div className="mt-auto h-[480px]" style={params.get('narrow') === '1' ? { width: 360 } : undefined}>{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
       {inbox?.dialog}
     </main>
   )
