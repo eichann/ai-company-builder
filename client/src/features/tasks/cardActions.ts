@@ -210,9 +210,6 @@ export function editSteps(now: { title: string; purpose: string | null }, draft:
   return steps
 }
 
-/** Said under the field when the member is the assignee of a request still 引き受け待ち (records.md "Acceptance"). */
-export const ACCEPTS_NOTE = '保存すると、このやることを引き受けたことになります。'
-
 export type TaskText = { title: string; purpose: string | null }
 type SendText = (steps: TextEditSteps) => Promise<string | null>
 
@@ -228,9 +225,9 @@ export function saveTaskText(now: TaskText, field: 'title' | 'purpose', draft: s
 }
 
 /** RecordPage's `titleEdit` for the task card: undefined (plain text) when the member may not correct the title. */
-export function taskTitleEdit(now: TaskText, may: boolean, busy: boolean, accepts: boolean, send: SendText): Pick<InlineTextProps, 'onSave' | 'busy' | 'note' | 'maxLength'> | undefined {
+export function taskTitleEdit(now: TaskText, may: boolean, busy: boolean, send: SendText): Pick<InlineTextProps, 'onSave' | 'busy' | 'maxLength'> | undefined {
   if (!may) return undefined
-  return { busy, maxLength: RECORD_TITLE_MAX, ...(accepts ? { note: ACCEPTS_NOTE } : {}), onSave: draft => saveTaskText(now, 'title', draft, may, send) }
+  return { busy, maxLength: RECORD_TITLE_MAX, onSave: draft => saveTaskText(now, 'title', draft, may, send) }
 }
 
 /** What the card says after the title or 目的 was saved. */

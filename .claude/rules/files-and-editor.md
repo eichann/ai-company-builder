@@ -265,22 +265,54 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 ## External changes to open files (`client/shared/editor-disk-state.ts`, `TabbedEditorPanel`)
 
 - A tab remembers the disk version it loaded/saved (`originalContent`). No edits → it follows the
-  disk. With edits, a disk change shows 「このファイルは外部で変更されました」 (ディスクの内容を読み込む
-  after a confirm / 差分を見る — disk vs. edits / 自分の編集を残す) and **pauses autosave**; deleted →
-  「ファイルは削除されました。保存すると作り直します」.
-- Every save first re-reads the disk: if it is no longer the loaded version, autosave stops and
-  ⌘S / closing the tab asks 「外部の変更を上書きして保存」 / 「キャンセル」 (Enter does not confirm).
-  Overwriting first backs the disk version up (`editor:backupBeforeOverwrite` →
-  `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder;
-  `features/backups/keep-current.ts`, shared with 復元 and 「元に戻す」, `sync.md` "Backups").
-  Closing a tab whose save was cancelled asks before discarding.
+  disk. With edits, a disk change shows 「このファイルは外部で変更されました。あなたの編集はまだ保存していません
+  （自動保存は止めています）」 with **one button, ［比べて選ぶ］**, and **pauses autosave**; deleted →
+  「ファイルは削除されました。保存すると作り直します」 (［保存して作り直す］).
+- **Compare and pick in one press** (owner decision 2026-11-28, UX 点検 10: 「自分の編集を残す」 only
+  changed a mark, then 「保存…」 and a red overwrite confirm followed — three presses, and 「ディスクの内容を
+  読み込む」 threw the edits away). ［比べて選ぶ］ opens `ExternalCompareView` (− 届いた版 / ＋ あなたの編集)
+  with two buttons; **the version not picked is always kept first, so there is no confirm**:
+  - ［自分の版を保存］: the disk version is kept (`editor:backupBeforeOverwrite` →
+    `.backups/<ts>_editor_overwrite/`), then the edits are written.
+  - ［届いた版を採用］: the edits — never on disk — are kept (`editor:backupEdits` → `.backups/<ts>_editor_edits/`,
+    `keepGivenVersion`), then the tab shows the version that arrived.
+  Both go to the private backups for a file in a private folder or a nested repository
+  (`features/backups/keep-current.ts`, shared with 復元 and 「元に戻す」, `sync.md` "Backups").
+  **No backup, nothing replaced**: a keep that fails (or is skipped, other than the file being gone)
+  stops with 「…バックアップに残せなかったため、…していません。あなたの編集はこのタブにそのまま残っています。」.
+  At the press the disk is read again against the version shown (`decideCompareChoice`), and again
+  after the keep: changed meanwhile → nothing written, the view shows the new version and
+  「比べている間に、ファイルがまた変わりました。…もう一度選んでください。」 (also when the watcher redraws it).
+  Typing during ［届いた版を採用］'s keep → nothing replaced, pick again.
+- Every save first re-reads the disk (`decideSave`): if it is no longer the loaded version,
+  nothing is written — autosave shows the banner; ⌘S opens the compare view; closing the tab keeps
+  it open and brings it to the front with the compare view. **Only when a keep has failed for that
+  change** (`OpenFile.keepFailed`, cleared once the change is resolved) does closing offer
+  「保存せずに閉じる」, saying 「閉じると、この編集は残りません（バックアップ履歴にも入りません）。」 (owner
+  2026-11-28: a file whose versions can never be kept, e.g. under `.backups/`, would otherwise never
+  close). Closing a tab whose save failed otherwise asks before discarding.
+  Tests: `tests/ui/editor-tabs.spec.ts` (one press each way, what is kept, a failed keep replaces
+  nothing, changed again while comparing, ⌘S), `editor-panel.spec.ts` (closing: the compare view, and
+  「保存せずに閉じる」 only after a failed keep), `tests/editor-disk-state.test.ts`, `tests/ipc-fs.test.ts`
+  「editor:backupEdits…」.
 - **Leaving never drops edits** (stage-1 #1, 2026-10-31). Autosave writes only the shown tab, so
   an edit in a tab left within the second, a tab paused by an external change and a failed save
   were lost on sign-out or closing the window. Now every editor registers a saver
   (`src/shared/lib/unsavedEdits.ts` `registerUnsavedEditsSaver`, in `useFileSaving.ts`) that writes
   every tab with edits without asking; `features/editor/hooks/useSaveBeforeLeaving.ts` runs them and
   names what could not be saved (「保存できていない編集があります」 … 「保存せずに進む」 / 「キャンセル」,
-  Enter does not confirm; `LeaveConfirmDialog`). Sign-out (`AppShell` → `authStore.signOut`, the
+  Enter does not confirm; `LeaveConfirmDialog`). **［保存せずに進む］ keeps those edits first** (owner
+  2026-11-28): each editor's keeper (`registerUnsavedEditsKeeper`, same file) writes them through
+  `editor:backupEdits` with reason `editor_left_unsaved` (`.backups/<ts>_editor_left_unsaved/`, or the
+  private backups); only a keep with a `backupPath` counts, and only while the tab's text is still what
+  was kept (the dialog has closed, so typing can go on): after the first round every editor saves
+  again and keeps what is unsaved then (a text already kept is not kept twice), and only that round's
+  answer counts. What could not be kept is named again —
+  「バックアップにも残せなかった編集があります」 … 「それでも進む」 / 「キャンセル」 (Enter does not confirm;
+  `leaving.ts` `notKeptQuestion`). Tests: `editor-panel.spec.ts` 「a tab that cannot be saved…」 /
+  「保存せずに進む when the edits cannot be kept either…」 / 「…typed while the edits are being kept…」 /
+  「…typing still going on during the last keep…」 / 「…a keep that was skipped…」, `src/shared/lib/unsavedEdits.test.ts`,
+  `ipc-fs.test.ts` 「editor:backupEdits…」 (the reason; an unknown one keeps nothing). Sign-out (`AppShell` → `authStore.signOut`, the
   one sign-out: it also closes the company, so the login screen shows), switching company from
   the title bar (`download-choices.md`) and closing the main window go through it. Closing / quitting: main holds the window's close and asks the renderer
   (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`
@@ -292,11 +324,11 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   saves every tab…」 / 「a tab that cannot be saved…」, `tests/ui/skill-layout.spec.ts` 「ログアウト…」.
 - `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
   (each tab's text, loading, the watcher: follow the disk / mark external / missing),
-  `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, load the disk
-  version, the confirm), `useMarkdownView.ts` (preview / source mode, scroll positions; the
+  `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, the compare
+  view's two choices), `useMarkdownView.ts` (preview / source mode, scroll positions; the
   preview pane is keyed by file so each file restores its own),
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
-  `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
+  `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `ExternalCompareView`, `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`; a file's `---` frontmatter is left out of the preview and its `name` /
   `description` shown in a small quiet box above it — `markdownFrontmatter.ts`, owner 2026-11-23: a
   SKILL.md's block read as a bold underlined heading; the source view is unchanged;
@@ -312,7 +344,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `editor.save` / `editor.togglePreview` / `editor.find`, delivered only while the focus is in
   that editor (`commands.md`).
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
-  `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
+  `EditorWrites` (save, recreate the folder, keep the disk version or the tab's edits in the
+  backups); nothing leaves the computer.
 - Preview: `client/tests/editor-tabs-ui.html?view=external` (`editor-tabs.spec.ts`); `?view=tabs`
   for the panel itself (`editor-panel.spec.ts`: autosave after 1 s, ⌘S, closing saves first,
   preview tabs pinned on double-click / first edit, ⌘⇧V and its remembered mode, ⌘F in a
@@ -325,7 +358,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   path can have it), drawn with its kind's icon and title (`RecordTabLook`, told by the card once
   read: `onLoaded`), and its card is drawn by the screen (`renderRecord`); only file tabs load
   text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
-  preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
+  preview tab (↑ ↓ over the list replace it: `tasks-ui.md` "Working through a list"); ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
 - Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
   `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records, pinned }` (`records`: the open
   record tabs' titles, so they show at once after a restart; a record tab is not checked against

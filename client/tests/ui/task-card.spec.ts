@@ -173,14 +173,16 @@ test('目的 already written: pressing the line opens it with the text; a change
   expectNoPageErrors(state)
 })
 
-test('a title stored before the rule: 目的 alone saves; the assignee of a request 引き受け待ち is told, under the field, that saving accepts', async ({ page }) => {
+test('a title stored before the rule: 目的 alone saves; the assignee of a request 引き受け待ち is not told that saving accepts (it does not: owner decision 2026-11-28)', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { task: 'legacy' })
   const card = page.getByTestId('task-card')
   await card.getByRole('heading', { level: 1 }).getByRole('button', { name: '件名を直す' }).click()
-  await expect(card.getByRole('heading', { level: 1 })).toContainText('保存すると、このやることを引き受けたことになります。')
+  await expect(card.getByRole('textbox', { name: '件名' })).toBeVisible()
+  await expect(card).not.toContainText('引き受けたことになります')
   await card.getByRole('textbox', { name: '件名' }).press('Escape')
   await card.getByRole('button', { name: '目的を書く' }).click()
-  await expect(card.locator('[data-purpose]')).toContainText('保存すると、このやることを引き受けたことになります。')
+  await expect(card.getByRole('textbox', { name: '目的' })).toBeVisible()
+  await expect(card).not.toContainText('引き受けたことになります')
   await card.getByRole('textbox', { name: '目的' }).fill('来週の提案に間に合わせる')
   await card.getByRole('textbox', { name: '目的' }).press('ControlOrMeta+Enter')
   await expect(page.locator('#acted')).toHaveText('set_purpose@3:purpose=来週の提案に間に合わせる')

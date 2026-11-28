@@ -24,24 +24,23 @@ export function MissingFileNotice() {
 
 interface ExternalChangeBannerProps {
   file: OpenFile & { external: NonNullable<OpenFile['external']> }
-  diffOpen: boolean
   onSave: () => void
-  onLoadDisk: () => void
-  onToggleDiff: () => void
-  onKeepMine: () => void
+  onToggleCompare: () => void
 }
 
-/** The file changed (or was deleted) on disk while this tab has edits: nothing is overwritten until the member decides. */
-export function ExternalChangeBanner({ file, diffOpen, onSave, onLoadDisk, onToggleDiff, onKeepMine }: ExternalChangeBannerProps) {
+/**
+ * The file changed (or was deleted) on disk while this tab has edits: nothing is
+ * overwritten until the member decides. A change offers one thing, ［比べて選ぶ］:
+ * the compare view holds both choices (owner decision 2026-11-28, UX 点検 10).
+ */
+export function ExternalChangeBanner({ file, onSave, onToggleCompare }: ExternalChangeBannerProps) {
   return (
     <div role="alert" data-external-change={file.external.kind} className="flex-shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-warning-border bg-warning-bg text-xs text-warning-text">
       <Warning size={14} className="flex-shrink-0 text-warning-icon" />
       <span className="min-w-0 flex-1">
         {file.external.kind === 'deleted'
           ? 'ファイルは削除されました。保存すると作り直します'
-          : file.keepMine
-            ? 'このファイルは外部で変更されました。編集を続けられます（自動保存は止めています）。保存（⌘S）するときに上書きしてよいか確認します'
-            : 'このファイルは外部で変更されました。あなたの編集はまだ保存していません'}
+          : 'このファイルは外部で変更されました。あなたの編集はまだ保存していません（自動保存は止めています）'}
       </span>
       <div className="flex items-center gap-1.5">
         {file.external.kind === 'deleted' ? (
@@ -52,36 +51,13 @@ export function ExternalChangeBanner({ file, diffOpen, onSave, onLoadDisk, onTog
             保存して作り直す
           </button>
         ) : (
-          <>
-            <button
-              onClick={onLoadDisk}
-              className="px-2 py-1 rounded-md border border-amber-500/40 hover:bg-amber-500/15 transition-colors"
-            >
-              ディスクの内容を読み込む
-            </button>
-            <button
-              onClick={onToggleDiff}
-              aria-pressed={diffOpen}
-              className={`px-2 py-1 rounded-md border border-amber-500/40 transition-colors ${diffOpen ? 'bg-amber-500/20' : 'hover:bg-amber-500/15'}`}
-            >
-              {diffOpen ? '差分を閉じる' : '差分を見る'}
-            </button>
-            {file.keepMine ? (
-              <button
-                onClick={onSave}
-                className="px-2 py-1 rounded-md bg-amber-500/90 text-white hover:bg-amber-500 transition-colors"
-              >
-                保存…
-              </button>
-            ) : (
-              <button
-                onClick={onKeepMine}
-                className="px-2 py-1 rounded-md bg-amber-500/90 text-white hover:bg-amber-500 transition-colors"
-              >
-                自分の編集を残す
-              </button>
-            )}
-          </>
+          <button
+            onClick={onToggleCompare}
+            aria-pressed={!!file.comparing}
+            className={`px-2 py-1 rounded-md border border-amber-500/40 transition-colors ${file.comparing ? 'bg-amber-500/20' : 'hover:bg-amber-500/15'}`}
+          >
+            {file.comparing ? '比べるのをやめる' : '比べて選ぶ'}
+          </button>
         )}
       </div>
     </div>

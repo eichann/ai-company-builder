@@ -1,6 +1,8 @@
 // Keep a file's current version, byte for byte, before the app replaces or
 // removes it on the member's behalf: the editor overwriting a file changed
-// elsewhere, a backup restored over it, 「元に戻す」 in the sync preview.
+// elsewhere, a backup restored over it, 「元に戻す」 in the sync preview. And
+// keep the editor's unsaved edits of a file before ［届いた版を採用］ drops
+// them (a version that was never on disk: keepGivenVersion).
 // .backups/<ts>_<reason>/ — or .git/acb-private-backups/ for a file in a
 // private folder or a nested repository (never in that folder's working tree).
 // Plan and rules: shared/editor-disk-state.ts.
@@ -23,16 +25,32 @@ export async function keepCurrentVersion(
   reason: KeepCurrentReason,
   now = new Date(),
 ): Promise<KeepCurrentResult> {
+  let bytes: Buffer
   try {
-    let bytes: Buffer
-    try {
-      // A link is kept by what it points to, and only when that is inside the company.
-      if ((await fs.promises.lstat(filePath)).isSymbolicLink()) paths.validate(filePath)
-      if (!(await fs.promises.stat(filePath)).isFile()) return { success: true, skipped: 'missing' }
-      bytes = await fs.promises.readFile(filePath)
-    } catch {
-      return { success: true, skipped: 'missing' }
-    }
+    // A link is kept by what it points to, and only when that is inside the company.
+    if ((await fs.promises.lstat(filePath)).isSymbolicLink()) paths.validate(filePath)
+    if (!(await fs.promises.stat(filePath)).isFile()) return { success: true, skipped: 'missing' }
+    bytes = await fs.promises.readFile(filePath)
+  } catch {
+    return { success: true, skipped: 'missing' }
+  }
+  return keepGivenVersion(paths, root, filePath, bytes, reason, now)
+}
+
+/**
+ * Keep `bytes` as a version of `filePath` (company-relative path inside the
+ * backup folder), in the same place a disk version would go: .backups/, or the
+ * private backups for a private folder or a nested repository.
+ */
+export async function keepGivenVersion(
+  paths: PathGuard,
+  root: string,
+  filePath: string,
+  bytes: Buffer,
+  reason: KeepCurrentReason,
+  now = new Date(),
+): Promise<KeepCurrentResult> {
+  try {
     let insideNestedRepo = false
     for (let dir = path.dirname(filePath); dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
       if (fs.existsSync(path.join(dir, '.git'))) { insideNestedRepo = true; break }
@@ -64,7 +82,7 @@ export async function keepCurrentVersion(
     await fs.promises.writeFile(path.join(backupDir, '_metadata.json'), JSON.stringify(metadata, null, 2))
     return { success: true, backupPath: backupDir }
   } catch (error) {
-    console.error(`[backups] keeping the current version (${reason}) failed:`, error)
+    console.error(`[backups] keeping a version (${reason}) failed:`, error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 }
