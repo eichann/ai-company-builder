@@ -456,7 +456,9 @@ pressing each record's own action.
   (「Gmail でもアーカイブしました」, written right after a 「済んだ」 once Google answered), `left_inbox_noted`, `unarchive_failed`;
   actor `INBOX_ACTOR`, no change, no state move — the undo is judged at the latest version, as for a card that saw the note.
   Anything else since keeps the card's version. The Gmail archive itself is not taken back by this undo (its notice's
-  ［元に戻す］ does). Test: `contact-threads.test.ts` 「a change made in between…」, 「the inbox's quiet note…」 (mutation-checked).
+  ［元に戻す］ does). Test: `contact-threads.test.ts` 「a change made in between…」, 「the inbox's quiet note…」 (the move past
+  notes and "every entry since" mutation-checked; the actor / no-change / same-state conditions are a backup — only the
+  inbox writes those actions, and no test can write them otherwise).
 - **The 受け箱** (the app, stage 2): a contact whose reply is over but with a やること still open goes to 「確認したもの」;
   the やること stays in the list. The app computes it from this view; nothing is stored.
 - Tests: `server/tests/unit/contact-threads.test.ts` (the view per reader — owner-only, members-only, owner / admin /
