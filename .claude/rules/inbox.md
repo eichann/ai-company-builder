@@ -211,7 +211,10 @@ nor archived in one.
     assignee's, `UNDO_BY_ASSIGNEE`) reaches the inbox through `afterAct` (also run after an undo), which
     puts back exactly those (`addLabelIds: ['INBOX']`) — never the Sent mail or what the member
     archived themselves. When no entry can be written (a lost race), what was taken out is put back at
-    once: nothing stays archived without a notice and an undo. When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
+    once: nothing stays archived without a notice and an undo. **Checked again after Google answers**: when the record
+    is no longer closed or has open work again (her 「済んだ」 taken back while the call ran, the 連絡 card's ［取り消す］
+    included), no note is written on the reopened record and what was taken out goes back the same way (test
+    `inbox-archive.test.ts` 「her 済んだ taken back while Google was still archiving…」, written before the fix). When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
     (`unarchive_failed`). Calls run after the action's answer (`whenIdle` in tests).
 - Tests: `server/tests/unit/inbox-archive.test.ts` (close as the inbox with the owner's undo, nobody
   runs `left_inbox`, task / 返事のお願い → the note once, another member's mailbox never, no cursor →

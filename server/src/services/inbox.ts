@@ -899,9 +899,14 @@ export function createInboxService(deps: InboxDeps) {
     if (r.changed.length === 0) return
     const label = source.label ?? DEFAULT_MAILBOX_LABEL
     const partly = r.stop !== null || left > 0
-    // Written meanwhile (another follow-up of the same close): one entry, one notice — ours goes back.
+    // Written meanwhile (another follow-up of the same close): one entry, one notice — ours goes back. Taken back while
+    // Google answered (her 「済んだ」 undone, a task or 返事のお願い open again): no note on a record that is open — ours goes back.
     const after = lastSeenOf(handle, interactionId)
-    const written = handle.records.ledger(interactionId).some(e => e.action === INBOX_ACTIONS.archivedThere && e.at >= after) ? null
+    const nowRow = handle.records.byIds([interactionId])[0]
+    const nowMine = nowRow ? ownMailbox(handle, nowRow) : null
+    const nowWork = openWork(handle, interactionId)
+    const stillClosed = !!nowMine && CLOSED_STATES.includes(nowMine.state ?? '') && nowWork.tasks === 0 && nowWork.replies === 0
+    const written = !stillClosed || handle.records.ledger(interactionId).some(e => e.action === INBOX_ACTIONS.archivedThere && e.at >= after) ? null
       : deps.writer.transition(companyId, {
         recordId: interactionId, action: INBOX_ACTIONS.archivedThere, expectedVersion: fieldsOf(handle, interactionId).version, to: null, actor: INBOX_ACTOR,
         note: partly ? archivedPartlyNote(label) : archivedThereNote(label),
