@@ -15,6 +15,7 @@ import { REVIEW_CONFIRM_MESSAGE } from '../../../../shared/review-request'
 import { MINUTES_NEEDS_CLAUDE_TEXT } from '../../../../shared/minutes-app'
 import { pendingReviewOf } from '../reviewRequest'
 import { ReviewActionsContext, type ReviewActions } from '../review-context'
+import { ChatFollowContext } from '../chatFollow'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -259,7 +260,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const unsentAttachmentsRef = useRef(0)
   const handleAttachmentsChange = useCallback((count: number) => { unsentAttachmentsRef.current = count }, [])
 
-  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isShown, isRestoringSession, messages, status })
+  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange, followIfFollowing } = useChatAutoScroll({ isShown, isRestoringSession, messages, status })
 
   const handleInputActivity = useCallback(() => {
     markChatInputActivity()
@@ -559,6 +560,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         </div>
       ) : (
         <ReviewActionsContext.Provider value={reviewActions}>
+          <ChatFollowContext.Provider value={followIfFollowing}>
           <MessageList
             messages={messages}
             status={status}
@@ -571,6 +573,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             onEditSubmit={handleEditMessage}
             onEditingChange={handleEditingChange}
           />
+          </ChatFollowContext.Provider>
         </ReviewActionsContext.Provider>
       )}
 

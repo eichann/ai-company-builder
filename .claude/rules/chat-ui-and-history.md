@@ -9,6 +9,7 @@ paths:
   - "client/src/features/chat/chat-rendering.test.ts"
   - "client/tests/chat-header-ui.*"
   - "client/tests/chat-reply-cleaning-ui.*"
+  - "client/tests/chat-rich-reply-ui.*"
   - "client/tests/ui/fixtures/reply-html-traps.ts"
   - "client/tests/ui-stream-limits.test.ts"
   - "client/shared/chat-server-api.ts"
@@ -411,8 +412,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - While a reply streams, the list follows the bottom unless the member scrolled up to read:
   only a move up that leaves the view more than 120 px from the bottom stops following
   (`hooks/useChatAutoScroll.ts`). The browser's scroll anchoring also moves the view (down) when
-  the reply grows; counting that as reading stopped the follow under load. Test:
-  `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」.
+  the reply grows; counting that as reading stopped the follow under load. Content that grows after its
+  render (a rich reply's frame taking its height) asks the same rule through `ChatFollowContext`
+  (`chatFollow.ts`, `followIfFollowing`), never a rule of its own. Test:
+  `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」, `tests/ui/chat-rich-reply.spec.ts`.
 - The scrolling list (`MessageList`) is `relative`, the containing block of anything absolutely
   positioned inside it (Tailwind `sr-only`, overlays). Without it a card's `sr-only` text was
   laid out against the page ~10 000 px down and the whole window painted shifted (staging,
@@ -520,7 +523,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   which draws the same) and a rich reply's HTML (`replyHtmlCleaning.ts` `sanitizeReplyHtml`, below). A gap found in
   the walk is fixed there, for both.
 - **Rich replies: the cleaning of the AI's HTML** (owner decisions 2026-11-28, 「リッチな返信」; PR1 of 4: the
-  function and its tests only — nothing draws it yet; the closed frame, the AI's line and the buttons follow).
+  function and its tests; PR2 draws it in the reply's closed frame, below; the AI's line and the buttons follow).
   `sanitizeReplyHtml(markup) → { html, css }`, the first of the two guards (the second is the closed frame, PR2): what
   it returns runs nothing, loads nothing, sends nothing, cannot leave the reply's box and does not move for ever,
   **even drawn in a frame that would allow it** (the spec checks exactly that). Kept: text, headings, lists, tables,
@@ -551,8 +554,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `cqw`, …); only style rules (their nested rules dropped),
   `@media` / `@supports` around them and `@keyframes` stay — `@import`, `@font-face`, `@layer` and every other
   at-rule go —, and no selector naming the document (`:root`, `:scope`, a top-level `&`, `:host`, `html`, `body`,
-  `::backdrop`, …; `*` and the like still match the frame's root, which the closed frame keeps apart — PR2 should
-  put its own CSS before the reply's or in a separate `<style>`, and clip the frame). **What is kept must read back
+  `::backdrop`, …; `*` and the like still match the frame's root, which the closed frame keeps apart — the frame
+  puts its own CSS in a `<style>` before the reply's and clips what it shows to its box). **What is kept must read back
   the same**: the sheet and each `style` are parsed again and must clean to themselves, and the sheet holds no `<`;
   otherwise it is dropped whole (so nothing is left open to swallow the CSS that follows). Raster pictures may be
   animated (GIF, APNG, WebP): the motion limits are CSS's only.
@@ -567,6 +570,61 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   traps as written does all four (the checks can fail); every piece cut every 3 characters is as clean; CSS put after
   the reply's (a sentinel rule, a sentinel declaration) still reads as its own.
   Mutation-checked guard by guard (the PR lists them).
+- **Rich replies: the reply's closed frame** (PR2 of 「リッチな返信」, owner decisions 2026-11-28 「シームレス版」).
+  A text part with a ```` ```acb-html ```` (an explanation) or ```` ```acb-slide ```` (one 1280×720 page) block
+  (`richReply.ts` `hasRichBlock` / `richPiecesOf`: the fence at a line's start, its info exactly that, case-insensitive,
+  not inside another fence; ```` ```html ```` and every other fence stay code) is drawn **whole — its Markdown too — in
+  one frame with no line or background of its own** (`components/ChatRichReply.tsx`), whatever 「返事の形」; with the
+  Markdown display off it stays plain text. Tool rows and cards stay outside: each such text part is its own frame.
+  - **Two guards, each enough alone.** (1) Every piece — the AI's blocks and the chat's own Markdown (drawn the
+    chat's way into static HTML, `richReplyMarkdown.tsx`: raw HTML skipped, pictures as words, code by the chat's
+    highlighter) — goes through `sanitizeReplyHtml`, each on its own, and the pieces are joined as one tree
+    (`richReplyFrame.ts` `frameContentOf`: a block cannot close the frame's wrappers; the CSS is refused if it holds
+    `<`); a block still being written is cut back to its last whole tag, outside an open `<style>` or table row
+    (`writtenSoFar`), and cleaned like the rest. (2) **The frame the member sees has `sandbox="allow-popups"` only — no
+    `allow-scripts`, no `allow-same-origin` (an opaque origin: the chat cannot reach into it, it cannot reach the
+    chat) — and its document starts with its own policy** `FRAME_CSP` (`default-src 'none'; img-src data:;
+    style-src 'unsafe-inline'; font-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'`), before
+    anything of the reply. Neither is to be widened for a convenience (no script for the height, no same origin for
+    the links): this is the owner's line.
+  - **Links**: the frame's `<base target="_blank">` makes a pressed web link (only `http(s)` survive the cleaning)
+    ask for a new window — the one thing `allow-popups` permits —, which the app's window-open handler opens in the
+    member's browser (`electron-adapter.ts` `keepAppPageInWindow`, `webLinkForBrowser`: the path of every chat link).
+    The frame itself never navigates (no `target` is kept, `_top` is refused by the sandbox).
+  - **Height** (no scroll inside): nothing can leave the shown frame to say how tall it is, so the chat lays the same
+    document out in **one hidden copy** (`measureReply`, one per window, one reply at a time): `sandbox="allow-same-origin"`
+    (still no script), the same policy, `inert`, `aria-hidden`, off screen and invisible — never pressed, hovered or
+    focused —, and reads its height there (pictures decoded first). Heights are kept per width and text
+    (`knownHeights`, ≤ 200). Over **20,000 px** (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
+    途中までを表示しています。続きは［大きく見る］で見られます。」 follows (`onOpenLarge`: the button comes with PR4).
+  - **Being written**: drawn again at most every 80 ms (`RICH_UPDATE_MS`), one drawing at a time. The shown frame is
+    never rewritten: the next one loads out of sight and takes the old one's place once drawn (two animation frames
+    after its `load`), so there is no empty moment; until the first frame has drawn, the chat's ordinary rendering
+    holds the place. A new height makes the list follow the bottom only when it was following (`ChatFollowContext`).
+  - **The look is the chat's**: the app's tokens (`:root` / `.dark` custom properties) and its Markdown typography
+    (the `prose` rules, `CHAT_MARKDOWN_CLASS` shared with `MarkdownMessage`) are read from the app's own style sheets
+    into the frame, then a few resets and the ready-made boxes (`acb-key`, `acb-note`, `acb-warn`, `acb-ok`,
+    `acb-steps`, `acb-compare`, `acb-tabs`, `acb-tip`, `acb-bar`, `acb-muted`: tokens only). The reply's CSS sits in a
+    `<style>` of its own after the frame's. **Light / dark** follows the app, not the computer: the frame's `<html>`
+    gets `dark`, and the reply's own `prefers-color-scheme` queries are rewritten to always / never hold
+    (`cssForTheme`); a switch loads the next frame the same way (no empty moment). A slide is scaled to the reply's
+    width by CSS alone (`container-type` + `calc(100cqw / 1280px)`).
+  - **Long conversations**: a frame is drawn only within 600 px of the list's view (one IntersectionObserver per
+    list) and taken down farther away, its box keeping its height; on top of `MessageList`'s latest-50 window.
+  - Selection and copy across the reply's words, tables and boxes work inside the one frame. A ```` ```mermaid ````
+    block or a page card inside such a reply stays code / a plain link (the frame draws neither).
+  Tests: `src/features/chat/richReply.test.ts` (which replies and pieces, cut-off pieces, the theme rewrite),
+  `tests/ui/chat-rich-reply.spec.ts` (real chat `chat-header-ui.html?turn=manual`, and the frame alone on
+  `chat-rich-reply-ui.html`): the sandbox, policy and hidden copy as above, words and HTML in one frame, selection,
+  ```` ```html ```` stays code; the demo's traps streamed 400 characters at a time then pressed, hovered, checked and
+  tabbed: nothing ran, no request and no window left, nothing fixed, no endless motion; a web link leaves only as one
+  new window to its address; every piece cleaned and kept in its place; height = content, the 20,000 px stop; no empty
+  moment and at most about one frame per 80 ms while written; following / not moving the reader; light / dark with the
+  reply's own dark colours; a slide scaled whole; `?history=long&rich=1` keeps ≤ 8 frames live while scrolling and the
+  list's height unchanged; **the frame alone with uncleaned traps** runs and loads nothing, shares no origin and cannot
+  move the app — and with its policy off the traps load, with its sandbox off a link moves the app (the checks can
+  fail). Mutation-checked: the sandbox, the policy, following, the double frame, near-screen drawing, the height and
+  the theme rewrite each fail a test when taken out. `SCREENSHOTS=<dir>` shoots a reply light and dark.
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

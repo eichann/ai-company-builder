@@ -8,6 +8,7 @@ import { ChatDiagram } from './ChatDiagram'
 import { diagramOf } from '../diagrams'
 import { ChatPageCard } from './ChatPageCard'
 import { pageCardOf } from '../pageCards'
+import { CHAT_MARKDOWN_CLASS } from '../richReply'
 
 interface MarkdownMessageProps {
   content: string
@@ -92,13 +93,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: Markdo
   const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
 
   return (
-    <div
-      className="markdown-message prose prose-sm dark:prose-invert max-w-none
-        prose-p:my-2
-        prose-pre:bg-transparent prose-pre:p-0 prose-pre:m-0
-        prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
-        break-words"
-    >
+    // One class list with the rich reply's frame (richReplyFrame.ts), so a reply there reads like this one.
+    <div className={CHAT_MARKDOWN_CLASS}>
       {blocks.map((block, index) => (
         <MarkdownBlockView key={index} text={block.text} components={block.openFence ? streamingComponents : components} />
       ))}
