@@ -111,6 +111,14 @@ test('「すべての部署」 is chosen on purpose: it downloads everything; no
   expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', null]])
 })
 
+test('the departments cannot be read: said on the folder choice, nothing is downloaded (never everything unasked)', async ({ page }) => {
+  await open(page, { depts: 'fail' })
+  await chooseCompany(page)
+  await button(page, /既存のフォルダを開く/).click()
+  await expect(page.getByText('部署の一覧を読み込めませんでした。')).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+})
+
 test('新しく作成 sets up <chosen folder>/<company>, and the picker\'s 戻る returns to that screen', async ({ page }) => {
   await open(page)
   await chooseCompany(page)

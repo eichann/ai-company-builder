@@ -135,6 +135,9 @@ test('the card\'s load: a failure is said (never an empty card), 「使えない
   const kept = nextMeetingCardLoad(ready, 'threw')
   assert.equal(kept.kind === 'ready' && kept.state, ok)
   assert.equal(kept.kind === 'ready' && kept.refreshFailed, MEETING_CARD_LOAD_FAILED)
+  // An empty error after the card was shown (a passing outage, not an older server): kept, with ［もう一度］.
+  const keptOff = nextMeetingCardLoad(ready, { success: false, error: '' })
+  assert.equal(keptOff.kind === 'ready' && keptOff.refreshFailed, MEETING_CARD_LOAD_FAILED)
   // ［もう一度］ that works clears the line; a failed first read recovers the same way.
   assert.deepEqual(nextMeetingCardLoad(kept, ok), { kind: 'ready', state: ok, refreshFailed: null })
   assert.equal(nextMeetingCardLoad({ kind: 'failed', error: 'x' }, ok).kind, 'ready')

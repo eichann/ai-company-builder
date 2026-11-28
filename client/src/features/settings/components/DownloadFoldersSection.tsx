@@ -180,7 +180,9 @@ export function DownloadFoldersSection({ rootPath, companyId, departments, unsav
   }, [diff.excluded, rootPath, runApply])
 
   // The settings ask before closing while the choice is not applied (適用 = 保存 here).
-  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty ? 'ダウンロードするフォルダの変更（まだ適用していません）' : null), save: startApply }))
+  // While it is being applied there is nothing left to ask about (asking would apply it twice).
+  const applying = phase.kind === 'applying' || phase.kind === 'checking'
+  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty && !applying ? 'ダウンロードするフォルダの変更（まだ適用していません）' : null), save: startApply }))
 
   const busy = phase.kind === 'applying' || phase.kind === 'checking'
 

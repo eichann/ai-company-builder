@@ -181,7 +181,8 @@ export const MEETING_CARD_LOAD_FAILED = '会議の情報を読み込めません
 /** The card's load after one answer (`'threw'`: no answer from main). A failure keeps what was shown. */
 export function nextMeetingCardLoad(prev: MeetingCardLoad, answer: MeetingCardStateResult | 'threw'): MeetingCardLoad {
   if (answer !== 'threw' && answer.success) return { kind: 'ready', state: answer, refreshFailed: null }
-  if (answer !== 'threw' && answer.error === '') return { kind: 'unavailable' }
+  // Main's empty error also covers a passing outage of the arrivals: a card already shown keeps its state.
+  if (answer !== 'threw' && answer.error === '') return prev.kind === 'ready' ? { ...prev, refreshFailed: MEETING_CARD_LOAD_FAILED } : { kind: 'unavailable' }
   const error = answer === 'threw' || !answer.error ? MEETING_CARD_LOAD_FAILED : answer.error
   return prev.kind === 'ready' ? { ...prev, refreshFailed: error } : { kind: 'failed', error }
 }

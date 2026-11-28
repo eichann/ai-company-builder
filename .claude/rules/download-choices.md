@@ -63,8 +63,10 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   `git:setupCompanyRemote` → `checkoutSelectedDepartments`: `fetch --filter=blob:none` → persist
   the exclusions (the departments *not* picked) and set the patterns → checkout (downloads only
   the checked-out blobs, in one batch). 「すべての部署」 sends no list → full clone (main's contract
-  unchanged). Existing clones are never converted to partial clones. Tests:
-  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「「すべての部署」 is chosen on purpose…」.
+  unchanged). When the company's department list cannot be read, the first setup stops with
+  `DEPARTMENTS_UNREAD` on the folder choice (`folderSetup.ts`) instead of downloading everything; a company that
+  answers no departments still opens whole. Existing clones are never converted to partial clones. Tests:
+  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「「すべての部署」 is chosen on purpose…」, 「the departments cannot be read…」.
 - Both selector paths (「既存のフォルダを開く」 = the folder, 「新しく作成」 = `<folder>/<company>`)
   first ask `git:inspectCompanyFolder` (`sync/company-folder.ts`, read-only; renderer
   `src/features/company/folderPlan.ts`):

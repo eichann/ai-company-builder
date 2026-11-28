@@ -246,6 +246,8 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   // .env: only typed values and removals are sent; main merges them into the file. null = saved.
   const envChanges = envChangesToSave({ ...envDrafts, ...envDraftsFromText(pastedEnv) }, removedKeys)
   const envDirty = Object.keys(envChanges).length > 0
+  // Also typed but not a value to save yet (a new name, a paste without values): asked about at closing.
+  const envTyped = envDirty || addedKeys.length > 0 || newKeyName.trim() !== '' || pastedEnv.trim() !== ''
   const gitignoreDirty = gitignoreEditable && gitignoreContent !== gitignoreSaved
   const saveEnv = useCallback(async (): Promise<string | null> => {
     if (!currentCompany?.rootPath) return null
@@ -283,7 +285,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
 
   // What closing would drop (`section`: only the open section's own input, which leaving it drops too).
   const unsavedParts = (sectionOnly: boolean): string[] => [
-    ...(!sectionOnly && envDirty ? ['APIキー・環境変数（.env）の入力'] : []),
+    ...(!sectionOnly && envTyped ? ['APIキー・環境変数（.env）の入力'] : []),
     ...(!sectionOnly && gitignoreDirty ? ['同期しないファイル（.gitignore）の変更'] : []),
     ...[sectionUnsaved.current?.pending() ?? null].filter((x): x is string => !!x),
   ]

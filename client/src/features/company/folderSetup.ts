@@ -7,6 +7,9 @@ import { companyPathExists, getMyDepartments, inspectCompanyFolder, openWorkingF
 import { planFolderSetup } from './folderPlan'
 import { departmentIdFor, isDepartmentEntry, membershipFolders, pickableDepartments, type PickableDepartment, type SetupKind } from './model'
 
+/** Said when the first setup cannot read the company's departments (nothing is downloaded). */
+export const DEPARTMENTS_UNREAD = '部署の一覧を読み込めませんでした。インターネット接続を確かめて、もう一度お試しください。何もダウンロードしていません。'
+
 export type FolderNextStep =
   | { kind: 'pick'; departments: PickableDepartment[] }
   /** First setup with the member's 所属: download these without asking. */
@@ -25,6 +28,8 @@ export async function prepareCompanyFolder(companyPath: string, companyId: strin
   const plan = planFolderSetup(inspected)
   if (plan.kind === 'firstSetup') {
     const result = await getDepartments(companyId).catch(() => null)
+    // The list could not be read: say so rather than download every department unasked.
+    if (!result?.success) return { kind: 'error', message: DEPARTMENTS_UNREAD }
     const departments = pickableDepartments(result?.success && result.data ? result.data : [])
     if (departments.length > 0) {
       const mine = await Promise.resolve().then(() => getMyDepartments(companyId)).catch(() => null)
