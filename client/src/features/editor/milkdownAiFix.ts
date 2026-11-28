@@ -38,13 +38,24 @@ function firstTextPos(doc: PMNode, index: number): number {
   try { return start + 1 + Selection.atStart(doc.child(index)).from } catch { return start + 1 }
 }
 
-/** Addresses of the images on the internet in `nodes` (http, https, or `//host`); an image beside the document is not one. */
+/**
+ * Whether an image address reaches the internet, read as a browser's URL parser reads it: tabs and line breaks
+ * dropped, outer spaces and control characters trimmed, `\` as `/`; then an `http:` / `https:` address (with or
+ * without `//`) or one starting `//`. An image beside the document (`images/…`) is not one.
+ */
+function onTheInternet(src: string): boolean {
+  // eslint-disable-next-line no-control-regex -- the parser's own trimming of C0 controls and spaces
+  const read = src.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').replace(/\\/g, '/')
+  return /^https?:/i.test(read) || read.startsWith('//')
+}
+
+/** Addresses of the images on the internet in `nodes` (`onTheInternet`). */
 function remoteImages(nodes: readonly PMNode[]): string[] {
   const out: string[] = []
   for (const n of nodes) {
     n.descendants(d => {
-      const src = d.type.name === 'image' ? String(d.attrs.src ?? '').trim() : ''
-      if (/^(https?:)?\/\//i.test(src)) out.push(src)
+      const src = d.type.name === 'image' ? String(d.attrs.src ?? '') : ''
+      if (onTheInternet(src)) out.push(src)
       return true
     })
   }

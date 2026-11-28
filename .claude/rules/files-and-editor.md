@@ -636,7 +636,9 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   pattern, so a tag broken over lines or attributes, in capitals or slipped into a comment is HTML all the same, and a
   tag written as code is words), an image on the internet the passage did not have (owner decision 2026-11-29: a
   planted instruction's tracking image — the document is opened on other computers and in other apps; `remoteImages` over
-  the nodes the reader made, so a reference-style image counts: `http:`, `https:` or `//host`; the passage's own and an
+  the nodes the reader made, so a reference-style image counts; the address read as a browser's URL parser reads it —
+  tabs and line breaks dropped, outer spaces and controls trimmed, `\` as `/` — then `http:` / `https:` with or without
+  `//`, or `//host` (`onTheInternet`, Codex review); the passage's own and an
   image beside the document, `images/…`, are taken), or is empty. Two faithful ways are
   tried — the AI's Markdown as written over the passage (`writeSource`: reads back as the screen shows, neighbours keep their
   bytes) and the write-back's smallest edit (`write`) — and the one changing fewer lines is written (a tie: the AI's), so a
@@ -660,7 +662,7 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; raw HTML read by the reader — a tag over lines,
   a line break in an attribute, capitals, a tag beside or inside the passage's own comment, a new comment, an HTML block, a tag in a
   table cell refused, the passage's own HTML and a tag in code kept; a new image on the internet — https, HTTP, `//host`,
-  by reference, inside a link, in a table — refused, the passage's own and `images/…` kept; a comment's quote → its block; the card
+  `https:host`, `/\host`, a tab inside the scheme, by reference, inside a link, in a table — refused, the passage's own and `images/…` kept; a comment's quote → its block; the card
   shown in the flow and not written), `tests/inline-fix.test.ts` (the message's outside-text blocks, a passage that spells a
   footer, the ask as a quoted line, the comment as outside text, the command's limits, `contextAround`, the answer's
   block, `restoreBrackets`, the pane's answer read strictly, a turn answering only its own request),
