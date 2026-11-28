@@ -67,7 +67,7 @@ export const BUILTIN_CONNECTORS = {
     summary: 'メンバーが自分で許可すると、予定・メール・Meet の議事録を ACB が読み、本人が確かめたメールを送れます。',
     servings: [
       { role: 'calendar', operations: ['read'], capabilities: [] },
-      { role: 'mail', operations: ['read', 'send'], capabilities: [] },
+      { role: 'mail', operations: ['read', 'send'], capabilities: ['sent_samples'] },
       { role: 'meetings', operations: ['read'], capabilities: ['transcript', 'attendees'] },
     ],
     capabilities: [{ id: 'drive', label: 'Drive で選んだものを読む・置く' }],

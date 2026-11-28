@@ -10,6 +10,7 @@ import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../../shared/core/outside-text'
 import type { InboxItemView, InboxJudgementResult, InboxReplyCheckResult } from '../../../../shared/types/inbox'
 import type { ThreadView } from '../../../../shared/types/threads'
+import type { WritingStyleKey } from '../../../../shared/types/writing-style'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
 import { recordToolDisplay } from '../../../shared/acb-tool-displays'
@@ -35,7 +36,11 @@ const oneLine = (v: string) => v.replace(/[\r\n\u2028\u2029]+/g, ' ')
  */
 const messageText = (v: string) => v.replace(/^([^\S\n]*-{3,})/gm, '> $1')
 
-export function threadForAi(t: ThreadView, item: InboxItemView): string {
+/**
+ * `writing`: the member's own writing-style summary for a reply here (「返事の下書きを、わたしの書き方に合わせる」,
+ * features/writing-style), handed after the block as ACB's own words — never inside the outside text.
+ */
+export function threadForAi(t: ThreadView, item: InboxItemView, writing: string | null = null): string {
   if (t.unavailable) return json({ read: t.unavailable.reason, error: t.unavailable.text, item })
   const body = t.messages.map((m, i) => [
     `--- ${i + 1}（${m.mine ? 'こちらから' : '相手から'}${m.at ? ` ${m.at}` : ''}）`,
@@ -55,10 +60,11 @@ export function threadForAi(t: ThreadView, item: InboxItemView): string {
     : ''
   const drafts = t.replies.length > 0 ? { replyDrafts: t.replies } : {}
   const block = wrapOutsideText(`${t.more ? '（前の連絡は省いています）\n' : ''}${body}`, { header: THREAD_TEXT_HEADER, footer: THREAD_TEXT_FOOTER })
-  return `${block}\n\n${flags}${outsideBracketsNote(body)}${json({ item, ...drafts })}`
+  return `${block}\n\n${flags}${outsideBracketsNote(body)}${writing ? `${writing}\n` : ''}${json({ item, ...drafts })}`
 }
 
-export async function createInboxTools(access: RecordTurnAccess, signal?: AbortSignal): Promise<ExtraRecordTools | null> {
+/** `writingStyle`: the signed-in member's own summary for a thread's key (null: none, or the check is off). */
+export async function createInboxTools(access: RecordTurnAccess, signal?: AbortSignal, writingStyle?: (key: WritingStyleKey | null | undefined) => string | null): Promise<ExtraRecordTools | null> {
   const specs: Array<RecordToolDescriptor & { run(input: Record<string, unknown>): Promise<string> }> = [
     {
       name: 'inbox_read', readOnly: true,
@@ -71,7 +77,8 @@ export async function createInboxTools(access: RecordTurnAccess, signal?: AbortS
         try {
           const item = await access.call('GET', `/inbox/items/${id}`, undefined, signal) as InboxItemView
           const answer = await access.call('GET', `/threads/${id}`, undefined, signal) as { thread: ThreadView }
-          return threadForAi(answer.thread, item)
+          const writing = answer.thread.unavailable ? null : writingStyle?.(answer.thread.writing) ?? null
+          return threadForAi(answer.thread, item, writing)
         } catch (error) { return refusal(error) ?? json({ error: '読めませんでした。' }) }
       },
     },

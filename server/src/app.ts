@@ -58,6 +58,7 @@ import { manualAdminRoute, manualRoute } from './routes/manual'
 import { coreConnectorsRoute } from './routes/core-connectors'
 import { slackEventsRoute, slackRoute } from './routes/slack-connection'
 import { recordsAiThreadsRoute, threadsRoute } from './routes/threads'
+import { writingSamplesRoute } from './routes/writing-samples'
 // lane A ▲
 // lane B ▼
 import { identitiesRoute } from './routes/identities'
@@ -248,6 +249,8 @@ app.route('/api/slack', slackEventsRoute)
 // The card's 元のスレッド (outbound-mail.md "Replies"): read now with the caller's own permission, never stored.
 app.route('/api/companies/:companyId', threadsRoute)
 app.route('/api/records-ai/threads', recordsAiThreadsRoute)
+// 「返事の下書きを、わたしの書き方に合わせる」: the member's own sent messages, handed to their PC (nothing kept).
+app.route('/api/companies/:companyId', writingSamplesRoute)
 // lane A ▲
 // lane B ▼
 // Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.

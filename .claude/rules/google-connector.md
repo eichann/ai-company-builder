@@ -517,6 +517,9 @@ Drive through the role ports (`connector-roles.md`).
   Only `users/me`. **Nothing stored, nothing of a message logged** (the client's action-log line
   names `gmail.messages.list` / `.get` only). Failures: `not-connected`, `turned-off`, `stopped`,
   `not-found`, `unavailable`.
+- **The member's own sent mail** (`inbox`, `gmail.readonly`, no new permission; `services/google-writing.ts`, the role
+  capability `sent_samples`, `writing-style.md`): the Sent label's newest mails as the text the member wrote, 身内 / よそ by
+  the company's domains — handed to the member's PC for 「わたしの書き方に合わせる」, nothing stored or logged.
 - **Inbox state** (`inbox`, `gmail.readonly`; `MailInboxWatcher`, 2026-11-05): `messageInInbox`
   (`messages/<id>?format=minimal`, labels only, before an archive), `inboxCursor`
   (`users/me/profile` → `historyId`), `inboxRemovalsSince` (`users/me/history?historyTypes=labelRemoved

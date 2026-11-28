@@ -76,7 +76,7 @@ export interface OneShotHost {
 /** A short, isolated text job: no tools, no session, the input as JSON data. */
 export interface OneShotTextRequest {
   /** Picks the agent's task model (descriptor `tasks`) unless `model` is set. */
-  job: Extract<keyof AgentTaskModels, 'commitMessage' | 'voice'>
+  job: Extract<keyof AgentTaskModels, 'commitMessage' | 'voice' | 'writingStyle'>
   model?: string
   system: string
   /** Data for the model, sent as JSON — never an instruction slot. */

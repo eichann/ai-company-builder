@@ -12,6 +12,7 @@ import { notDownloadedFolders } from '../sync/not-downloaded'
 import type { ExtraRecordTools, RecordToolProvider } from './tools'
 import type { JobWriteArea } from '../../shared/ai-turn-steps/job'
 import type { DriveOverwriteCard } from '../../shared/drive-overwrite'
+import type { WritingStyleKey } from '../../../shared/types/writing-style'
 
 export interface RecordToolProviderDeps {
   /** Google Drive (google-drive.md): only where the app can show Google Picker. */
@@ -31,6 +32,11 @@ export interface RecordToolProviderDeps {
   jobDelivery?: (conversationId: string) => { connector: string | null } | null
   /** Whether this consultation's record token is bound to an execution run (then drive_put reads only a job's area, else nothing). */
   runBound?: (companyId: string, conversationId: string) => boolean
+  /**
+   * 「返事の下書きを、わたしの書き方に合わせる」 (features/writing-style): the signed-in member's own summary for a thread's
+   * key, handed beside the thread `inbox_read` reads; null when none or the member's check is off.
+   */
+  writingStyle?: (companyId: string) => ((key: WritingStyleKey | null | undefined) => string | null) | null
 }
 
 /** The turn the tools are for: its company and the consultation's company folder. */
@@ -75,7 +81,10 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // lane B ▼
   // The inbox (来た連絡, inbox.md): read a message's thread on demand, record the judgement (B4).
   // Only while the company's 受信の振り分け・返事のお願い is on (「使う機能」; absent = an older server = on).
-  providers.push((access, signal, t) => (t && !t.features.inbox ? Promise.resolve(null) : createInboxTools(access, signal)))
+  // The member's own writing-style summary rides beside a thread read for a reply (features/writing-style).
+  // Bound now, to the member this turn is for: another sign-in later gets nothing through it.
+  const writingStyle = deps.writingStyle?.(turn.companyId) ?? undefined
+  providers.push((access, signal, t) => (t && !t.features.inbox ? Promise.resolve(null) : createInboxTools(access, signal, writingStyle)))
   // lane B ▲
   // lane C ▼
   // A task's wait that is over (ai-turns.md): the wait-over step's one read of its task.

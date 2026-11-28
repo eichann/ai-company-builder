@@ -36,6 +36,7 @@ import type { AppCommandAnswer } from '../shared/app-commands'
 // lane A ▼
 import type { SlackFeature } from '../shared/slack'
 import type { PluginPackageRef } from '../shared/plugin-bridge'
+import type { WritingAudience, WritingStyle } from '../../shared/core/writing-style'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -461,6 +462,11 @@ const api: ElectronAPI = {
   setGoogleDrive: (companyId: string, on: boolean) => invoke('google:setDrive', companyId, on),
   getDriveTrustedFolders: (companyId: string) => invoke('google:driveTrustedFolders', companyId),
   untrustDriveFolder: (companyId: string, folderId: string) => invoke('google:untrustDriveFolder', companyId, folderId),
+  getWritingStyle: (companyId: string) => invoke('writingStyle:status', companyId),
+  setWritingStyleEnabled: (companyId: string, on: boolean) => invoke('writingStyle:setEnabled', companyId, on),
+  rebuildWritingStyle: (companyId: string) => invoke('writingStyle:rebuild', companyId),
+  updateWritingStyle: (companyId: string, connectorId: string, audience: WritingAudience, style: WritingStyle) => invoke('writingStyle:update', companyId, connectorId, audience, style),
+  removeWritingStyle: (companyId: string, connectorId?: string | null, audience?: WritingAudience | null) => invoke('writingStyle:remove', companyId, connectorId, audience),
   // lane A ▲
   // lane B ▼
   // lane B ▲

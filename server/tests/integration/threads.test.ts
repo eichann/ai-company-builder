@@ -111,6 +111,13 @@ beforeAll(async () => {
   const mail = (id: string, at: string, headers: Record<string, string>, text: string) => google.deliver({ id, threadId: 'thmail0001', account: GOOGLE_SEED.member, headers, labelIds: ['INBOX'], receivedAt: at, text })
   mail('msg0001', '2026-11-02T01:00:00.000Z', { From: `取引先 <${CLIENT}>`, To: GOOGLE_SEED.member, Cc: BOSS, Subject: '見積について', 'Message-ID': '<m1@acme.example>' }, MAIL_TEXT_1)
   mail('msg0002', '2026-11-02T02:00:00.000Z', { From: CLIENT, To: GOOGLE_SEED.member, Subject: 'Re: 見積について', 'Message-ID': '<m2@acme.example>', 'In-Reply-To': '<m1@acme.example>' }, MAIL_TEXT_2)
+  // Sato's own sent mail (「わたしの書き方に合わせる」): one to a colleague, one outside with the quoted conversation below.
+  const sent = (id: string, daysAgo: number, to: string, text: string) => google.deliver({
+    id, threadId: `thsent${id}`, account: GOOGLE_SEED.member, labelIds: ['SENT'], receivedAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+    headers: { From: GOOGLE_SEED.member, To: to, Subject: '件名', 'Message-ID': `<${id}@div.example>` }, text,
+  })
+  sent('sent0001', 2, GOOGLE_SEED.colleague, 'お疲れさまです。WRITING-MARK-IN 了解です！')
+  sent('sent0002', 1, CLIENT, 'いつもお世話になっております。WRITING-MARK-OUT\n\nOn Mon, Nov 2, 2026 at 10:00 AM Client <client@acme.example> wrote:\n> QUOTED-MARK-THEIRS')
   googleServer = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' })
 
   const seed = defaultSlackSeed()
@@ -145,6 +152,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', (await import('../../src/routes/threads')).threadsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
   app.route('/api/records-ai/threads', (await import('../../src/routes/threads')).recordsAiThreadsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/writing-samples')).writingSamplesRoute)
   app.route('/api/oauth', (await import('../../src/routes/oauth')).oauthRoute)
 
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'th-owner', ts(), ts())
@@ -199,6 +207,8 @@ describe('元のスレッド: read now, with the viewer\'s own permission, shown
     expect(t).toMatchObject({ interactionId: mailInteraction, channel: 'email', unavailable: null, more: false })
     expect(t.messages.map((m: Json) => [m.fromAddress, m.text])).toEqual([[CLIENT, MAIL_TEXT_1], [CLIENT, MAIL_TEXT_2]])
     expect(t.messages[0].cc).toEqual([BOSS])
+    // Which writing-style summary fits a reply (writing-style.ts): the mail role's connector, the other side outside.
+    expect(t.writing).toEqual({ connectorId: 'google', audience: 'outside' })
   })
 
   it('another member and the company owner get the same 404 as a missing record (owner-only)', async () => {
@@ -224,6 +234,8 @@ describe('元のスレッド: read now, with the viewer\'s own permission, shown
     expect(r.body.data.thread).toMatchObject({ channel: 'chat', unavailable: null })
     expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual([`@佐藤 ${SLACK_TEXT}`])
     expect(r.body.data.thread.messages[0].mine).toBe(false)
+    // The chat role's connector has no 本人が送った文を読む yet: no summary key, the AI drafts as before.
+    expect(r.body.data.thread.writing).toBeNull()
     expect((await person('th-tanaka', 'GET', `/threads/${chatInteraction}`)).status).toBe(404)
   })
 })
@@ -360,11 +372,40 @@ describe('a Slack reply into the thread', () => {
   })
 })
 
+describe('「わたしの書き方に合わせる」: the member\'s own sent mail, handed to their PC', () => {
+  it('only with their own 受信を読む: their own words, 身内 / よそ by the company\'s domain, the quoted part cut off', async () => {
+    const sources = await person('th-sato', 'GET', '/me/writing-sources')
+    expect(sources.body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: true }])
+    const r = await person('th-sato', 'GET', '/me/writing-sources/google/samples')
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.samples.map((x: Json) => [x.audience, x.text])).toEqual([
+      ['outside', 'いつもお世話になっております。WRITING-MARK-OUT'],
+      ['inside', 'お疲れさまです。WRITING-MARK-IN 了解です！'],
+    ])
+    expect(r.text).not.toContain('QUOTED-MARK-THEIRS')
+    // Tanaka allowed nothing: nothing of his is read, and never Sato's.
+    expect((await person('th-tanaka', 'GET', '/me/writing-sources')).body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: false }])
+    const tanaka = await person('th-tanaka', 'GET', '/me/writing-sources/google/samples')
+    expect([tanaka.status, tanaka.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
+  })
+
+  it('her 受信を読む off: refused before anything leaves; another connector\'s id is the one 404', async () => {
+    expect((await person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: false })).status).toBe(200)
+    const before = google.requests.length
+    const r = await person('th-sato', 'GET', '/me/writing-sources/google/samples')
+    expect([r.status, r.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
+    expect(google.requests.slice(before).filter(q => q.path.includes('/gmail/'))).toEqual([])
+    expect((await person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: true })).status).toBe(200)
+    const slackId = await person('th-sato', 'GET', '/me/writing-sources/slack/samples')
+    expect([slackId.status, slackId.body.code]).toEqual([404, 'WRITING_SOURCE_NOT_FOUND'])
+  })
+})
+
 describe('nothing of a thread is kept', () => {
   it('no table and no log line holds a thread\'s text', () => {
     const all = everyTable()
     const logs = logLines.join('\n')
-    for (const mark of ['THREAD-MARK-ONE', 'THREAD-MARK-TWO', 'THREAD-MARK-SLACK']) {
+    for (const mark of ['THREAD-MARK-ONE', 'THREAD-MARK-TWO', 'THREAD-MARK-SLACK', 'WRITING-MARK-IN', 'WRITING-MARK-OUT']) {
       expect(all).not.toContain(mark)
       expect(logs).not.toContain(mark)
     }

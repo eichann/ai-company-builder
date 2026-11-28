@@ -767,6 +767,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     operatorStopped: connectorId => pluginShelf.isStopped(connectorId, ''),
     readsIncoming: readIncoming.on,
+    // The inbox (lane B) is built below: called only after construction.
+    internalDomains: companyId => inboxLane.inbox.internalDomains(companyId),
     recordCall: (companyId, userId, e) => {
       try {
         agentEvents.recordServerEvent(companyId, userId ?? 'acb:slack-bot', {

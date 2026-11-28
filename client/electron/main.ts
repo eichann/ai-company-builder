@@ -104,6 +104,9 @@ import { registerPluginBridgeIpc } from './features/plugins/bridge-ipc'
 import { createPluginFileServer } from './features/plugins/protocol'
 import { registerPluginScreensIpc } from './features/plugins/screens'
 import { servePluginFiles } from './electron-adapter'
+import { createWritingSourcesApi, createWritingStyles } from './features/writing-style/service'
+import { createWritingSummarizer } from './features/writing-style/summarize'
+import { registerWritingStyleIpc } from './features/writing-style/ipc'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -614,6 +617,20 @@ registerPluginScreensIpc(ipc, {
   declaration: (companyId, ref) => pluginFiles.declaration(companyId, ref),
   isMainWindow: senderId => mainWindowHost.isWindow(senderId),
 })
+// 「返事の下書きを、わたしの書き方に合わせる」: summaries of the member's own sent messages, kept on this PC per account and company.
+const writingStyles = createWritingStyles({
+  dir: () => path.join(userDataDir(), 'writing-style'),
+  userId: session.userId,
+  session: session.cookies,
+  server: createWritingSourcesApi({ baseUrl: getServerApiUrl, cookies: session.cookies }),
+  summarize: createWritingSummarizer({
+    settings: () => ({ authMode: config.authMode(), apiKey: apiKey.read() }),
+    claudeReady: claudeCli.isAuthenticated, getCli: claudeCli.path, getEnv: shellEnv.env,
+    cwd: () => path.join(userDataDir(), 'writing-style-work'),
+  }),
+  aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+})
+registerWritingStyleIpc(ipc, writingStyles)
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -962,6 +979,7 @@ app.whenReady().then(async () => {
       serverUrl: getServerApiUrl,
       brokerTokens,
       drivePicking,
+      writingStyle: companyId => writingStyles.forTurn(companyId),
       paths: allowedRoots,
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),

@@ -72,6 +72,8 @@ import type { RecordThreadResult } from './threads'
 import type { PluginBridgeAnswer } from './plugin-bridge-ops'
 import type { PluginPackageRef } from './plugin-bridge'
 import type { PluginScreensResult } from './plugin-screens'
+import type { WritingStyleResult } from './writing-style'
+import type { WritingAudience, WritingStyle } from '../../shared/core/writing-style'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -926,6 +928,12 @@ export interface IpcInvokeChannels {
   'google:setDrive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   'google:driveTrustedFolders': { args: [companyId: string]; result: DriveTrustedFoldersResult }
   'google:untrustDriveFolder': { args: [companyId: string, folderId: string]; result: DriveUntrustResult }
+  // 「返事の下書きを、わたしの書き方に合わせる」 (features/writing-style): the check and the member's own summaries on this PC.
+  'writingStyle:status': { args: [companyId: string]; result: WritingStyleResult }
+  'writingStyle:setEnabled': { args: [companyId: string, on: boolean]; result: WritingStyleResult }
+  'writingStyle:rebuild': { args: [companyId: string]; result: WritingStyleResult }
+  'writingStyle:update': { args: [companyId: string, connectorId: string, audience: WritingAudience, style: WritingStyle]; result: WritingStyleResult }
+  'writingStyle:remove': { args: [companyId: string, connectorId?: string | null, audience?: WritingAudience | null]; result: WritingStyleResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -1418,6 +1426,11 @@ export interface ElectronAPI {
   setGoogleDrive: Invoke<'google:setDrive'>
   getDriveTrustedFolders: Invoke<'google:driveTrustedFolders'>
   untrustDriveFolder: Invoke<'google:untrustDriveFolder'>
+  getWritingStyle: Invoke<'writingStyle:status'>
+  setWritingStyleEnabled: Invoke<'writingStyle:setEnabled'>
+  rebuildWritingStyle: Invoke<'writingStyle:rebuild'>
+  updateWritingStyle: Invoke<'writingStyle:update'>
+  removeWritingStyle: Invoke<'writingStyle:remove'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

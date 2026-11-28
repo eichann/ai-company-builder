@@ -329,7 +329,9 @@ The block follows `shared/core/outside-text.ts` (`wrapOutsideText`): every field
 (`wrapper-spoof` flagged); header values are one line, and a message line starting `---` is
 quoted (`> ---`), so the other side cannot pass text off as the member's own reply (`--- N（こちらから）`,
 which `reply-check` decides on). The item JSON after the footer is ACB's own view (its `title` may
-be the subject, JSON-encoded). Test: `client/tests/outside-text-entry-points.test.ts`.
+be the subject, JSON-encoded). Test: `client/tests/outside-text-entry-points.test.ts`. After the block (never inside it),
+while the member's 「わたしの書き方に合わせる」 is on, their own writing-style summary for the thread's `writing` key
+(`writing-style.md`).
 
 ## The AI's turn on the PC (B4: `inbox-triage`)
 

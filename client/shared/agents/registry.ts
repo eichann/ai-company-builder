@@ -134,6 +134,8 @@ export interface AgentTaskModels {
   readonly commitMessage?: string
   /** Voice formatting. */
   readonly voice?: string
+  /** 「わたしの書き方に合わせる」's summary of the member's own sent messages (client/shared/writing-style.ts). */
+  readonly writingStyle?: string
   /** Hand-off memos. */
   readonly handoff?: string
   /** The Web reader (`capabilities.webReader`); absent → the agent's catalog default (Codex). */
@@ -222,6 +224,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     title: CLAUDE_LIGHT_MODEL,
     commitMessage: CLAUDE_LIGHT_MODEL,
     voice: CLAUDE_LIGHT_MODEL,
+    writingStyle: CLAUDE_LIGHT_MODEL,
     handoff: CLAUDE_LIGHT_MODEL,
     webReader: CLAUDE_CHAT_MODEL,
     // A second opinion is worth the strong model (no tools, one answer).
@@ -302,6 +305,7 @@ const CODEX: AgentDescriptor = {
     // Voice and commit messages prefer the light model, else the catalog's default.
     commitMessage: CODEX_LIGHT_MODEL,
     voice: CODEX_LIGHT_MODEL,
+    writingStyle: CODEX_LIGHT_MODEL,
     // Required: hand-off memos fail when the account does not have it.
     handoff: CODEX_LIGHT_MODEL,
     // No webReader entry: the Web reader runs on the catalog's default chat
@@ -354,6 +358,7 @@ const API_KEY: AgentDescriptor = {
     // Commit messages moved to the newer Haiku with sync's AI messages; voice keeps 4.5.
     commitMessage: 'claude-haiku-5-5',
     voice: 'claude-haiku-4-5-20251001',
+    writingStyle: 'claude-haiku-5-5',
   },
   brokerReservedServices: [],
   capabilities: {

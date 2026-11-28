@@ -19,9 +19,12 @@
 
 export const CONNECTOR_ROLES = {
   calendar: { label: '予定を読む', operations: ['read'], capabilities: [] },
-  mail: { label: 'メールを読む・送る', operations: ['read', 'send'], capabilities: [] },
+  // `sent_samples` (本人が送った文を読む, owner decision 2026-11-28): the member's own newest sent messages and
+  // whether a thread's other side is inside the company — 「返事の下書きを、わたしの書き方に合わせる」
+  // (shared/core/writing-style.ts, server/src/ports/sent-samples.ts).
+  mail: { label: 'メールを読む・送る', operations: ['read', 'send'], capabilities: ['sent_samples'] },
   meetings: { label: '会議の記録を読む', operations: ['read'], capabilities: ['transcript', 'attendees'] },
-  chat: { label: 'チャットの連絡を受け取る・返す', operations: ['receive', 'reply'], capabilities: [] },
+  chat: { label: 'チャットの連絡を受け取る・返す', operations: ['receive', 'reply'], capabilities: ['sent_samples'] },
 } as const satisfies Record<string, { label: string; operations: readonly string[]; capabilities: readonly string[] }>
 
 export type ConnectorRole = keyof typeof CONNECTOR_ROLES

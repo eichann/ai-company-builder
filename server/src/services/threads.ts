@@ -19,6 +19,8 @@ import type { ThreadChannel, ThreadMessageView, ThreadUnavailableReason, ThreadV
 import type { ChatReader, ChatReadFailure } from '../ports/chat'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MailReader, MailReadFailure } from '../ports/mail'
+import type { ThreadParty } from '../ports/sent-samples'
+import type { WritingStyleKey } from '../../shared/types/writing-style'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
@@ -98,11 +100,21 @@ export interface ThreadServiceDeps {
   chatReader: ChatReader
   /** The member's ACB email (their own messages are marked 「自分」). */
   emailOf: (companyId: string, userId: string) => string | null
+  /**
+   * Which writing-style summary fits a reply here (services/writing-samples.ts `keyForThread`): the connector serving
+   * the role judges the other side. Absent: none (the answer's `writing` is null).
+   */
+  writingKeyOf?: (member: Member, role: 'mail' | 'chat', thread: readonly ThreadParty[]) => Promise<WritingStyleKey | null>
 }
 
 export function createThreadService(deps: ThreadServiceDeps) {
   const { companyData } = deps
   const notFound = () => refuse('not-found', THREAD_NOT_FOUND.error, { code: THREAD_NOT_FOUND.code })
+  /** Never fails the thread: no key is an answer (the AI drafts as before). */
+  const writingOf = async (member: Member, role: 'mail' | 'chat', parties: ThreadParty[]): Promise<WritingStyleKey | null> => {
+    if (!deps.writingKeyOf) return null
+    try { return await deps.writingKeyOf(member, role, parties) } catch { return null }
+  }
 
   /** The record asked about and its 連絡, both readable by the member; else null (one answer for every reason). */
   function interactionFor(member: Member, recordId: unknown): { record: RecordRow; interaction: RecordRow } | null {
@@ -168,7 +180,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
         const messages: ThreadMessageView[] = r.value.messages.map(m => ({
           id: m.ts, fromName: m.authorName, fromAddress: null, to: [], cc: [], at: m.at, subject: null, text: m.text, truncated: m.truncated, mine: m.mine,
         }))
-        return ok({ thread: { ...base, messages, more: r.value.more, unavailable: null } })
+        const writing = await writingOf(member, 'chat', r.value.messages.map(m => ({ mine: m.mine, fromAddress: null, to: [], cc: [], ...(m.external !== undefined ? { external: m.external } : {}) })))
+        return ok({ thread: { ...base, messages, more: r.value.more, unavailable: null, writing } })
       }
 
       const id = await mailThreadIdOf(deps.mailReader, member, pointer)
@@ -181,7 +194,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
         to: m.to.map(a => a.email), cc: m.cc.map(a => a.email), at: m.receivedAt, subject: m.subject,
         text: m.text, truncated: m.truncated, mine: me !== null && m.from?.email === me,
       }))
-      return ok({ thread: { ...base, messages, more: r.value.more, unavailable: null } })
+      const writing = await writingOf(member, 'mail', messages.map(m => ({ mine: m.mine, fromAddress: m.fromAddress, to: m.to, cc: m.cc })))
+      return ok({ thread: { ...base, messages, more: r.value.more, unavailable: null, writing } })
     },
   }
 }

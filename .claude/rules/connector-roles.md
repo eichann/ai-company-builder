@@ -22,8 +22,10 @@ paths:
 The core app asks a core connector (Google Workspace, Microsoft 365, Slack) for a **role**, never
 for a service by name. The four roles, their operations and optional capabilities live in one
 place, `shared/core/connector-roles.ts` (`CONNECTOR_ROLES`): `calendar` 予定を読む (read),
-`mail` メールを読む・送る (read, send), `meetings` 会議の記録を読む (read; optional `transcript`,
-`attendees`), `chat` チャットの連絡を受け取る・返す (receive, reply). Drive is not a role: it is a
+`mail` メールを読む・送る (read, send; optional `sent_samples`), `meetings` 会議の記録を読む (read; optional `transcript`,
+`attendees`), `chat` チャットの連絡を受け取る・返す (receive, reply; optional `sent_samples`). `sent_samples`
+(本人が送った文を読む) is the member's own newest sent messages and a thread's 身内 / よそ for 「わたしの書き方に合わせる」
+(`writing-style.md`: `ports/sent-samples.ts`, registered per connector id in `services/writing-samples.ts`). Drive is not a role: it is a
 Google-specific capability a business plugin uses by name. A connector declares what it serves
 (`RoleServing`; `roleServingProblems` refuses unknown roles, operations, capabilities, a role
 twice); `services/connector-roles.ts` registers connectors (`RoleConnector`: id, servings,
@@ -55,7 +57,7 @@ the connector. They are not packages in
 the company's on / off (Google: its client's `enabled`) and the operator's stop file
 (`<PLUGINS_DIR>/stopped` naming `google` or `*`). Google stays where its code is (`google-*.ts`,
 plan §5-2); it registers with `usable` = set up, on, vault on, not operator-stopped
-(`googleConnector.usable`). Google serves `calendar` read, `mail` read + send, `meetings` read
+(`googleConnector.usable`). Google serves `calendar` read, `mail` read + send (capability `sent_samples`: `google-writing.ts`), `meetings` read
 (capabilities `transcript`, `attendees`). Slack serves `chat` receive + reply (`slack-connector.md`;
 usable = its app set up and on, vault on, not operator-stopped).
 

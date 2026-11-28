@@ -30,6 +30,8 @@ export interface ChatMessage {
   /** The text as written (NFC, `\n`), cut at the reader's limit. */
   text: string
   truncated: boolean
+  /** The author is of another organisation (a shared channel's guest); absent = not known. */
+  external?: boolean
 }
 
 export interface ChatThread {
