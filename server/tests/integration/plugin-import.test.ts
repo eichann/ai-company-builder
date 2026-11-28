@@ -215,12 +215,19 @@ describe('one record at a time', () => {
 
 describe('runs, stops and connections', () => {
   it('one run per company at a time', async () => {
-    fake.faults.delayMs = 20
+    // The first run is caught at its first request outside (it holds the company's run by then), however
+    // long its checks before took: a fixed wait raced them on a busy runner.
+    const release = fake.faults.holdRequests()
+    const n = way.sent.length
     const first = services.pluginImport.run(owner, 'sample-sales')
-    await new Promise(r => setTimeout(r, 5))
-    expect(await services.pluginImport.run(owner, 'sample-sales')).toMatchObject({ ok: false, body: { code: 'IMPORT_RUNNING' } })
+    for (let i = 0; i < 1000 && way.sent.length === n; i++) await new Promise(r => setTimeout(r, 5))
+    expect(way.sent.length).toBeGreaterThan(n)
+    try {
+      expect(await services.pluginImport.run(owner, 'sample-sales')).toMatchObject({ ok: false, body: { code: 'IMPORT_RUNNING' } })
+    } finally {
+      release()
+    }
     expect((await first).ok).toBe(true)
-    fake.faults.delayMs = 0
   })
 
   it('a stop between requests ends the run: nothing more is sent', async () => {
