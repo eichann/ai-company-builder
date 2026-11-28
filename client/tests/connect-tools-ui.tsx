@@ -7,6 +7,7 @@
 // also mounts the task list's today's-calendar hook (one meeting once Google is allowed). `&minutes=1` mounts the
 // minutes slot's hook and says whether main reports minutes as available. `&manual=1`: the user
 // manual's company (検証A社's domain and 山田さん's address, client/tests/manual/scenes.ts chapter 28).
+// 「返事の下書きを、わたしの書き方に合わせる」: off at first; `&writing=on` starts with the check on and two summaries.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -16,6 +17,8 @@ import { useCalendarToday } from '../src/features/tasks/hooks/useCalendarToday'
 import { useMinutesNotices } from '../src/features/minutes/hooks/useMinutesNotices'
 import type { MyGoogle } from '../shared/google'
 import type { MySlack } from '../shared/slack'
+import type { WritingStyleStatus } from '../shared/writing-style'
+import { parseWritingStyle, type WritingStyle } from '../../shared/core/writing-style'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
@@ -36,6 +39,19 @@ if (state === 'new' || state === 'seen') {
 }
 
 const calls: string[] = []
+
+const STYLE: WritingStyle = { greeting: 'お疲れさまです。', closing: 'よろしくお願いします。', sentenceLength: 'short', politeness: 'polite', phrases: ['承知しました', '助かります'], emoji: 'sometimes', notes: '改行を多めに使う' }
+const kept = (style: WritingStyle, sampleCount: number) => ({ style, madeAt: '2026-11-27T00:00:00.000Z', sampleCount, edited: false })
+const madeStyles = (): WritingStyleStatus['styles'] => [
+  { connectorId: 'google', label: 'Google Workspace', audience: 'outside', kept: kept({ ...STYLE, greeting: 'いつもお世話になっております。', politeness: 'formal', emoji: 'none' }, 12) },
+  { connectorId: 'slack', label: 'Slack', audience: 'inside', kept: kept(STYLE, 20) },
+]
+let writing: WritingStyleStatus = {
+  available: true, enabled: params.get('writing') === 'on', building: false,
+  sources: [{ connectorId: 'google', label: 'Google Workspace', readable: true }, { connectorId: 'slack', label: 'Slack', readable: true }],
+  styles: params.get('writing') === 'on' ? madeStyles() : [], note: null,
+}
+const writingAnswer = () => ({ success: true as const, data: writing })
 const minutesListeners = new Set<(change: { companyId: string }) => void>()
 ;(window as unknown as { __connectToolsCalls: string[] }).__connectToolsCalls = calls
 
@@ -60,6 +76,26 @@ installElectronAPI({
   checkMinutes: async () => { calls.push('checkMinutes'); for (const l of minutesListeners) l({ companyId: 'co-preview' }); return { success: true } },
   getMinutesNotices: async () => ({ available: google.connected && google.features.includes('minutes'), notices: [] }),
   onMinutesChanged: (callback) => { minutesListeners.add(callback); return () => { minutesListeners.delete(callback) } },
+  getWritingStyle: async () => writingAnswer(),
+  setWritingStyleEnabled: async (_companyId, on) => {
+    calls.push(`writing:${on ? 'on' : 'off'}`)
+    writing = { ...writing, enabled: on, styles: on ? madeStyles() : writing.styles }
+    return writingAnswer()
+  },
+  rebuildWritingStyle: async () => { calls.push('writing:rebuild'); return writingAnswer() },
+  // Main checks the member's correction like the AI's (parseWritingStyle) and keeps it as theirs.
+  updateWritingStyle: async (_companyId, connectorId, audience, style) => {
+    calls.push(`writing:update:${connectorId}:${audience}:${JSON.stringify(style)}`)
+    const checked = parseWritingStyle(style)
+    if (!checked) return { success: false, offline: false, error: '入力が正しくありません。' }
+    writing = { ...writing, styles: writing.styles.map(e => e.connectorId === connectorId && e.audience === audience ? { ...e, kept: { ...e.kept, style: checked, edited: true } } : e) }
+    return writingAnswer()
+  },
+  removeWritingStyle: async (_companyId, connectorId, audience) => {
+    calls.push(`writing:remove:${connectorId ?? 'all'}:${audience ?? 'all'}`)
+    writing = connectorId ? { ...writing, styles: writing.styles.filter(e => !(e.connectorId === connectorId && e.audience === audience)) } : { ...writing, enabled: false, styles: [] }
+    return writingAnswer()
+  },
   markSlackSeen: async () => { calls.push('markSlackSeen'); slack = { ...slack, seen: ['read', 'notices'] }; return { success: true, data: slack } },
 })
 

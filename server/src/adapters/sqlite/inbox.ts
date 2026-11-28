@@ -56,6 +56,11 @@ export function sqliteInboxRepository(conn: Database.Database, companyId: string
         .get(companyId, channel, prefix.length, prefix, since, before) as MessageRow | undefined
       return r ? message(r) : null
     },
+    recentSourceRefs(reporterId, channel, limit) {
+      return (conn.prepare(`SELECT source_ref FROM inbox_messages WHERE company_id = ? AND channel = ? AND reporter_id = ? AND source_ref IS NOT NULL
+          ORDER BY occurred_at DESC, message_id DESC LIMIT ?`).all(companyId, channel, reporterId, Math.max(0, Math.floor(limit))) as Array<{ source_ref: string }>)
+        .map(r => r.source_ref)
+    },
     insertMessage(row) {
       const r = conn.prepare(`INSERT OR IGNORE INTO inbox_messages (company_id, ${MESSAGE_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, row.channel, row.messageId, row.interactionId, row.direction, row.occurredAt, row.seenAt, row.sourceRef, row.reporterId ?? null)

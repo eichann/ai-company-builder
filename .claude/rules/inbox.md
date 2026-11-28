@@ -101,7 +101,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   directly in its state (`state`); 届いた (the AI's turn) and やることにしなかった tell nobody
   (`quiet`, signal only); 確認待ち tells its owner (`intake_unsure`).
 - **Each message keeps its pointer** (`inbox_messages.source_ref`, B4; null for rows from before
-  it): pointers only, for later reads by message.
+  it): pointers only, for later reads by message. `recentSourceRefs(reporter, channel, limit)` lists a member's own
+  newest pointers (Slack's sent samples find the member's DMs and threads there: `writing-style.md`).
 - **The member's own reply** (B4). Slack sends the member's own message in a DM or a thread as an
   `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). Gmail (owner FB #19:
   a reply sent from the phone, or in Gmail itself): the poll also lists the member's **Sent** label in

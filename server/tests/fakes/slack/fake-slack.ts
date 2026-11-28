@@ -12,7 +12,9 @@
  *   slack.com  GET  /oauth/v2/authorize        (sign-in: redirects back with a code; `as=<U…>` picks the account)
  *              POST /api/oauth.v2.access       code → the member's user token (`authed_user`)
  *              POST /api/auth.test, /api/users.info, /api/auth.revoke
- *              POST /api/conversations.open, /api/chat.postMessage, /api/conversations.replies
+ *              POST /api/conversations.open, /api/chat.postMessage, /api/conversations.replies (a root's or a reply's ts),
+ *                   /api/conversations.history (a channel's messages, newest first, from `oldest`)
+ *   Each message answered carries `team`: its author's workspace (a Slack Connect guest's is another one).
  *
  * Practice values only: client secrets `fake-slack-secret-…`, signing secrets
  * `fake-slack-signing-…`, user tokens `xoxp-fake-…`, bot tokens `xoxb-fake-…`,
@@ -27,8 +29,11 @@ export interface FakeSlackUser { id: string; email: string; teamId: string; name
 export interface FakeSlackApp { clientId: string; clientSecret: string; signingSecret: string; teamId: string; botToken: string; botUserId: string; rotation?: boolean }
 
 /** A thread's messages in a channel of a workspace (conversations.replies); the root is the one whose ts is the thread's. */
-export interface FakeSlackThread { teamId: string; channel: string; ts: string; messages: Array<{ ts: string; user: string; text: string }> }
-export interface FakeSlackSeed { users: FakeSlackUser[]; apps: FakeSlackApp[]; threads?: FakeSlackThread[] }
+export interface FakeSlackMessage { ts: string; user: string; text: string; subtype?: string; bot_id?: string }
+export interface FakeSlackThread { teamId: string; channel: string; ts: string; messages: FakeSlackMessage[] }
+/** A channel's own messages (conversations.history), e.g. a DM; `teamId` is the workspace that reads it. */
+export interface FakeSlackChannel { teamId: string; channel: string; messages: FakeSlackMessage[] }
+export interface FakeSlackSeed { users: FakeSlackUser[]; apps: FakeSlackApp[]; threads?: FakeSlackThread[]; channels?: FakeSlackChannel[] }
 
 export function defaultSlackSeed(): FakeSlackSeed {
   return {
@@ -62,6 +67,13 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
   /** What the bots and members posted (test assertions only). */
   const posted: Array<{ teamId: string; by: string; channel: string; text: string; threadTs?: string }> = []
   const revokedTokens: string[] = []
+  /** Every read of messages, `<method>:<channel>` (test assertions only). */
+  const reads: string[] = []
+  /** A message as Slack answers it: with its author's workspace. */
+  const withTeam = (m: FakeSlackMessage) => {
+    const author = seed.users.find(u => u.id === m.user)
+    return author ? { ...m, team: author.teamId, user_team: author.teamId } : m
+  }
 
   const appByClient = (clientId: string) => seed.apps.find(a => a.clientId === clientId)
   const userById = (id: string) => seed.users.find(u => u.id === id)
@@ -182,14 +194,32 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
     if (who.kind === 'user' && !who.t.scopes.some(s => s.endsWith(':history'))) return fail(c, 'missing_scope')
     const f = await form(c)
     if (!f.channel || !f.ts) return fail(c, 'invalid_arguments')
+    reads.push(`conversations.replies:${f.channel}`)
     const team = who.kind === 'bot' ? who.app.teamId : who.t.teamId
-    const thread = (seed.threads ?? []).find(t => t.teamId === team && t.channel === f.channel && t.ts === f.ts)
+    // Slack takes the root's ts or any reply's and answers the whole thread.
+    const thread = (seed.threads ?? []).find(t => t.teamId === team && t.channel === f.channel && (t.ts === f.ts || t.messages.some(m => m.ts === f.ts)))
     // A thread nobody seeded reads as empty (the connector's switch tests only need the call to pass).
     if (!thread) return c.json({ ok: true, messages: [] })
-    return c.json({ ok: true, messages: thread.messages.map(m => ({ type: 'message', ...m, thread_ts: thread.ts })), has_more: false })
+    return c.json({ ok: true, messages: thread.messages.map(m => ({ type: 'message', ...withTeam(m), thread_ts: thread.ts })), has_more: false })
   })
 
-  return { app, seed, issueCode, posted, revokedTokens, tokens }
+  app.post('/api/conversations.history', async c => {
+    const who = caller(c)
+    if ('error' in who) return fail(c, who.error)
+    if (who.kind === 'user' && !who.t.scopes.some(s => s.endsWith(':history'))) return fail(c, 'missing_scope')
+    const f = await form(c)
+    if (!f.channel) return fail(c, 'invalid_arguments')
+    const team = who.kind === 'bot' ? who.app.teamId : who.t.teamId
+    const channel = (seed.channels ?? []).find(ch => ch.teamId === team && ch.channel === f.channel)
+    if (!channel) return fail(c, 'channel_not_found')
+    reads.push(`conversations.history:${f.channel}`)
+    const oldest = Number(f.oldest ?? '0')
+    const limit = Math.min(Number(f.limit ?? '100') || 100, 1000)
+    const messages = channel.messages.filter(m => Number(m.ts) >= oldest).sort((a, b) => Number(b.ts) - Number(a.ts)).slice(0, limit)
+    return c.json({ ok: true, messages: messages.map(m => ({ type: 'message', ...withTeam(m) })), has_more: false })
+  })
+
+  return { app, seed, issueCode, posted, revokedTokens, tokens, reads }
 }
 
 export type FakeSlack = ReturnType<typeof createFakeSlack>

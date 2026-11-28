@@ -2,7 +2,7 @@
 // words and shapes client/shared/writing-style.ts). The server hands the member's own newest sent messages (read now with
 // their own permission, kept nowhere); this module has their own AI summarize them — one tool-less one-shot per audience —
 // and keeps **only the summaries**, here, per account and company:
-//   <dir>/<userId>/<companyId>.json   { version: 1, enabled, styles: { <connectorId>: { inside?, outside? } }, note }
+//   <dir>/<userId>/<companyId>.json   { version: 1, enabled, styles: { <connectorId>: { inside?, outside? } }, note, dismissed }
 // (owner-only, written atomically). Never sent anywhere, never logged (only counts and fixed words), never handed to anyone
 // but this member's own AI, and only for a reply it drafts (`forThread`). Another account or company reads another file.
 // It knows no tool: connectors are the ids the server answered.
@@ -24,6 +24,8 @@ export interface KeptFile {
   enabled: boolean
   styles: WritingStyleSet
   note: string | null
+  /** `<connectorId>:<audience>` the member removed with 「消す」: a thread read never makes them again (only 「作り直す」). */
+  dismissed: string[]
 }
 
 /** The server's answers, read with the member's session (null = not reached). */
@@ -64,7 +66,7 @@ const NOTE = {
 /** A stale summary is made again from a thread read at most this often. */
 export const REFRESH_RETRY_MS = 6 * 60 * 60 * 1000
 
-const empty = (): KeptFile => ({ version: 1, enabled: false, styles: {}, note: null })
+const empty = (): KeptFile => ({ version: 1, enabled: false, styles: {}, note: null, dismissed: [] })
 
 export function createWritingStyles(deps: WritingStylesDeps) {
   const now = deps.now ?? (() => Date.now())
@@ -73,8 +75,8 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   const generation = new Map<string, number>()
   /** When a stale summary's making was last started from a thread read, per account and company (memory only). */
   const refreshTried = new Map<string, number>()
-  /** Builds running, per account and company: one at a time. */
-  const building = new Map<string, { job: Promise<void>; generation: number }>()
+  /** Builds running, per account and company: one at a time (`full`: every summary, else only the missing or stale). */
+  const building = new Map<string, { job: Promise<void>; generation: number; full: boolean }>()
   /** Still the sign-in a piece of work started under. */
   const sameSignIn = (userId: string, session: unknown) => deps.userId() === userId && (deps.session?.() ?? null) === session
 
@@ -88,7 +90,8 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return empty() }
     if (!raw || typeof raw !== 'object') return empty()
     const r = raw as Record<string, unknown>
-    return { version: 1, enabled: r.enabled === true, styles: parseWritingStyleSet(r.styles), note: typeof r.note === 'string' ? r.note.slice(0, 200) : null }
+    const dismissed = Array.isArray(r.dismissed) ? r.dismissed.filter((d): d is string => typeof d === 'string' && /^[a-z][a-z0-9_-]{0,39}:(?:inside|outside)$/.test(d)).slice(0, 20) : []
+    return { version: 1, enabled: r.enabled === true, styles: parseWritingStyleSet(r.styles), note: typeof r.note === 'string' ? r.note.slice(0, 200) : null, dismissed }
   }
 
   function write(userId: string, companyId: string, kept: KeptFile): void {
@@ -99,16 +102,17 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   }
 
   /**
-   * Make every summary again from the member's newest sent messages. Only connectors readable now keep a summary;
-   * an audience with too few messages has none. Written only when the same account is still signed in.
+   * Make every summary again from the member's newest sent messages (`full`), or only the ones missing or older than a
+   * month (a thread read: a fresh summary is never made twice). Only connectors readable now keep a summary; an
+   * audience with too few messages has none. Written only when the same account is still signed in.
    */
-  async function build(userId: string, companyId: string): Promise<void> {
+  async function build(userId: string, companyId: string, full = true): Promise<void> {
     const key = `${userId}\u0000${companyId}`
     const running = building.get(key)
     const startedAt = generation.get(key) ?? 0
     if (running) {
-      // One started before a 「消す」 saves nothing: this press makes them again after it.
-      return running.generation === startedAt ? running.job : running.job.then(() => build(userId, companyId))
+      // One started before a 「消す」 saves nothing, and one making only the missing ones is not 「作り直す」: this one runs after it.
+      return running.generation === startedAt && (running.full || !full) ? running.job : running.job.then(() => build(userId, companyId, full))
     }
     const session = deps.session?.() ?? null
     const current = () => (generation.get(key) ?? 0) === startedAt && sameSignIn(userId, session)
@@ -125,8 +129,19 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       // Pairs whose making failed for a passing reason (offline, the server or the AI not answering): the kept one stays.
       const keepOld = new Set<string>()
       const controller = new AbortController()
+      /** Kept and made within the month: a thread read's making leaves it as it is. */
+      const fresh = (connectorId: string, a: WritingAudience) => {
+        const k = before.styles[connectorId]?.[a]
+        // What the member removed counts as kept for a thread read's making: only 「作り直す」 makes it again.
+        if (!full && k === undefined && before.dismissed.includes(`${connectorId}:${a}`)) return true
+        return !full && k !== undefined && !writingStyleStale(k, now())
+      }
       for (const source of sources.sources) {
         if (!source.readable || !isWritingConnectorId(source.connectorId)) continue
+        if (WRITING_AUDIENCES.every(a => fresh(source.connectorId, a))) {
+          for (const a of WRITING_AUDIENCES) keepOld.add(`${source.connectorId}:${a}`)
+          continue
+        }
         const r = await deps.server.samples(companyId, source.connectorId)
         // 409 / 404: no longer readable or served — its summaries go. Anything else passes: they stay.
         if (!r || (!r.ok && r.status !== 409 && r.status !== 404)) {
@@ -138,8 +153,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
         const samples = r.value.samples
         const audiences = audiencesToSummarize(samples)
         if (audiences.length < WRITING_AUDIENCES.length) few = true
+        for (const a of WRITING_AUDIENCES) if (fresh(source.connectorId, a)) keepOld.add(`${source.connectorId}:${a}`)
         for (const audience of audiences) {
-          if (before.styles[source.connectorId]?.[audience]?.edited) continue
+          if (before.styles[source.connectorId]?.[audience]?.edited || fresh(source.connectorId, audience)) continue
           if (deps.aiAllowed?.() === false) { failed = true; keepOld.add(`${source.connectorId}:${audience}`); continue }
           const mine = samples.filter(s => s.audience === audience)
           let style: WritingStyle | null = null
@@ -165,12 +181,12 @@ export function createWritingStyles(deps: WritingStylesDeps) {
             if (pick) (next[s.connectorId] ??= {})[a] = pick
           }
         }
-        return { ...k, styles: next, note }
+        return { ...k, styles: next, note, dismissed: full ? [] : k.dismissed }
       })
       log.info(`[writing-style] made ${made} summaries`)
     })().catch(() => { log.warn('[writing-style] making the summaries failed') })
       .finally(() => building.delete(key))
-    building.set(key, { job, generation: startedAt })
+    building.set(key, { job, generation: startedAt, full })
     return job
   }
 
@@ -248,9 +264,10 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       save(userId, companyId, k => {
         const by = { ...k.styles[connectorId] }
         delete by[audience as WritingAudience]
+        const dismissed = [...new Set([...k.dismissed, `${connectorId}:${audience as WritingAudience}`])]
         const styles = { ...k.styles, [connectorId]: by }
         if (Object.keys(by).length === 0) delete styles[connectorId]
-        return { ...k, styles }
+        return { ...k, styles, dismissed }
       })
       return status(companyId)
     },
@@ -258,8 +275,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     /**
      * What the drafting AI of one turn is handed beside a thread it reads for a reply, bound to the sign-in the turn
      * started under (another sign-in since: nothing): the member's own summary for the thread's connector and audience
-     * (or the other audience standing in), only while the check is on. A month-old one is made again in the background
-     * (at most every `REFRESH_RETRY_MS`); this answer uses what is kept.
+     * (or the other audience standing in), only while the check is on. A month-old one, or none yet for the thread's
+     * connector (a tool connected or allowed after the check was turned on), is made in the background (only those; at
+     * most every `REFRESH_RETRY_MS`); this answer uses what is kept.
      */
     forTurn(companyId: string): ((key: WritingStyleKey | null | undefined) => string | null) | null {
       const userId = deps.userId()
@@ -270,11 +288,13 @@ export function createWritingStyles(deps: WritingStylesDeps) {
         const kept = read(userId, companyId)
         if (!kept.enabled) return null
         const tryKey = `${userId}\u0000${companyId}`
-        if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
-          && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
-          // Tried at most every few hours: a making that keeps failing never costs one AI call per thread read.
+        const stale = Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
+        const missing = !Object.prototype.hasOwnProperty.call(kept.styles, key.connectorId)
+          && !kept.dismissed.some(d => d.startsWith(`${key.connectorId}:`))
+        if ((stale || missing) && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
+          // Tried at most every few hours: a making that keeps failing (or too few messages) never costs a read per thread.
           refreshTried.set(tryKey, now())
-          void build(userId, companyId)
+          void build(userId, companyId, false)
         }
         const choice = chooseWritingStyle(kept.styles, key.connectorId, key.audience)
         return choice ? writingStyleForAi(choice) : null

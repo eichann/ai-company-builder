@@ -76,10 +76,17 @@ export function slackPlainText(text: string, names: ReadonlyMap<string, string |
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 }
 
+const TEAM_RE = /^[TE][A-Z0-9]{2,30}$/
+/** The workspace of a message's author as Slack names it (`user_team`, else `team`), null when not given. */
+export function slackTeamOf(m: Record<string, unknown>): string | null {
+  for (const v of [m.user_team, m.team]) if (typeof v === 'string' && TEAM_RE.test(v)) return v
+  return null
+}
+
 export const isSlackThreadRef = (r: ChatThreadRef) => SLACK_CHANNEL_RE.test(r.channelId) && SLACK_TS_RE.test(r.threadTs)
 
 /** The history scope that reads this kind of channel (all four come with `read`). */
-function historyScope(channelId: string): string {
+export function historyScope(channelId: string): string {
   if (channelId.startsWith('D')) return 'im:history'
   if (channelId.startsWith('G')) return 'mpim:history'
   return 'channels:history'
@@ -121,7 +128,9 @@ export function createSlackChat(deps: SlackChatDeps): ChatReader & ChatSender {
         write: false, operation: 'conversations.replies', scope: historyScope(ref.channelId),
       })
       if (!r.ok) return { ok: false, reason: readReason(r) }
-      const me = deps.slackData.forCompany(companyId).slackUserOfEmail(allowed.account)
+      const slackData = deps.slackData.forCompany(companyId)
+      const me = slackData.slackUserOfEmail(allowed.account)
+      const teamId = slackData.app()?.teamId ?? null
       const raw = (Array.isArray(r.json.messages) ? r.json.messages : [])
         .filter(isObj)
         .filter(m => typeof m.ts === 'string' && SLACK_TS_RE.test(m.ts) && typeof m.text === 'string')
@@ -141,6 +150,8 @@ export function createSlackChat(deps: SlackChatDeps): ChatReader & ChatSender {
       const messages: ChatMessage[] = kept.map(m => {
         const authorId = typeof m.user === 'string' && USER_RE.test(m.user) ? m.user : null
         const seconds = Number(m.ts)
+        // Of another workspace (a Slack Connect guest): only the team Slack names; absent = not known.
+        const team = slackTeamOf(m)
         return {
           ts: m.ts as string,
           authorId,
@@ -148,6 +159,7 @@ export function createSlackChat(deps: SlackChatDeps): ChatReader & ChatSender {
           mine: authorId !== null && authorId === me,
           at: Number.isFinite(seconds) ? new Date(Math.floor(seconds * 1000)).toISOString() : null,
           ...cut(slackPlainText(m.text as string, names), SLACK_THREAD_TEXT_MAX),
+          ...(team && teamId ? { external: team !== teamId } : {}),
         }
       })
       return { ok: true, value: { ref, messages, more: raw.length > kept.length || (isObj(r.json) && r.json.has_more === true) } }

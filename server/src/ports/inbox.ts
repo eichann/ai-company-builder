@@ -54,6 +54,12 @@ export interface InboxRepository {
   messagesOf(interactionId: string): InboxMessageRow[]
   /** The newest incoming message whose id starts with `prefix` (a chat DM's `<channel>:`), at or after `since` and before `before`. */
   latestIncoming(channel: InboxChannel, prefix: string, since: string, before: string): InboxMessageRow | null
+  /**
+   * The pointers of the newest messages of a channel this member reported (theirs or to them, newest first, at most
+   * `limit`): where the member's own conversations are, for a connector reading their own sent messages
+   * (ports/sent-samples.ts). Pointers only.
+   */
+  recentSourceRefs(reporterId: string, channel: InboxChannel, limit: number): string[]
   /** false when the message was already there (another reporter got there first). */
   insertMessage(row: InboxMessageRow): boolean
 

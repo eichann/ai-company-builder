@@ -7,7 +7,9 @@
 //   account or company finds nothing, and a sign-in during a build writes nothing;
 // - the drafting AI gets the summary only while the check is on, for the thread's connector and audience (or the other
 //   audience of the same connector standing in), after the thread block — never inside it;
-// - the member's correction is checked like the AI's; 「消す」 removes the file; a month-old summary is made again.
+// - the member's correction is checked like the AI's; 「消す」 removes the file; a month-old summary is made again;
+// - a tool allowed after the check was turned on gets its summary from the next thread read through it, making only
+//   that one (a fresh summary is never made twice), at most every few hours.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
@@ -31,7 +33,7 @@ const samples = (inside: number, outside: number): WritingSample[] => [
   ...Array.from({ length: outside }, (_, i) => ({ text: `社外 ${i}`, at: null, audience: 'outside' as const })),
 ]
 
-function world(opts: { readable?: boolean; inside?: number; outside?: number; aiAllowed?: boolean; style?: (s: readonly WritingSample[]) => WritingStyle | null } = {}) {
+function world(opts: { readable?: boolean; inside?: number; outside?: number; aiAllowed?: boolean; style?: (s: readonly WritingSample[]) => WritingStyle | null; chat?: { readable: boolean } } = {}) {
   const dir = makeTempDir('acb-writing-style-')
   const user = { id: 'u-sato' as string | null }
   /** The sign-in's identity (services/session.ts' cookies array): a new object at every sign-in. */
@@ -40,7 +42,9 @@ function world(opts: { readable?: boolean; inside?: number; outside?: number; ai
   const summarized: Array<readonly WritingSample[]> = []
   let nowMs = Date.parse('2026-11-28T00:00:00Z')
   const server: WritingSourcesPort = {
-    async sources(): Promise<WritingSourcesView> { return { sources: [{ connectorId: 'mailco', label: 'メール', readable: opts.readable ?? true }] } },
+    async sources(): Promise<WritingSourcesView> {
+      return { sources: [{ connectorId: 'mailco', label: 'メール', readable: opts.readable ?? true }, ...(opts.chat ? [{ connectorId: 'chatco', label: 'チャット', readable: opts.chat.readable }] : [])] }
+    },
     async samples(companyId, connectorId): Promise<{ ok: true; value: WritingSamplesView }> {
       asked.push(`${companyId}/${connectorId}`)
       return { ok: true, value: { connectorId, samples: samples(opts.inside ?? 6, opts.outside ?? 6) } }
@@ -266,4 +270,51 @@ test('「作り直す」 right after 「消す」 makes them again once the earl
   release()
   await slow.whenIdle()
   assert.equal((await slow.status('co-a'))!.styles.length, 2)
+})
+
+test('a tool allowed after the check: the next thread through it makes only its summary, at most every few hours', async () => {
+  const chat = { readable: false }
+  const w = world({ chat })
+  await w.styles.setEnabled('co-a', true)
+  await w.styles.whenIdle()
+  assert.deepEqual(w.asked, ['co-a/mailco'])
+  const made = w.summarized.length
+  chat.readable = true
+  const turn = w.styles.forTurn('co-a')!
+  assert.equal(turn({ connectorId: 'chatco', audience: 'inside' }), null, 'nothing kept yet: this reply drafts as before')
+  await w.styles.whenIdle()
+  assert.deepEqual(w.asked, ['co-a/mailco', 'co-a/chatco'], 'the fresh mail summaries are not read or made again')
+  assert.equal(w.summarized.length, made + 2)
+  assert.match(turn({ connectorId: 'chatco', audience: 'inside' }) ?? '', /おつかれ！/)
+  assert.deepEqual((await w.styles.status('co-a'))!.styles.map(s => s.connectorId).sort(), ['chatco', 'chatco', 'mailco', 'mailco'])
+  // A connector with too few messages is looked at again only after the wait.
+  turn({ connectorId: 'otherco', audience: 'inside' })
+  await w.styles.whenIdle()
+  turn({ connectorId: 'otherco', audience: 'inside' })
+  await w.styles.whenIdle()
+  assert.equal(w.asked.length, 2)
+  // 「作り直す」 makes every one again.
+  await w.styles.rebuild('co-a')
+  await w.styles.whenIdle()
+  assert.deepEqual(w.asked.slice(2), ['co-a/mailco', 'co-a/chatco'])
+})
+
+test('a summary the member removed is not made again by a thread read, only by 「作り直す」', async () => {
+  const w = world({ chat: { readable: true } })
+  await w.styles.setEnabled('co-a', true)
+  await w.styles.whenIdle()
+  await w.styles.remove('co-a', 'chatco', 'inside')
+  await w.styles.remove('co-a', 'chatco', 'outside')
+  const asked = w.asked.length
+  w.setNow(Date.parse('2026-11-29T00:00:00Z'))
+  assert.equal(w.styles.forTurn('co-a')?.({ connectorId: 'chatco', audience: 'inside' }) ?? null, null)
+  await w.styles.whenIdle()
+  w.setNow(Date.parse('2026-12-29T00:00:00Z'))
+  w.styles.forTurn('co-a')?.({ connectorId: 'mailco', audience: 'inside' })
+  await w.styles.whenIdle()
+  assert.deepEqual((await w.styles.status('co-a'))!.styles.map(s => s.connectorId), ['mailco', 'mailco'])
+  assert.ok(!w.asked.slice(asked).includes('co-a/chatco'), 'never read again for what was removed')
+  await w.styles.rebuild('co-a')
+  await w.styles.whenIdle()
+  assert.deepEqual((await w.styles.status('co-a'))!.styles.map(s => s.connectorId).sort(), ['chatco', 'chatco', 'mailco', 'mailco'])
 })

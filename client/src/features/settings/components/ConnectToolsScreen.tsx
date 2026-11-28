@@ -8,6 +8,9 @@ import { Button, Callout, Card } from '../../../shared/ui/primitives'
 import { GOOGLE_PRACTICE_TEXT } from '../../../../shared/google'
 import { connectToolsOffer, connectToolsView, type ConnectToolItem, type ConnectToolsOffer } from '../connectTools'
 import { useConnectTools } from '../hooks/useConnectTools'
+import { useWritingStyle } from '../hooks/useWritingStyle'
+import { writingCheckOffered } from '../writingStyle'
+import { WritingStyleSection } from './WritingStyleSection'
 import { Dialog } from '../../../shared/ui/Dialog'
 
 interface Props {
@@ -17,7 +20,8 @@ interface Props {
 }
 
 export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
-  const tools = useConnectTools(companyId)
+  const writing = useWritingStyle(companyId)
+  const tools = useConnectTools(companyId, () => { void writing.afterConnect() })
   // First run: decided once, when the state has loaded, and kept while the member connects
   // (the server marks things shown at once; the screen must not change under them).
   const [offer, setOffer] = useState<ConnectToolsOffer | 'undecided' | 'closed'>(firstRun ? 'undecided' : { only: null })
@@ -70,6 +74,11 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
             />
           )}
         </>
+      )}
+      {tools.loaded && (view.google || view.slack) && (
+        <div ref={writing.loadRef}>
+          {writingCheckOffered(writing.status) && <WritingStyleSection writing={writing} status={writing.status} />}
+        </div>
       )}
       {tools.message && <p role="status" className="text-small leading-relaxed text-zinc-600 dark:text-zinc-300">{tools.message}</p>}
       {firstRun && (

@@ -8,12 +8,16 @@
  * - Gmail's reader: only the member's own words (the quoted conversation, a forwarded part, `>` lines cut off),
  *   machine mail and mail to nobody else left out, 身内 = every other address of the company's domains, at most
  *   the asked number, a refusal of the read → not allowed;
- * - the summary key for a thread: the serving connector's id and its judgement of the other side.
+ * - the summary key for a thread: the serving connector's id and its judgement of the other side;
+ * - Slack's reader (end to end in tests/integration/threads.test.ts): a place where no one else's workspace shows is
+ *   left out (neither 身内 nor よそ), a thread is よそ when anyone of another workspace is in it and unknown when
+ *   someone's workspace is not known, the reads stop at their limit, and a refusal of the permission ends the making.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { resolveRole, type RoleCandidate, type RoleServing } from '../../shared/core/connector-roles'
 import { audienceOfAddresses, createGoogleSentSamples, ownWords } from '../../src/services/google-writing'
 import { createWritingSamples } from '../../src/services/writing-samples'
+import { createSlackSentSamples, parseSlackRef } from '../../src/services/slack-writing'
 import type { MailMessage, MailReader, MailSummary } from '../../src/ports/mail'
 import type { SentSamplesReader } from '../../src/ports/sent-samples'
 
@@ -175,5 +179,64 @@ describe('Gmail\'s reader of the member\'s own sent mail', () => {
     expect(g.audienceOf('co-a', 'u-sato', [
       { mine: false, fromAddress: 'a@div.example', to: ['sato@div.example'], cc: ['x@a-corp.example'] },
     ])).toBe('outside')
+  })
+})
+
+describe('Slack\'s reader of the member\'s own messages', () => {
+  const NOW = Date.parse('2026-11-28T00:00:00Z')
+  const ts = (n: number) => `${Math.floor(NOW / 1000) - n * 60}.000100`
+  function slackReader(answers: (method: string, channel: string) => Record<string, unknown> | 'refused', refs: string[]) {
+    const calls: string[] = []
+    const userCall = vi.fn(async (_c: string, _u: string, req: { method: string; params: Record<string, string> }) => {
+      calls.push(`${req.method}:${req.params.channel}`)
+      const a = answers(req.method, req.params.channel)
+      return a === 'refused' ? { ok: false as const, kind: 'not-sent' as const, reason: 'feature-off' } : { ok: true as const, json: a }
+    })
+    const grant = { status: 'active', scopes: ['im:history', 'mpim:history', 'channels:history', 'groups:history', 'users:read', 'users:read.email'], featuresOff: [], accountEmail: 'sato@div.example' }
+    const r = createSlackSentSamples({
+      slack: { userCall } as never,
+      companyData: { forCompany: () => ({ connectors: { grant: () => grant }, inbox: { recentSourceRefs: () => refs } }) } as never,
+      slackData: { forCompany: () => ({ app: () => ({ teamId: 'T0DIV', enabled: true }), slackUserOfEmail: () => 'U0SATO' }) } as never,
+      readsIncoming: () => true,
+      nowMs: () => NOW,
+    })
+    return { r, calls }
+  }
+
+  it('a DM where no one else\'s workspace shows hands nothing; a known colleague makes it 身内', async () => {
+    const mine = { ts: ts(1), user: 'U0SATO', text: 'りょうかいです' }
+    const alone = slackReader(() => ({ messages: [mine] }), ['slack:D0A:' + ts(1)])
+    expect(await alone.r.recentSent('co', 'u', 20)).toEqual({ ok: true, samples: [] })
+    const withColleague = slackReader(() => ({ messages: [mine, { ts: ts(2), user: 'U0TWO', team: 'T0DIV', text: 'x' }] }), ['slack:D0A:' + ts(1)])
+    expect((await withColleague.r.recentSent('co', 'u', 20))).toMatchObject({ ok: true, samples: [{ text: 'りょうかいです', audience: 'inside' }] })
+    // Someone whose workspace Slack does not give: never guessed as 身内.
+    const unknown = slackReader(() => ({ messages: [mine, { ts: ts(2), user: 'U0TWO', team: 'T0DIV', text: 'x' }, { ts: ts(3), user: 'U0X', text: 'y' }] }), ['slack:D0A:' + ts(1)])
+    expect(await unknown.r.recentSent('co', 'u', 20)).toEqual({ ok: true, samples: [] })
+    const guest = slackReader(() => ({ messages: [mine, { ts: ts(3), user: 'U0X', text: 'y' }, { ts: ts(4), user: 'U0G', user_team: 'T0GUEST', text: 'z' }] }), ['slack:D0A:' + ts(1)])
+    expect(await guest.r.recentSent('co', 'u', 20)).toMatchObject({ ok: true, samples: [{ audience: 'outside' }] })
+  })
+
+  it('reads each DM once and stops at its limit; a refused permission ends the making', async () => {
+    const refs = Array.from({ length: 40 }, (_, i) => `slack:D0${String.fromCharCode(65 + (i % 20))}X:${ts(i)}`)
+    const many = slackReader(() => ({ messages: [] }), refs)
+    await many.r.recentSent('co', 'u', 20)
+    expect(many.calls.length).toBe(12)
+    expect(new Set(many.calls).size).toBe(12)
+    const refused = slackReader(() => 'refused', ['slack:D0A:' + ts(1)])
+    expect(await refused.r.recentSent('co', 'u', 20)).toEqual({ ok: false, reason: 'not-allowed' })
+  })
+
+  it('a thread is よそ with anyone of another workspace, 身内 when all are known to be of the company, else unknown', () => {
+    const { r } = slackReader(() => ({}), [])
+    const p = (external?: boolean, mine = false) => ({ mine, fromAddress: null, to: [], cc: [], ...(external === undefined ? {} : { external }) })
+    expect(r.audienceOf('co', 'u', [p(false), p(true)])).toBe('outside')
+    expect(r.audienceOf('co', 'u', [p(false), p(undefined, true)])).toBe('inside')
+    expect(r.audienceOf('co', 'u', [p(false), p(undefined)])).toBeNull()
+    expect(r.audienceOf('co', 'u', [p(undefined, true)])).toBeNull()
+  })
+
+  it('takes only the inbox\'s Slack pointers', () => {
+    expect(parseSlackRef('slack:D0AB:1793400000.000100')).toEqual({ channel: 'D0AB', ts: '1793400000.000100' })
+    for (const bad of ['gmail:abc', 'slack:../x:1.1', 'slack:D0AB:1793400000.000100:x', 'slack:d0ab:1793400000.000100']) expect(parseSlackRef(bad)).toBeNull()
   })
 })
