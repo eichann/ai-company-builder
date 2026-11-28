@@ -204,6 +204,12 @@ export const CALM = {
   aiDone: (what: string) => `AI が反映しました：${what}`,
 } as const
 
+/**
+ * The watch AI's character, as members read it (owner 2026-11-28: its own name is not decided yet).
+ * The one place the name is written: ids, data, files and types say `watch` (`.claude/rules/watch.md`).
+ */
+export const WATCH_NAME = '見張り役'
+
 /** Who can see it, in plain words: 「あなただけ」 is the one that gets a lock (5b). */
 export const ONLY_YOU = 'あなただけ'
 

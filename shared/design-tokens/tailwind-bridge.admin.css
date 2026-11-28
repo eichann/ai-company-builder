@@ -178,6 +178,10 @@
   --color-thing-decision: var(--color-thing-decision);
   --color-thing-project: var(--color-thing-project);
   --color-thing-meeting: var(--color-thing-meeting);
+  --color-watch-paper: var(--color-watch-paper);
+  --color-watch-ink: var(--color-watch-ink);
+  --color-watch-tool: var(--color-watch-tool);
+  --color-watch-stale: var(--color-watch-stale);
   --color-scrim: var(--color-scrim);
   --color-scrim-palette: var(--color-scrim-palette);
   --radius-small: var(--radius-small);
