@@ -562,10 +562,13 @@ export function browseOperatorPrompt(lines: { actions: readonly string[]; screen
 export const BROWSER_OPERATOR_BROWSE_PROMPT = browseOperatorPrompt({ actions: OPERATOR_ACTION_LINES, screen: OPERATOR_SCREEN_LINES })
 
 /**
- * A history entry as the operator is shown it: its `do` in the words of the tool set it answers in (agent-browser.md "The
- * operator's tool sets": the compact set's `set`); the rest as the app recorded it.
+ * A history entry as the operator is shown it: its action in the words and key of the tool set it answers in
+ * (agent-browser.md "The operator's tool sets": `do`, or a computer-use set's `type` / `action`; a ref as `target` in the
+ * Playwright-like set); the rest as the app recorded it.
  */
-export type BrowserOperatorHistoryEntry = Omit<BrowserBrowseHistoryEntry, 'do'> & { do: string; path?: string }
+export type BrowserOperatorHistoryEntry = Omit<BrowserBrowseHistoryEntry, 'do' | 'ref'> & {
+  do?: string; type?: string; action?: string; ref?: number; target?: number; path?: string
+}
 
 export interface BrowserBrowseHistoryEntry {
   do: BrowserBrowseAction['do']

@@ -41,7 +41,7 @@ import type { BrowserLinesAnswer } from '../electron/features/browser/lines-api'
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import type { BrowserWriteSteps } from '../shared/browser-runner'
 import type { BrowserWriteView } from '../shared/browser-line-writes'
-import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
+import { BROWSER_OPERATOR_TOOLSETS, type BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
 import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const HOST = 'shop.example.test'
@@ -570,8 +570,12 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     },
     // The screen of this moment (memory only, for the operator): a marker no other channel could carry by chance.
     async screenshot() { return { mediaType: 'image/jpeg', data: new TextEncoder().encode(`${SCREEN_MARKER}-${++shots}`) } },
+    // Typing without a ref goes into the name field (the window's hit-test, as the real one finds a focused text field).
+    async aim() { return { ok: true, role: 'textbox', logLabel: '名前' } },
     async act(action) {
       w.calls.push(`act ${action.do}`)
+      // A press on the name field writes nothing and reaches the field.
+      if (action.do === 'click' && 'ref' in action && action.ref === 3) return { outcome: 'ok', pressed: { role: 'textbox', name: '名前' } }
       // 保存 makes the page's write (to the frame), 自動保存 one outside it.
       if (action.do === 'click' && hooks) {
         const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, w.saveBody ?? '{"title":"冬のクーポン","_token":"csrf-9"}',
@@ -1056,23 +1060,42 @@ test('a page write outside the plan during the work is refused; the after-read c
   assert.equal(card.sections.find(s => s.heading === CW.writes)?.rows.length, 2)
 })
 
-test('both tool sets: the same write task makes the same actions and the same one write within the frame; a write outside the frames is refused and a word of the other set is asked again in both (agent-browser.md "The operator\'s tool sets")', async () => {
+test('all five tool sets: the same write task makes the same actions and the same one write within the frame; a write outside the frames is refused; a slip is asked again once in the set\'s own words (agent-browser.md "The operator\'s tool sets")', async () => {
+  // Each set presses the name field, types into it without naming it, goes back, slips once with another set's word, presses
+  // 自動保存 (a write outside every frame) and 保存. The sets that type into "the field pressed just before" first slip by
+  // typing before any press: asked again with their words, nothing typed.
   const answers: Record<BrowserOperatorToolset, string[]> = {
-    current: ['{"do":"type","ref":3,"text":"冬のクーポン"}', '{"do":"back"}', '{"do":"set","ref":3,"value":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
-    compact: ['{"do":"set","ref":3,"value":"冬のクーポン"}', '{"do":"go","path":"back"}', '{"do":"type","ref":3,"text":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
+    current: ['{"do":"click","ref":3}', '{"do":"type","text":"冬のクーポン"}', '{"do":"back"}', '{"do":"set","ref":3,"value":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
+    compact: ['{"do":"click","ref":3}', '{"do":"set","value":"冬のクーポン"}', '{"do":"go","path":"back"}', '{"do":"type","ref":3,"text":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN],
+    playwright: [
+      '{"do":"browser_type","text":"冬のクーポン"}', '{"do":"browser_click","target":3,"element":"名前"}', '{"do":"browser_type","text":"冬のクーポン"}', '{"do":"browser_navigate_back"}',
+      '{"do":"click","ref":2}', '{"do":"browser_click","target":2}', '{"do":"browser_click","target":1,"element":"保存"}', DONE_PLAIN,
+    ],
+    openai: [
+      '{"type":"type","text":"冬のクーポン"}', '{"do":"click","ref":3}', '{"type":"type","text":"冬のクーポン"}', '{"do":"back"}',
+      '{"do":"wait","seconds":1}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN,
+    ],
+    anthropic: [
+      '{"action":"type","text":"冬のクーポン"}', '{"do":"click","ref":3}', '{"action":"type","text":"冬のクーポン"}', '{"do":"back"}',
+      '{"type":"type","text":"x"}', '{"do":"click","ref":2}', CLICK_SAVE, DONE_PLAIN,
+    ],
   }
   const runs = []
-  for (const toolset of ['current', 'compact'] as const) {
+  for (const toolset of BROWSER_OPERATOR_TOOLSETS) {
     const { w, tool } = workWorld({ toolset, answers: answers[toolset], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }) })
     const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons', items: [] })
     assert.deepEqual(w.toolsets, Array(answers[toolset].length).fill(toolset), toolset)
-    // The other set's word was asked again once (the app's fixed words), never acted on.
-    assert.ok(w.materials.some(m => typeof (m as { retry?: unknown }).retry === 'string'), toolset)
+    // Each slip was asked again once, in the words of the set (never acted on).
+    const retries = w.materials.map(m => (m as { retry?: unknown }).retry).filter(r => typeof r === 'string')
+    const focus = toolset === 'current' || toolset === 'compact' ? [] : [workRetrySentence('focus', toolset)]
+    assert.deepEqual(retries, [...focus, workRetrySentence('shape', toolset)], toolset)
     runs.push({ said, sent: w.site.requests.map(r => r.split(' ').slice(0, 2).join(' ')), acts: w.calls.filter(c => c.startsWith('act ') || c === 'framePermit') })
   }
   assert.deepEqual(runs[0].sent, ['POST /coupons'], 'the autosave outside the frames never reached the site')
-  assert.deepEqual(runs[1], runs[0])
-  assert.deepEqual(runs[0].acts, ['act type', 'act back', 'act click', 'act click', 'framePermit'])
+  for (const r of runs.slice(1)) assert.deepEqual(r, runs[0])
+  assert.deepEqual(runs[0].acts, ['act click', 'act type', 'act back', 'act click', 'act click', 'framePermit'])
+  // The re-ask names the set's own keys.
+  assert.notEqual(workRetrySentence('focus', 'openai'), workRetrySentence('focus', 'playwright'))
 })
 
 test('the incident of 2026-11-27: a write outside the frames, then the operator stuck → the AI and the card say the write did not fit, and the line names its address', async () => {

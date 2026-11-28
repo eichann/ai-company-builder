@@ -22,7 +22,7 @@ export interface AppConfig {
   /** Extra environment variable names passed to AI processes (agents/agent-env.ts). */
   agentEnvPassthrough?: string[]
   /**
-   * The operator's tool set of 「ブラウザ操作」 on this PC (`current` / `compact`; agent-browser.md "The operator's tool sets").
+   * The operator's tool set of 「ブラウザ操作」 on this PC (`BROWSER_OPERATOR_TOOLSETS`; agent-browser.md "The operator's tool sets").
    * Read through `browserOperatorToolset`: anything else is `current`.
    */
   browserOperatorToolset?: string

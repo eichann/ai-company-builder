@@ -1,11 +1,12 @@
-import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail, type BrowserTrailRun } from '../../../../shared/browser-operator-trail'
+import { BROWSER_TRAIL_WORDS as W, answerProblemWords, type BrowserOperatorTrail, type BrowserTrailRun } from '../../../../shared/browser-operator-trail'
+import { BROWSER_TOOLSET_WORDS } from '../../../../shared/browser-operator-toolset-choice'
 
 /**
  * The operator AI's own trail on the person's card (agent-browser.md "The operator's trail on the card"): what it did step
  * by step (the action, the button's or field's label in the run log's kept form, its own reason), its own words for stopping
  * and its notes. Written by an AI that reads page text, so it is outside text: collapsed by default under
  * 「係の AI のメモを見る」, labelled as the operator's memo — not a checked fact —, shown as plain text only (React text,
- * never markup).
+ * never markup). It names the tool set the operator answered in (agent-browser.md "The operator's tool sets").
  */
 export function OperatorTrail({ trail, asked = null }: {
   trail: BrowserOperatorTrail
@@ -29,6 +30,7 @@ function TrailRun({ run, titled, asked }: { run: BrowserTrailRun; titled: boolea
   return (
     <div className="mt-2" data-trail-phase={run.phase}>
       {titled && <p className="font-strong text-text">{W.phase[run.phase]}</p>}
+      {run.toolset && <p className="mt-1" data-trail-toolset>{W.toolset}：{BROWSER_TOOLSET_WORDS.names[run.toolset]}</p>}
       {run.end?.kind === 'stop' && !(asked !== null && stopReason === asked) && (
         <p className="mt-1 text-text" data-trail-stop>
           {W.stopReason}：{stopReason ?? W.noReason}
@@ -56,7 +58,7 @@ function TrailRun({ run, titled, asked }: { run: BrowserTrailRun; titled: boolea
       {run.end && run.end.kind !== 'stop' && (
         <p className="mt-1"><span className="text-text">{W.end[run.end.kind]}</span> — {run.end.reason ?? W.noReason}</p>
       )}
-      {!run.end && <p className="mt-1">{run.problem ? <span data-trail-problem>{W.problem(BROWSER_ANSWER_PROBLEM_WORDS[run.problem])}</span> : W.appEnded}</p>}
+      {!run.end && <p className="mt-1">{run.problem ? <span data-trail-problem>{W.problem(answerProblemWords(run.problem, run.toolset))}</span> : W.appEnded}</p>}
       {run.notes && (
         <div className="mt-1">
           <p className="font-strong">{W.notes}</p>

@@ -1715,7 +1715,7 @@ preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
 preload getBrowserInspection -> invoke browserLines:card($0, $1)
 preload getBrowserInspection : (companyId: string, planId: string) => Promise<BrowserInspectionGetResult>
 preload getBrowserOperatorToolset -> invoke config:getBrowserOperatorToolset()
-preload getBrowserOperatorToolset : () => Promise<"current" | "compact">
+preload getBrowserOperatorToolset : () => Promise<"current" | "compact" | "playwright" | "openai" | "anthropic">
 preload getBrowserPc -> invoke browserDevice:get($0)
 preload getBrowserPc : (companyId: string) => Promise<BrowserPcResult>
 preload getBrowserPlan -> invoke browserPlans:get($0, $1)
@@ -2091,7 +2091,7 @@ preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
 preload setBrowserOperatorToolset -> invoke config:setBrowserOperatorToolset($0)
-preload setBrowserOperatorToolset : (toolset: "current" | "compact") => Promise<boolean>
+preload setBrowserOperatorToolset : (toolset: "current" | "compact" | "playwright" | "openai" | "anthropic") => Promise<boolean>
 preload setDocViewBounds -> invoke docView:setBounds($0, $1)
 preload setDocViewBounds : (viewId: number, bounds: DocViewBounds | null) => Promise<void>
 preload setDocViewReview -> invoke docView:review($0, $1)

@@ -1,5 +1,6 @@
 // Settings › 「ブラウザ操作」 › 「係の道具」 (agent-browser.md "The operator's tool sets"): this PC's choice of how the
-// operator AI's tools are described to it — いまの形 (default) or まとめた形. What it may do and every guard stay the same.
+// operator AI's tools are described to it — いまの形 (default), まとめた形, or a known tool set's words (Playwright /
+// OpenAI / Anthropic 風). What it may do and every guard stay the same.
 import { Callout, Card } from '../../../shared/ui/primitives'
 import { BROWSER_OPERATOR_TOOLSETS, BROWSER_TOOLSET_WORDS as W } from '../../../../shared/browser-operator-toolsets'
 import { useBrowserToolset } from '../hooks/useBrowserToolset'

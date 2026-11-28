@@ -23,7 +23,8 @@ import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOu
 import { BROWSER_CARD_CHECKED_BY_WORDS, type BrowserCard, type BrowserCardCheck, type BrowserCardRow, type BrowserCardSection, type BrowserCardValue } from '../../shared/core/browser-card'
 import type { BrowserFrameView } from '../../shared/types/browser-frames'
 import type { BrowserWriteOutcome, BrowserWriteSteps } from './browser-runner'
-import { BROWSER_ANSWER_PROBLEM_WORDS, stopQuestion, type BrowserAnswerProblem, type BrowserStopNext } from './browser-operator-trail'
+import { answerProblemWords, stopQuestion, type BrowserAnswerProblem, type BrowserStopNext } from './browser-operator-trail'
+import type { BrowserOperatorToolset } from './browser-operator-toolset-choice'
 import {
   BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_STOPS, OPERATOR_ACTION_LINES, OPERATOR_MEMO_KEYS, OPERATOR_OUTSIDE_LINE, OPERATOR_REASON_LINE, OPERATOR_SCREEN_LINES, browseHeading, operatorReason, parseBrowseAnswer,
   type BrowserBrowseAction, type BrowserBrowseStop, type BrowserOperatorHistoryEntry, type BrowserPageSnapshot,
@@ -582,11 +583,11 @@ export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapsh
 }
 
 /**
- * The app's one re-ask after an answer out of its form (fixed words: the rule it broke, from `BROWSER_ANSWER_PROBLEM_WORDS`;
- * never the operator's own text).
+ * The app's one re-ask after an answer out of its form (fixed words: the rule it broke, in the words of the operator's tool
+ * set — `answerProblemWords`; never the operator's own text).
  */
-export function workRetrySentence(problem: BrowserAnswerProblem): string {
-  return `答えの形が決まりに合いませんでした：${BROWSER_ANSWER_PROBLEM_WORDS[problem]}。決まった形の JSON 1つだけで、答え直してください。`
+export function workRetrySentence(problem: BrowserAnswerProblem, toolset?: BrowserOperatorToolset): string {
+  return `答えの形が決まりに合いませんでした：${answerProblemWords(problem, toolset)}。決まった形の JSON 1つだけで、答え直してください。`
 }
 
 const ACTION_LINES = OPERATOR_ACTION_LINES

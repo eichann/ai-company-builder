@@ -5,7 +5,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail } from '../../../../shared/browser-operator-trail'
+import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, answerProblemWords, type BrowserOperatorTrail } from '../../../../shared/browser-operator-trail'
+import { BROWSER_TOOLSET_WORDS } from '../../../../shared/browser-operator-toolset-choice'
 import { InspectionBody } from './BrowserInspectionCard'
 
 const TRAIL: BrowserOperatorTrail = [{
@@ -55,4 +56,14 @@ test('the operator\'s word for what it saw on the screen without a ref is shown 
   const [shown, memo] = html.split('<details')
   assert.equal(shown.includes('コピーを作成'), false)
   assert.ok(memo.includes(`${W.unlisted}：&lt;b&gt;メニュー&lt;/b&gt;の［コピーを作成］`))
+})
+
+test('the memo says which tool set the operator answered in, and names a broken rule in that set\'s words (agent-browser.md "The operator\'s tool sets")', () => {
+  const ended: BrowserOperatorTrail = [{ phase: 'work', steps: [], more: 0, end: null, notes: null, problem: 'focus', toolset: 'anthropic' }]
+  const html = renderToStaticMarkup(React.createElement(InspectionBody, { view: { card, readAt: '2026-11-27T00:00:00.000Z', siteLabel: 'shop.example.test', trail: ended } }))
+  const [shown, memo] = html.split('<details')
+  assert.ok(memo.includes(`${W.toolset}：${BROWSER_TOOLSET_WORDS.names.anthropic}`))
+  assert.equal(shown.includes(BROWSER_TOOLSET_WORDS.names.anthropic), false)
+  assert.ok(memo.includes(W.problem(answerProblemWords('focus', 'anthropic'))))
+  assert.notEqual(answerProblemWords('focus', 'anthropic'), BROWSER_ANSWER_PROBLEM_WORDS.focus)
 })

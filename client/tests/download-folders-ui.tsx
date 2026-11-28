@@ -41,6 +41,7 @@ import { dispatchFileChanges } from '../src/shared/lib/fileEvents'
 import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
 import { setWatchProposalDefinition } from '../../shared/core/job-proposals'
 import { JOB_SET_WATCH_OPENED } from '../../shared/core/jobs'
+import type { BrowserOperatorToolset } from '../shared/browser-operator-toolset-choice'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
@@ -215,8 +216,8 @@ Object.assign(window, {
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
     clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),
     // 「係の道具」: this PC's tool set (`?toolsetFails=1` fails the save); what was saved is kept on the window.
-    getBrowserOperatorToolset: async () => (window as unknown as { browserToolset?: 'current' | 'compact' }).browserToolset ?? 'current',
-    setBrowserOperatorToolset: async (toolset: 'current' | 'compact') => {
+    getBrowserOperatorToolset: async () => (window as unknown as { browserToolset?: BrowserOperatorToolset }).browserToolset ?? 'current',
+    setBrowserOperatorToolset: async (toolset: BrowserOperatorToolset) => {
       if (params.get('toolsetFails')) return false
       ;(window as unknown as { browserToolset?: string }).browserToolset = toolset
       return true

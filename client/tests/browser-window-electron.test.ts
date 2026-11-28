@@ -18,6 +18,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeTempDir, stopWithTempDirs } from '../../shared/testing/temp-dirs'
+import { BROWSER_OPERATOR_TOOLSETS } from '../shared/browser-operator-toolset-choice'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const canRun = process.platform === 'darwin' || (process.platform === 'linux' && !!process.env.DISPLAY)
@@ -58,8 +59,7 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   workPress: Record<string, unknown>
-  workFlow: Record<string, unknown>
-  workFlowCompact: Record<string, unknown>
+  workFlows: Record<string, Record<string, unknown>>
   verify: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
@@ -567,9 +567,9 @@ test('a write task on the real window: a press while a held write is being sent 
   assert.deepEqual(last.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', '送っている途中なので押していません']])
 })
 
-// The completion regression runs once per tool set (agent-browser.md "The operator's tool sets"): the same guards hold in both.
-for (const [toolset, key] of [['current', 'workFlow'], ['compact', 'workFlowCompact']] as const) test(`the completion regression (${toolset} tool set): a company Skill's copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once`, { skip }, t => {
-  const r = result[key]
+// The completion regression runs once per tool set (agent-browser.md "The operator's tool sets"): the same guards hold in all.
+for (const toolset of BROWSER_OPERATOR_TOOLSETS) test(`the completion regression (${toolset} tool set): a company Skill's copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once`, { skip }, t => {
+  const r = result.workFlows[toolset]
   // Each step's operator was started with this set; its steps and stops are printed for comparing the sets.
   assert.deepEqual(new Set(r.toolsets as string[]), new Set([toolset]))
   t.diagnostic(`toolset=${toolset} operatorSteps=${String(r.operatorSteps)} workSteps=${String(r.workSteps)} stops=${String(r.stops)} ms=${String(r.ms)}`)

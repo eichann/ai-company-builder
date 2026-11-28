@@ -49,7 +49,7 @@ export interface BrowserBrowseDeps {
   /** One window serves one run at a time, on every path (the plans' runner shares the set). */
   busyWindows?: Set<string>
   now?: () => number
-  log?: Pick<Console, 'warn'>
+  log?: Pick<Console, 'warn' | 'info'>
   /** Ends the server did not hear (a lost `finish`): retried, and flushed before this member's next task. */
   pendingEnds?: PendingEnds
   /** This PC's tool set for the operator (agent-browser.md "The operator's tool sets"), read once per run; absent: `current`. */
@@ -131,6 +131,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     }
 
     const steps: BrowserRunLogStep[] = []
+    // One tool set for the whole run: only what the operator is told and how its answer is read (the same actions after).
+    const toolset = deps.toolset?.() ?? DEFAULT_BROWSER_OPERATOR_TOOLSET
     let outcome: BrowserRunOutcome = 'failed'
     let reason: BrowserRunEndReason | undefined
     let entered = false
@@ -158,12 +160,10 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       if (!(await win.enter(() => deps.stopped(companyId) || !current()))) { reason = 'refused'; return refused(W.failed) }
 
       const history: BrowserBrowseHistoryEntry[] = []
-      // One tool set for the whole run: only what the operator is told and how its answer is read (the same actions after).
-      const toolset = deps.toolset?.() ?? DEFAULT_BROWSER_OPERATOR_TOOLSET
       // The operator's own working memory between its fresh, tool-less steps (never the chat AI's).
       let notes = ''
       // Its trail for the member's card only (outside text: never the chat AI's words or the server's log).
-      const trail = createOperatorTrail('browse')
+      const trail = createOperatorTrail('browse', toolset)
       for (let round = 1; round <= L.rounds; round++) {
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         // No frame the write gate does not see (a login check left in the page): stop, as a run does.
@@ -187,7 +187,7 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         })
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         if (!step.ok) { reason = 'operator-failed'; return refused(W.failed) }
-        const read = readToolsetAnswer(toolset, step.text, page)
+        const read = readToolsetAnswer(toolset, step.text, { page, history, host })
         const parsed = 'problem' in read ? read : parseBrowseAnswer(read.text, { snapshot: page, items: input.items.length })
         if ('problem' in parsed) { reason = 'bad-answer'; return refused(W.failed) }
         const answer = parsed.answer
@@ -230,6 +230,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       // The log and the lock: always told (no value in it); lost to the network = kept and sent again until its lease is
       // over (agent-browser.md "Letting a domain go"; a run past its lease counts as ended on the server anyway).
       const body = { outcome, ...(reason ? { reason } : {}), steps }
+      // This PC's own record of which tool set the run used (agent-browser.md "The operator's tool sets"); never the server's.
+      ;(deps.log ?? console).info(`[browser] operator run ${runId} (read): tool set ${toolset}, ${outcome}${reason ? ` (${reason})` : ''}`)
       void sendEnd(deps.pendingEnds, { runId, userId, companyId, until: now() + BROWSER_RUN_LIMITS.leaseMs }, () => deps.api.runFinish(companyId, runId, body))
     }
   }
