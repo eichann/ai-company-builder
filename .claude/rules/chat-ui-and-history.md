@@ -654,7 +654,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     `file.open`, as the page cards): the HTML viewer opens it (doc-frame.md: its own view, no network, an opaque origin,
     that folder only). **［ページとして残す］** keeps the same page and shows it under the reply as a page card
     (「ページとして残しました」, 「ページ・あなただけに見えます・<name>」), which opens it the same way. The same reply in the
-    same conversation keeps one file (remembered per conversation and text, ≤ 100); a refusal shows as an alert line.
+    same conversation keeps one file (remembered per conversation and text, ≤ 100) while it is still there (`fs:exists`;
+    moved or deleted → kept again under a free name); while the reply is still being written the two are disabled; a
+    refusal shows as an alert line.
   - **The page is the AI's HTML as written** (owner ④): `richReplyPage.ts` `replyPageDocument` — the reply's Markdown as
     the chat draws it, each ```` ```acb-html ```` / ```` ```acb-slide ```` block uncleaned, the app's tokens, typography and
     ready-made boxes (`appCss`, `FRAME_CSS`); a small script of its own sets `.dark` from the computer's setting (the
@@ -665,7 +667,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     folder the chat requests already carry, which consultation (company and conversation id) and the page — never a
     file path. Main builds `<root>/<today folder>/ページ/<name>.html` with `replyPageFolderOf` (only a today folder of the
     app's shape: never the top level, never another place), refuses a department not on this computer, a folder not
-    downloaded and a reserved name, checks the folder by real location before and after making it, names the page after
+    downloaded and a reserved name (the folder's and the file's), checks the folder by real location before and after
+    making it and refuses a link anywhere from the department down to `ページ/` (Codex review: a link to a shared folder
+    inside the company folder passes the root check, and the page would be synced), names the page after
     the consultation's stored title (`client/shared/reply-pages.ts` `replyPageBaseName`: path, Windows, control,
     invisible and direction characters out, ≤ 40 characters, else 「AI の返事」) and creates it with `wx`, trying
     「名前 (2).html」… up to 50: nothing is ever replaced. The buttons that keep a page show only where the conversation has
@@ -674,11 +678,12 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     (「整えた表示に戻す」, `aria-pressed`) the frame comes back.
   Tests: `tests/ipc-reply-pages.test.ts` (the page in ページ/ named after the consultation, as written; a taken name gets
   (2), (3) and the member's file is untouched; another root, a climb, another shape, the top level, a department not
-  here and a link out of the company folder are refused with nothing written outside; not a page refused; the name rule;
-  mutation-checked: `wx`, the folder shape, the real-location check), `tests/ipc-path-guard.test.ts` (`rootPath`
+  here, a link out of the company folder and a link to a shared folder inside it are refused with nothing written
+  there; not a page refused; the name rule; mutation-checked: `wx`, the folder shape, the real-location check, the link
+  check), `tests/ipc-path-guard.test.ts` (`rootPath`
   GUARDED), `tests/ui/chat-rich-reply.spec.ts` 「the reply's buttons」 (`chat-header-ui.html?pages=1`: hidden until
-  hover or focus, three buttons only with a today folder; ［大きく見る］ asks main once with the uncleaned block and
-  opens the viewer, the chat's frame still without the script; ［ページとして残す］'s card and a refusal; ［コードとして見る］;
+  hover or focus, three buttons only with a today folder; disabled while written; ［大きく見る］ asks main once with the
+  uncleaned block and opens the viewer, the chat's frame still without the script, and a deleted page is kept again; ［ページとして残す］'s card and a refusal; ［コードとして見る］;
   the 20,000 px line's button; mutation-checked: the focus rule, the one file per reply).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a

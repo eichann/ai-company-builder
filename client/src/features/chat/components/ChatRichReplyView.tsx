@@ -24,7 +24,7 @@ function remember(key: string, page: KeptPage) {
 
 const BUTTON = 'inline-flex h-7 w-7 items-center justify-center rounded-control text-text-muted hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring'
 
-export function ChatRichReplyView({ text }: { text: string }) {
+export function ChatRichReplyView({ text, writing = false }: { text: string; /** Still being written: nothing to keep yet. */ writing?: boolean }) {
   const pages = useContext(ReplyPagesContext)
   const isDark = useAppStore(s => s.theme) === 'dark'
   const inEditor = useCommandAvailable('editor.viewDocument')
@@ -36,10 +36,11 @@ export function ChatRichReplyView({ text }: { text: string }) {
   const keep = async (): Promise<KeptPage | null> => {
     if (!pages) return null
     const key = `${pages.scope()}|${text}`
-    const known = keptPages.get(key)
-    if (known) return known
     setBusy(true)
     try {
+      // Kept before and still there: the same file (moved or deleted by the member: kept again).
+      const known = keptPages.get(key)
+      if (known && await pages.stillThere(known.path)) return known
       const saved = await pages.save(replyPageDocument(text, 'AI の返事', isDark))
       if (!saved.success) { setProblem(saved.error); return null }
       const page = { path: saved.path, name: saved.name }
@@ -75,10 +76,10 @@ export function ChatRichReplyView({ text }: { text: string }) {
       >
         {pages && (
           <>
-            <button type="button" className={BUTTON} disabled={busy} onClick={() => void openLarge()} aria-label="大きく見る" title="大きく見る（真ん中のタブで開きます）">
+            <button type="button" className={BUTTON} disabled={busy || writing} onClick={() => void openLarge()} aria-label="大きく見る" title="大きく見る（真ん中のタブで開きます）">
               <ArrowsOut size={15} aria-hidden />
             </button>
-            <button type="button" className={BUTTON} disabled={busy} onClick={() => void keepAsPage()} aria-label="ページとして残す" title="ページとして残す（今日のフォルダに置きます。あなただけに見えます）">
+            <button type="button" className={BUTTON} disabled={busy || writing} onClick={() => void keepAsPage()} aria-label="ページとして残す" title="ページとして残す（今日のフォルダに置きます。あなただけに見えます）">
               <BookmarkSimple size={15} aria-hidden />
             </button>
           </>

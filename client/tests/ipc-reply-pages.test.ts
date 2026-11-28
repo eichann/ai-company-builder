@@ -77,6 +77,13 @@ test('never outside the today folder: another root, another shape, a climb, the 
   const linked = await save({ todayFolder: '人事/.personal/inbox/日付別/2026/20261128' })
   assert.equal(linked.success, false)
   assert.deepEqual(fs.readdirSync(outside), before)
+  // A link inside the company folder, to a shared folder: the page would be synced while said to be the member's alone.
+  writeFiles(root, { '営業部/共有/x.md': 'shared' })
+  fs.mkdirSync(path.join(root, '営業部', '.personal', 'inbox', '日付別', '2026', '20261127'), { recursive: true })
+  fs.symlinkSync(path.join(root, '営業部', '共有'), path.join(root, '営業部', '.personal', 'inbox', '日付別', '2026', '20261127', 'ページ'))
+  const shared = await save({ todayFolder: '営業部/.personal/inbox/日付別/2026/20261127' })
+  assert.equal(shared.success, false)
+  assert.deepEqual(fs.readdirSync(path.join(root, '営業部', '共有')), ['x.md'])
   // Nothing landed at the company folder's top level either.
   assert.deepEqual(fs.readdirSync(root).filter(name => name.endsWith('.html')), [])
 })

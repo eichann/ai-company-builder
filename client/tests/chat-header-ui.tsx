@@ -209,11 +209,15 @@ const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled
 const pagesOn = params.get('pages') === '1'
 const PREVIEW_TODAY = '営業部/.personal/inbox/日付別/2026/20261128'
 const pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: unknown; html: string }> = []
+// Pages on "disk" (a spec removes one through __acbChat.pagesOnDisk, as the member deleting it would).
+const pagesOnDisk = new Set<string>()
 installElectronAPI({
+  exists: async filePath => pagesOnDisk.has(filePath),
   saveReplyPage: async (rootPath, todayFolder, consultation, html) => {
     pagesSaved.push({ rootPath, todayFolder, consultation, html })
     if ((window as unknown as { __acbPageRefusal?: string }).__acbPageRefusal) return { success: false, error: (window as unknown as { __acbPageRefusal: string }).__acbPageRefusal }
     const name = pagesSaved.length === 1 ? 'AI の返事.html' : `AI の返事 (${pagesSaved.length}).html`
+    pagesOnDisk.add(`${rootPath}/${todayFolder}/ページ/${name}`)
     return { success: true, path: `${rootPath}/${todayFolder}/ページ/${name}`, name }
   },
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
@@ -386,8 +390,9 @@ const control = {
   opened: [] as string[],
   /** HTML pages the chat asked the editor to show (`editor.viewDocument`). */
   viewed: [] as string[],
-  /** Rich replies kept as pages (?pages=1). */
+  /** Rich replies kept as pages (?pages=1), and which are still on "disk". */
   pagesSaved,
+  pagesOnDisk,
   answered(id: string, response: AgentInteractionResponse) {
     control.answers.push({ id, response })
     const toolCallId = id.replace(/^ask-/, '')

@@ -11,7 +11,7 @@ import path from 'path'
 import type { PathGuard } from '../ports'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { notDownloadedRefusal } from '../../file-guards'
-import { replyPageFolderOf } from '../../../shared/reply-style'
+import { REPLY_PAGE_FOLDER, replyPageFolderOf } from '../../../shared/reply-style'
 import {
   REPLY_PAGE_MAX_CHARS, REPLY_PAGE_MAX_TRIES, replyPageBaseName, replyPageFileName,
   type ReplyPageConsultation, type ReplyPageSaveResult,
@@ -36,6 +36,16 @@ const consultationOf = (value: unknown): ReplyPageConsultation | null => {
     ? { companyId, sessionId } : null
 }
 
+/** Whether the department, any folder of the today folder or its ページ/ is a link (they are all made by the app). */
+async function linkBelow(root: string, todayFolder: string): Promise<boolean> {
+  let at = root
+  for (const segment of [...todayFolder.split('/'), REPLY_PAGE_FOLDER]) {
+    at = path.join(at, segment)
+    if ((await fs.promises.lstat(at)).isSymbolicLink()) return true
+  }
+  return false
+}
+
 export function registerReplyPagesIpc(ipc: IpcRegistrar, deps: ReplyPagesDeps): void {
   const { paths } = deps
   ipc.handle('replyPage:save', async (_, rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string): Promise<ReplyPageSaveResult> => {
@@ -53,11 +63,16 @@ export function registerReplyPagesIpc(ipc: IpcRegistrar, deps: ReplyPagesDeps): 
       paths.validate(folder)
       await fs.promises.mkdir(folder, { recursive: true })
       const madeFolder = paths.validate(folder)
+      // No link on the way down from the company folder (Codex review): one to a shared folder inside the company folder
+      // passes the root check, and the page would be synced while the member is told it is theirs alone.
+      if (await linkBelow(root, todayFolder)) return { success: false, error: NO_PLACE }
       const who = consultationOf(consultation)
       const base = replyPageBaseName(who ? deps.consultationTitle(who.companyId, who.sessionId) : null)
       for (let n = 1; n <= REPLY_PAGE_MAX_TRIES; n++) {
         const name = replyPageFileName(base, n)
         const file = paths.validate(path.join(madeFolder, name))
+        const nameRefused = await deps.writeRefusal(file)
+        if (nameRefused) return { success: false, error: nameRefused }
         try {
           await fs.promises.writeFile(file, html, { encoding: 'utf-8', flag: 'wx' })
           return { success: true, path: file, name }

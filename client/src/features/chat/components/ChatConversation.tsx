@@ -50,7 +50,7 @@ import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
 import { AppInstructionChip } from './AppInstructionChip'
 import { TopicChip } from './TopicChip'
-import { patchChatSession, saveReplyPage } from '../api'
+import { patchChatSession, replyPageStillThere, saveReplyPage } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 import { chatErrorText } from '../chatErrorText'
 import { replyAsksTheMember } from '../aiTurns'
@@ -431,6 +431,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       if (!root || !folder || !companyId || !sessionId) return { success: false, error: '今日のフォルダが見つからないため、ページを残せません。' }
       return saveReplyPage(root, folder, { companyId, sessionId }, html)
     },
+    stillThere: filePath => replyPageStillThere(filePath).catch(() => false),
   } : null), [todayFolder, companyIdRef, companyRootRef, todayFolderRef, appSessionIdRef])
   const reviewActions = useMemo<ReviewActions>(() => ({
     pendingId: pendingReviewId,

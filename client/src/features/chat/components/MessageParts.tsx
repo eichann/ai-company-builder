@@ -98,7 +98,7 @@ const TextPartView = memo(function TextPartView({ text, markdown, showCursor }: 
     <div data-assistant-text className="break-words text-[14px] leading-relaxed text-text">
       {markdown ? (
         // A reply with ```acb-html / ```acb-slide is drawn whole in its closed frame, whatever 「返事の形」, with its three buttons.
-        hasRichBlock(text) ? <ChatRichReplyView text={text} /> : <MarkdownMessage content={text} />
+        hasRichBlock(text) ? <ChatRichReplyView text={text} writing={showCursor} /> : <MarkdownMessage content={text} />
       ) : (
         <div className="whitespace-pre-wrap">{text}</div>
       )}

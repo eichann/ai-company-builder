@@ -10,6 +10,8 @@ export interface ReplyPages {
   /** Pages already kept are remembered per conversation (the same reply opens the same file). */
   scope: () => string
   save: (html: string) => Promise<ReplyPageSaveResult>
+  /** A page kept earlier is still where it was (the member may have moved or deleted it). */
+  stillThere: (filePath: string) => Promise<boolean>
 }
 
 export const ReplyPagesContext = createContext<ReplyPages | null>(null)

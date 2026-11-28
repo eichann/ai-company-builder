@@ -8,7 +8,7 @@ import { ALL_TRAPS, GOOD_REPLY } from './fixtures/reply-html-traps'
 import { RICH_HTML_PIECES } from '../../shared/reply-style'
 
 type Control = { open(): boolean; send(chunk: unknown): void; text(id: string, delta: string): void; finish(): void; toggleTheme(): void
-  viewed: string[]; opened: string[]; pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: { companyId: string; sessionId: string }; html: string }> }
+  viewed: string[]; opened: string[]; pagesOnDisk: Set<string>; pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: { companyId: string; sessionId: string }; html: string }> }
 type PageGlobals = { __acbChat: Control; __pwned?: unknown[] }
 
 const input = (page: Page) => page.locator('.cm-content[role="textbox"]').locator('visible=true')
@@ -487,6 +487,9 @@ test.describe('the reply\'s buttons', () => {
     await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
     await send(page, '表にして')
     await reply(page, `表です。\n\n${fence('acb-html', RAW)}`)
+    // Still being written: nothing to keep yet.
+    await expect(shownFrame(page)).toBeVisible()
+    await expect(toolbar(page).getByRole('button', { name: '大きく見る' })).toBeDisabled()
     await finish(page)
     await shownFrame(page).hover()
     await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
@@ -505,6 +508,11 @@ test.describe('the reply\'s buttons', () => {
     await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
     await expect.poll(() => chat(page, c => c.viewed)).toEqual([path, path])
     expect(await chat(page, c => c.pagesSaved.length), 'kept once').toBe(1)
+    // The member deleted it: kept again, under a new name (nothing replaced), and that one opens.
+    await chat(page, c => c.pagesOnDisk.clear())
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed.at(-1))).toBe(path.replace('AI の返事.html', 'AI の返事 (2).html'))
+    expect(await chat(page, c => c.pagesSaved.length)).toBe(2)
   })
 
   test('［ページとして残す］ shows the page as a card for the member alone; the card opens it; a refusal is said', async ({ page }) => {
