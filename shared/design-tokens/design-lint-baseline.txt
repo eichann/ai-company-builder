@@ -153,13 +153,13 @@ client/src/features/doc-review/components/ReviewSaveError.tsx type-scale=1
 client/src/features/doc-review/components/ReviewSidePanel.tsx arbitrary-value=9 opacity-scale=2 palette-color=93 radius-scale=1 type-scale=3 z-index=1
 client/src/features/doc-review/components/severity.tsx arbitrary-value=1
 client/src/features/editor/components/BinaryPreviews.tsx palette-color=6 type-scale=3
-client/src/features/editor/components/EditorNotices.tsx palette-color=13 radius-scale=5 type-scale=2 white-black=3
+client/src/features/editor/components/EditorNotices.tsx palette-color=7 radius-scale=2 type-scale=2 white-black=1
 client/src/features/editor/components/EditorTabBar.tsx arbitrary-value=5 palette-color=24 type-scale=1 white-black=2
 client/src/features/editor/components/MarkdownPreview.tsx opacity-scale=2 palette-color=25 shadow-scale=1 type-scale=1 white-black=1 z-index=1
 client/src/features/editor/components/MarkdownPreviewPane.tsx opacity-scale=1 palette-color=18 radius-scale=2 shadow-scale=3 type-scale=1 white-black=2
 client/src/features/editor/components/PlaceNavigation.tsx opacity-scale=1 palette-color=6
 client/src/features/editor/components/TabGroupParts.tsx arbitrary-value=1 opacity-scale=2 palette-color=14 type-scale=1
-client/src/features/editor/components/TabbedEditorPanel.tsx arbitrary-value=3 opacity-scale=2 palette-color=33 radius-scale=1 shadow-scale=1 white-black=1
+client/src/features/editor/components/TabbedEditorPanel.tsx arbitrary-value=3 opacity-scale=2 palette-color=25 radius-scale=1 shadow-scale=1 white-black=1
 client/src/features/editor/components/TidiedTabsDialog.tsx arbitrary-value=1
 client/src/features/editor/components/TidyNoticeBar.tsx palette-color=13
 client/src/features/editor/hooks/usePreviewSearch.ts palette-color=5 radius-scale=2

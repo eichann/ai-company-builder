@@ -9,7 +9,10 @@ import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle, undoTas
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { bundleListWord, companyNow, departmentBundleKind, dueText, filterByTag, listEvents, listRows, listSections, nextMondayDue, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { bundleListWord, companyNow, departmentBundleKind, dueText, filterByTag, listEvents, listRows, listSections, nextMondayDue, tagCounts, workOrder, type ListMode, type ListRow, type ListSection } from '../model'
+import { commandArea } from '../../../shared/commands/commands'
+import { workListRef } from '../../../shared/lib/workThrough'
+import { WorkThroughNotice } from '../../../shared/ui/WorkThrough'
 import { OverdueFix, type OverdueDone } from './OverdueFix'
 import { CALM } from '../../../../shared/thing-words'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
@@ -17,6 +20,9 @@ import { ArchiveSection } from './ArchiveSection'
 import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
+
+/** The list's name for working through it (shared/lib/workThrough.ts): AppShell shows its items in the middle. */
+export const TASK_LIST_WORK_KEY = 'tasks'
 
 const HEADER = 'mb-1 flex w-full items-center gap-1.5 px-2.5 text-caption font-semibold text-gray-500 dark:text-zinc-400'
 
@@ -43,9 +49,10 @@ interface Props {
   /**
    * A task the member completed with its ☑ here (owner FB #15), or a 来た連絡 they checked as 済んだ
    * (owner FB #20): AppShell closes its tab in the middle and its automatic consultations (as the card's
-   * own end button does, owner FB #29). Not for 見てもらう, やり直す or 元に戻す.
+   * own end button does, owner FB #29). Not for 見てもらう, やり直す or 元に戻す. `undo` takes the press back (the
+   * refusal's words, or null): working through the list, the next item takes its place with 取り消す.
    */
-  onCompleted?: (recordId: string) => void
+  onCompleted?: (recordId: string, undo: () => Promise<string | null>) => void
   /** 「今日の予定」 belongs to 会議と議事録 (owner decision 2026-11-07): off, no meeting is read or mixed in. */
   showCalendar?: boolean
   /** A company without the shared folder: a file dropped on a row is linked as the member's own (あなただけ). */
@@ -80,6 +87,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   // 「〇〇ごと」: the kinds in the member's list; with none linked, the department on screen's kind.
   const bundleWord = useMemo(() => bundleListWord(items, deptKind?.name ?? kinds?.core.name), [items, deptKind, kinds])
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now, deptKind?.name ?? kinds?.core.name), [items, events, mode, now, shownTag, deptKind, kinds])
+  // What ↑ ↓ go over and 「3 / 11」 counts: the rows on screen (tasks-ui.md "Working through a list").
+  const order = useMemo(() => workOrder(sections, key => unfolded[key] === true), [sections, unfolded])
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
   /** True when every step went through. */
@@ -117,7 +126,16 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
     // Checked off (a task's 完了, a 来た連絡's 済んだ — owner FB #20): its tab in the middle goes too
     // (owner FB #15); やり直す / 元に戻す do not bring it back.
-    else if (c.action === 'complete' || c.action === 'settle') void run(item, [{ action: c.action }]).then(ok => { if (ok) onCompleted?.(item.id) })
+    else if (c.action === 'complete' || c.action === 'settle') {
+      // One step: its ledger entry is the version after the one the list knows.
+      const entry = item.version + 1
+      const undo = async () => {
+        const r = await undoTaskAction(companyId, item.id, entry, entry)
+        list.reload()
+        return r.success ? null : r.error
+      }
+      void run(item, [{ action: c.action }]).then(ok => { if (ok) onCompleted?.(item.id, undo) })
+    }
     // A 来た連絡 closed today: 元に戻す is the undo of that 済んだ (the server refuses when something changed since).
     else if (c.action === 'undo') void undoOne(item, c.version)
     else void run(item, [{ action: c.action }])
@@ -319,7 +337,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
           </div>
         )}
         {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded-small bg-amber-50 px-2 py-1 text-caption font-normal text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
+        <WorkThroughNotice listKey={TASK_LIST_WORK_KEY} />
+        <div ref={workListRef(TASK_LIST_WORK_KEY, order)} data-work-list={TASK_LIST_WORK_KEY} {...commandArea('list', TASK_LIST_WORK_KEY)} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
           {list.data === null && !list.error && <p className="px-2.5 py-2 text-small text-gray-400">{CALM.loading}</p>}
           {list.data && sections.length === 0 && (
             <p className="px-2.5 py-4 text-small leading-relaxed text-gray-500 dark:text-zinc-400">

@@ -31,7 +31,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status, claudeSignIn:* — `chat-and-agents.md` "Signing in to Claude Code"), `env`,
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
-  editor:backupBeforeOverwrite; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
+  editor:backupBeforeOverwrite, editor:backupEdits; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
@@ -325,7 +325,7 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 
 ## Guards on what the renderer hands main (keep them)
 
-- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `env:*`,
+- Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `editor:backupEdits`, `env:*`,
   `git:*` incl. sync / log / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
   goes through `AllowedRoots.validate` (`client/electron/allowed-roots.ts`): inside a registered
   company root **by name and by real location** — every symlink resolved (`realpathSync.native`;

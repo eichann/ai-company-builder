@@ -14,8 +14,26 @@ import { applyDiskDecision, decideOnDiskEvent, isDirty, type EditorFileState } f
 export interface OpenFile extends EditorFileState {
   path: string
   isLoading: boolean
-  /** The member chose 「自分の編集を残す」: the banner stays, in its short form, until saved. */
-  keepMine?: boolean
+  /**
+   * The compare view (the version that arrived vs. the tab's edits, ［自分の版を保存］ /
+   * ［届いた版を採用］) is open for this tab. Only while `external` is a change.
+   */
+  comparing?: boolean
+  /** The file changed again while the member was comparing: the view says so until they pick. */
+  changedWhileComparing?: boolean
+  /** Keeping a version in the backups failed for this change: only then may closing drop the edits. */
+  keepFailed?: boolean
+}
+
+/**
+ * The compare view after a disk event: it closes once nothing is left to
+ * choose, and says so when the version it shows was replaced meanwhile.
+ */
+function followCompare(before: OpenFile, after: OpenFile): OpenFile {
+  if (after.external?.kind !== 'changed') return { ...after, comparing: false, changedWhileComparing: false, keepFailed: false }
+  if (!after.comparing) return after
+  const shown = before.external?.kind === 'changed' ? before.external.diskContent : null
+  return shown === after.external.diskContent ? after : { ...after, changedWhileComparing: true }
 }
 
 /**
@@ -78,7 +96,7 @@ export function useOpenFiles(
           const updated = applyDiskDecision(cur, decideOnDiskEvent(cur, disk))
           if (updated === cur) return prev
           const next = new Map(prev)
-          next.set(filePath, updated.external ? updated : { ...updated, keepMine: false })
+          next.set(filePath, followCompare(cur, updated))
           return next
         })
       } catch {
@@ -99,7 +117,7 @@ export function useOpenFiles(
             : applyDiskDecision(f, decideOnDiskEvent(f, null))
           if (updated !== f) {
             next ??= new Map(prev)
-            next.set(p, updated)
+            next.set(p, isBinaryFile(p) ? updated : followCompare(f, updated))
           }
         }
         return next ?? prev

@@ -3,6 +3,7 @@ import i18n from '../i18n'
 import type { CompanyView } from '../types'
 import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
 import { forgetAllShown } from '../shared/lib/shownCache'
+import { forgetAllWork } from '../shared/lib/workThrough'
 import { MODEL_EFFORT_OPTIONS as EFFORTS_OF_MODEL, resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../shared/lib/aiModels'
 
 // Theme type
@@ -142,8 +143,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (company?.rootPath && canRegisterCompanyFolder()) {
       registerCompanyFolder(company.rootPath)
     }
-    // Another company or none (sign-out sets none): no view shows what it remembered of the last one.
-    if (company?.id !== get().currentCompany?.id) forgetAllShown()
+    // Another company or none (sign-out sets none): no view shows what it remembered of the last one, and no
+    // list keeps its place or a 取り消す that would act on the last company (tasks-ui.md "Working through a list").
+    if (company?.id !== get().currentCompany?.id) { forgetAllShown(); forgetAllWork() }
     set({ currentCompany: company, companyToChoose: null })
   },
 
@@ -151,7 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (company.rootPath && canRegisterCompanyFolder()) {
       registerCompanyFolder(company.rootPath)
     }
-    if (company.id !== get().currentCompany?.id) forgetAllShown()
+    if (company.id !== get().currentCompany?.id) { forgetAllShown(); forgetAllWork() }
     set({ currentCompany: company, companyToChoose: null })
   },
 

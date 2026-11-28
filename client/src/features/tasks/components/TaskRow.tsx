@@ -115,7 +115,8 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
             </span>
           ) : <ThingIcon kind={kind} typeLabel={item.typeLabel} size={15} />}
       </span>
-      <button type="button" onClick={() => onOpen(item.id)} className="min-w-0 flex-1 text-left">
+      {/* The row's own button: ↑ ↓ Enter move from it when working through the list (data-work-row). */}
+      <button type="button" data-work-row={item.id} aria-current={active ? 'true' : undefined} onClick={() => onOpen(item.id)} className="min-w-0 flex-1 rounded-small text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring">
         <span className="flex items-center gap-1.5">
           <span className={`truncate text-body ${done ? 'text-gray-400 line-through dark:text-zinc-500' : 'text-gray-800 dark:text-zinc-200'}`}>{item.title}</span>
           {item.personal && <SeenBy who={ONLY_YOU} small />}

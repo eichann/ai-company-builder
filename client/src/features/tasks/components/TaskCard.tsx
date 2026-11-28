@@ -75,9 +75,10 @@ interface Props {
   onChanged?: () => void
   /**
    * The member completed it here (owner FB #29): AppShell closes its tab in the middle and its
-   * automatic consultations, as the list's ☑ does. Not for 見てもらう or 中止, nor for 取り消す.
+   * automatic consultations, as the list's ☑ does. Not for 見てもらう or 中止, nor for 取り消す. `undo` (a one-step
+   * press) takes it back — the refusal's words, or null — for the list the card was shown from.
    */
-  onEnded?: (recordId: string) => void
+  onEnded?: (recordId: string, undo?: () => Promise<string | null>) => void
   /** What the department on screen makes as its 案件・プロジェクト (`tasks:bundleKinds`): its name for ［〇〇につなぐ］ and the kind ［新しい〇〇にする］ makes; null until known. */
   bundleKind?: BundleKind | null
   /** The department's folder a new one is put in (全社: none) when `bundlePlaces` is not given. */
@@ -181,7 +182,14 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     }
     // Only a one-step press is undone in one step.
     setNotice(done ? { kind: 'done', text: done, undo: steps.length === 1 ? { recordId, version: at } : null } : null)
-    if (steps[steps.length - 1]?.action === 'complete') onEnded?.(recordId)
+    if (steps[steps.length - 1]?.action === 'complete') {
+      const entry = at
+      onEnded?.(recordId, steps.length === 1 ? async () => {
+        const r = await undoTaskAction(companyId, recordId, entry, entry)
+        onChanged?.()
+        return r.success ? null : r.error
+      } : undefined)
+    }
     return null
   })
   const undo = (target: UndoTarget) => change(async () => {
@@ -462,11 +470,9 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
   const textNow = { title: record.title, purpose: card.purpose }
-  // The assignee's every action accepts a request still 引き受け待ち (records.md "Acceptance"): said before saving.
-  const accepts = card.roles.assignee && record.state === 'awaiting_acceptance'
   return (
     <RecordPage testId="task-card" kind="task" name="やること" title={record.title}
-      titleEdit={taskTitleEdit(textNow, card.canEdit.title, busy, accepts, onEditText)}
+      titleEdit={taskTitleEdit(textNow, card.canEdit.title, busy, onEditText)}
       titleNote={meetingTitle ? `（${meetingTitle}）` : null} top={top}
       chips={<>
         {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
@@ -481,7 +487,7 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
       from={<>
         {/* 目的 right under the title, corrected in place (task version 16). Not keyed by version: a reload (someone
             else's change, a press half done) keeps the draft and the refusal in the field. */}
-        <TaskPurpose now={textNow} may={card.canEdit.purpose} busy={busy} accepts={accepts} onSave={onEditText} />
+        <TaskPurpose now={textNow} may={card.canEdit.purpose} busy={busy} onSave={onEditText} />
         {card.origin && <OriginLine origin={card.origin} />}
       </>}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}

@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { askedByOthers, bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, keptTaskTabFacts, taskTabShown, filterByTag, linkCandidates, meetingRowText, nextCard, nextMondayDue, overdueFixes, postponeChoices } from './model'
+import { askedByOthers, bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, keptTaskTabFacts, taskTabShown, filterByTag, linkCandidates, meetingRowText, nextCard, nextMondayDue, overdueFixes, postponeChoices, workOrder } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -244,4 +244,19 @@ test('非公開 is offered exactly to who may make a private folder there: owner
 test('a 非公開 one\'s folder name follows the folder-name rule, with -2… for a taken name', () => {
   assert.deepEqual(privateBundleFolderNames('A社 研修/導入', 'プロジェクト').slice(0, 2), ['A社-研修-導入', 'A社-研修-導入-2'])
   assert.equal(privateBundleFolderNames('...', 'プロジェクト')[0], 'プロジェクト')
+})
+
+// Working through the list (UX 点検 14, owner decision 2026-11-28): ↑ ↓ and 「3 / 11」 go over what the member sees and
+// can still work on — never a folded section's hidden rows, a finished item, or 期限切れ (handled by 「まとめて直す」).
+test('the work order is the rows on screen top to bottom: folded parts only once opened, nothing finished, no 期限切れ', () => {
+  const meeting = (id: string): TaskListItem => ({ ...item(id, 'mine', null), type: 'meeting', needsBundle: true, bundleGroup: { key: 'g', label: '相手' } })
+  const sections = listSections([
+    item('acc', 'acceptance', null), item('late', 'mine', '2026-11-03'), item('today', 'mine', '2026-11-05'),
+    item('soon', 'mine', '2026-11-06'), meeting('m1'), meeting('m2'), { ...item('someday', 'mine', null), resting: true },
+    item('ai', 'ai', '2026-11-06'), item('done', 'done', null),
+  ], [], 'turn', NOW)
+  const closed = workOrder(sections, () => false)
+  assert.deepEqual(closed, ['acc', 'today', 'soon', 'ai'])
+  const opened = new Set(['someday', 'group:g'])
+  assert.deepEqual(workOrder(sections, key => opened.has(key)), ['acc', 'today', 'soon', 'm1', 'm2', 'ai', 'someday'])
 })
