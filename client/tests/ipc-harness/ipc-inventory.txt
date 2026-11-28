@@ -1085,7 +1085,7 @@ contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [compan
 contract.type IpcInvokeChannels.'minutes:skipReading' = 'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'notifications:markRead' = 'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
-contract.type IpcInvokeChannels.'notifications:refresh' = 'notifications:refresh': { args: [companyId: string]; result: void }
+contract.type IpcInvokeChannels.'notifications:refresh' = 'notifications:refresh': { args: [companyId: string]; result: NoticesState }
 contract.type IpcInvokeChannels.'notifications:setSetting' = 'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
 contract.type IpcInvokeChannels.'notifications:settings' = 'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
 contract.type IpcInvokeChannels.'notifications:state' = 'notifications:state': { args: [companyId: string]; result: NoticesState }
@@ -2053,7 +2053,7 @@ preload reconcileTaskRun : (companyId: string, runId: string, key: string, done:
 preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, $3, $4)
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload refreshNotifications -> invoke notifications:refresh($0)
-preload refreshNotifications : (companyId: string) => Promise<void>
+preload refreshNotifications : (companyId: string) => Promise<NoticesState>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
 preload registerBrowserPc -> invoke browserDevice:register($0, $1)

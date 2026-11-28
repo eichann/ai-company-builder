@@ -112,7 +112,10 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
   /** Per company: the turn items already seen (null until the first answer). */
   const seenTurn = new Map<string, Set<string>>()
   /** A look running per company: `again` = asked once more meanwhile; `untold` = one of the askers was not a records signal. */
-  const refreshing = new Map<string, { again: boolean; untold: boolean }>()
+  const refreshing = new Map<string, { again: boolean; untold: boolean; done: Promise<void> }>()
+  /** Looks are numbered as they start; per company, the look whose answer `known` holds (`refreshNow`: a look started after the ask). */
+  let looksStarted = 0
+  const answeredBy = new Map<string, number>()
 
   async function call(companyId: string, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<Answer | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
@@ -170,19 +173,26 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
   /** `told`: a records signal started it, and the task list has been told already. */
   async function refresh(companyId: string, told = false): Promise<void> {
     const running = refreshing.get(companyId)
-    if (running) { running.again = true; if (!told) running.untold = true; return }
-    const state = { again: false, untold: !told }
+    // Asked while one runs: it runs once more, and this ask is done when that last look is (`refreshNow`).
+    if (running) { running.again = true; if (!told) running.untold = true; return running.done }
+    const state = { again: false, untold: !told, done: Promise.resolve() }
+    state.done = look(companyId, state)
     refreshing.set(companyId, state)
+    return state.done
+  }
+
+  async function look(companyId: string, state: { again: boolean; untold: boolean }): Promise<void> {
     try {
       do {
         state.again = false
+        const lookId = ++looksStarted
         const untold = state.untold
         state.untold = false
         const [turn, notices] = await Promise.all([myTurn(companyId), call(companyId, 'GET', '/me/notifications')])
         // Asked for another session or server than now (signed out meanwhile): nothing is shown or
         // notified, but a look asked meanwhile (the next account's watch) still runs.
         if (turn === 'discarded') continue
-        const publish = (next: NoticesState) => publishState(companyId, next, untold)
+        const publish = (next: NoticesState) => { publishState(companyId, next, untold); answeredBy.set(companyId, lookId) }
         // Off line or an older server: keep what was shown.
         if (!turn || !notices) return
         if (turn.status !== 200 || notices.status !== 200) {
@@ -239,6 +249,20 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
       if (companyId === current) void refresh(companyId, told)
     },
 
+    /**
+     * The renderer learnt that what it shows is older than the server's answer (a contact gone, inbox.md): the company
+     * on screen is read again now, and this answers what the look that started after the ask left (another company:
+     * nothing read, nothing answered).
+     */
+    async refreshNow(companyId: string): Promise<NoticesState> {
+      if (companyId !== current) return NO_NOTICES
+      const asked = looksStarted
+      await refresh(companyId)
+      // Off line, an older server or signed out meanwhile: what is kept is from before the ask — nothing is answered.
+      if (companyId !== current || (answeredBy.get(companyId) ?? 0) <= asked) return NO_NOTICES
+      return known.get(companyId) ?? NO_NOTICES
+    },
+
     async markRead(companyId: string, ids: string[] | 'all'): Promise<NoticesActionResult> {
       if (!COMPANY.test(companyId)) return { success: false, error: '入力が正しくありません。' }
       if (ids !== 'all' && (!Array.isArray(ids) || ids.length === 0 || ids.length > 200 || !ids.every(i => typeof i === 'string' && NOTICE_ID.test(i)))) {
@@ -274,6 +298,7 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
       current = null
       if (timer !== null) { stopEvery(timer); timer = null }
       known.clear()
+      answeredBy.clear()
       seenTurn.clear()
       shown = null
     },

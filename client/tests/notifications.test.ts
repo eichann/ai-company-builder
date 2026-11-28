@@ -231,6 +231,46 @@ test('an AI change notice keeps the operation ［元に戻す］ sends only when
   watcher.stop()
 })
 
+test('「read again now」 (a contact gone, inbox.md) answers only a look started after the ask — never what was kept from before, never another company\'s', async () => {
+  const before = { ...NOTICES, items: [{ ...NOTICES.items[0], recordId: 'interaction-aaaaaa01', recordType: 'interaction', recordTitle: '役員人事' }] }
+  const after = { ...NOTICES, items: [{ ...NOTICES.items[0], recordId: 'reply_request-bbbbbb02', recordType: 'reply_request', recordTitle: '返事' }] }
+  let notices: unknown = before
+  let offline = false
+  // A look already on its way when the ask comes: it answers what the server said before the contact went.
+  let hold: (() => void) | null = null
+  const server = (async (url: string) => {
+    if (offline) throw new Error('offline')
+    if (url.endsWith('/records/my-turn')) return Response.json({ success: true, data: { total: 0, records: [] } })
+    const answer = notices
+    if (hold === null && url.endsWith('/me/notifications') && answerHeld) await new Promise<void>(r => { hold = r })
+    return Response.json({ success: true, data: answer })
+  }) as unknown as typeof fetch
+  let answerHeld = false
+  const watcher = createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},
+    fetch: server, log: quiet, setInterval: () => 0, clearInterval: () => {},
+  })
+  await watcher.watch('co')
+  answerHeld = true
+  watcher.signal('co')
+  await tick()
+  notices = after
+  const asked = watcher.refreshNow('co')
+  await tick()
+  ;(hold as (() => void) | null)?.()
+  const answer = await asked
+  assert.deepEqual(answer.notices.items.map(i => i.recordId), ['reply_request-bbbbbb02'])
+
+  // Not reached after the ask: what main keeps is older than the ask, so nothing is answered.
+  offline = true
+  assert.deepEqual(await watcher.refreshNow('co'), NO_NOTICES)
+  assert.equal(watcher.state('co').notices.items[0].recordId, 'reply_request-bbbbbb02')
+  offline = false
+  // Another company than the one on screen: nothing read, nothing answered.
+  assert.deepEqual(await watcher.refreshNow('other-co'), NO_NOTICES)
+  watcher.stop()
+})
+
 test('records off: no title bar parts; refusals of bad input', async () => {
   const watcher = createNotificationsWatcher({
     baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},

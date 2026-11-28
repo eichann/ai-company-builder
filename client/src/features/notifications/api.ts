@@ -38,11 +38,12 @@ export async function getNoticesState(companyId: string, reads: NoticesReads = w
 }
 
 /**
- * Main reads the company on screen again now (another company: nothing) and tells as usual (`notifications:changed`):
- * for when the renderer learnt that the notices it shows are older than what the server would answer.
+ * Main reads the company on screen again now and answers what that look left (also told as usual through
+ * `notifications:changed`); another company, or not reached: `NO_NOTICES`. For when the renderer learnt that the
+ * notices it shows are older than what the server would answer.
  */
-export function refreshNotices(companyId: string, reads: NoticesReads = window.electronAPI) {
-  void Promise.resolve(reads.refreshNotifications(companyId)).catch(() => {})
+export async function refreshNotices(companyId: string, reads: NoticesReads = window.electronAPI): Promise<NoticesState> {
+  try { return (await reads.refreshNotifications(companyId)) ?? NO_NOTICES } catch { return NO_NOTICES }
 }
 
 export function markNoticesRead(companyId: string, ids: string[] | 'all', writes: NoticesWrites = window.electronAPI) {

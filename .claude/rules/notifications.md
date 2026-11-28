@@ -346,7 +346,7 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   `/records/my-turn` and `/me/notifications` for the company on screen with the session in the
   Cookie header — at `notifications:watch`, every 5 minutes, and on a `records` or `notifications`
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
-  (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `refresh` (read the company on screen again now) / `markRead` /
+  (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `refresh` (read the company on screen again now and answer that look: `inbox.md` "A contact gone is no row at all") / `markRead` /
   `settings` / `setSetting`, event `notifications:changed` (the inbox's only: the task list does not listen).
   Signals come once per burst (`push-signal-fanout.ts`, ≤ 250 ms after the first). A `records`
   signal also sends `records:changed` (the task list re-reads, `tasks-ui.md`); so does the member's
@@ -453,8 +453,8 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
 - **Visibility is the server's**: every row comes from `/records/my-turn`, `/me/notifications`, the arrivals and the plans,
   which already left out what the member cannot read (and the contacts, read the same way); the inbox never filters on the
   client instead. The one thing it hides on top (never instead): a notice about a contact the store learnt is `gone` after
-  those notices were read — no row of any kind, and main reads them again (`notifications:refresh`; `inbox.md` "A contact
-  gone is no row at all"). AppShell is keyed by company and `useNotices` drops another company's answer; a contact's read or press
+  those notices were read — no row of any kind until main's read made after it (`notifications:refresh`) lists the id again
+  (`inbox.md` "A contact gone is no row at all"). AppShell is keyed by company and `useNotices` drops another company's answer; a contact's read or press
   answered after a company change shows nothing (the company era). **Nothing is stored** (`inboxView` rebuilds every
   answer; no new server table; the contact IPC of `inbox.md` is the only addition).
 - **Nothing irreversible from a row**: `InboxAction` has no approve or send — ［承認する…］ / ［開く…］ open the approval card

@@ -112,7 +112,7 @@ test('a contact gone after the notices were read is no row at all: not its conta
 test('a contact becoming gone asks for the notices again (for its company); a shown or failed read does not', async () => {
   let answer: ContactReadResult = { success: true, contact: view }
   const asked: string[] = []
-  const store = createContactStore(async () => answer, undefined, c => asked.push(c))
+  const store = createContactStore(async () => answer, undefined, async c => { asked.push(c); return null })
   store.want('co-a', [`${I}@1`])
   await settle()
   answer = { success: false, gone: false, offline: true, error: '連絡を読めませんでした' }
@@ -123,4 +123,53 @@ test('a contact becoming gone asks for the notices again (for its company); a sh
   store.refresh('co-a', I)
   await settle()
   assert.deepEqual(asked, ['co-a'])
+})
+
+test('the notices read again after the 404: an id the server still lists gets its own notice row back (its own title), the others stay gone; no read is started for it', async () => {
+  let answer: ContactReadResult = { success: true, contact: view }
+  let reads = 0
+  const again = later<ReadonlySet<string> | null>()
+  const store = createContactStore(async () => { reads++; return answer }, undefined, () => again.promise)
+  store.want('co-a', [`${R}@2`, `${I}@1`])
+  await settle()
+  answer = GONE
+  store.refresh('co-a', I)
+  await settle()
+  const readsAtGone = reads
+  // Until main's new read answers, nothing of the contact is a row.
+  const waiting = inboxView(staleNotices, [], undefined, INBOX_NEWS_SINCE, id => rowContact(store.snapshot().get(id)))
+  assert.deepEqual([...waiting.news, ...waiting.seen], [])
+  // That read (made after the 404) still lists the 返事のお願い — the server shows it to the member — and not the 来た連絡.
+  again.answer(new Set([R]))
+  await settle()
+  assert.equal(store.entry(R), undefined)
+  assert.equal(store.entry(I)?.kind, 'gone')
+  const rows = inboxView(staleNotices, [], undefined, INBOX_NEWS_SINCE, id => rowContact(store.snapshot().get(id)))
+  assert.deepEqual([...rows.news, ...rows.seen].map(r => [r.key, r.title]), [[`record:${R}`, '返事']])
+  assert.doesNotMatch(JSON.stringify(rows), /役員人事/)
+  store.want('co-a', [`${R}@2`, `${I}@1`])
+  await settle()
+  assert.equal(reads, readsAtGone)
+})
+
+test('a read of the notices that did not happen (null), or a read of the contact written since, keeps what it has', async () => {
+  let answer: ContactReadResult = { success: true, contact: view }
+  const again = later<ReadonlySet<string> | null>()
+  const store = createContactStore(async () => answer, undefined, () => again.promise)
+  store.want('co-a', [`${R}@2`, `${I}@1`])
+  await settle()
+  answer = GONE
+  store.refresh('co-a', I)
+  await settle()
+  // Put back on the list and read again before main's answer came: the newer read stands.
+  answer = { success: true, contact: view }
+  store.refresh('co-a', R)
+  await settle()
+  again.answer(new Set([I, R]))
+  await settle()
+  assert.equal(store.entry(I)?.kind, 'shown')
+  const offline = createContactStore(async () => GONE, undefined, async () => null)
+  offline.want('co-a', [`${I}@1`])
+  await settle()
+  assert.equal(offline.entry(I)?.kind, 'gone')
 })

@@ -14,7 +14,7 @@ import { useInboxBrowserPlans, type InboxBrowserPlanList, type InboxPlanStates }
 import { useContacts } from './useContacts'
 import { ContactCard } from '../components/ContactCard'
 import { CONTACT_ROW_READS, createContactStore, rowContact } from '../contactStore'
-import { contactsToRead, inboxView, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
+import { contactsToRead, inboxView, noticedRecordIds, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 import { CONTACT_NAME } from '../../../../shared/thing-words'
 import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, paged, sectionsOf, type BesideCard, type InboxKind } from '../workModel'
 import { useWorkThrough } from '../../../shared/hooks/useWorkThrough'
@@ -98,8 +98,10 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const plans = useInboxBrowserPlans(companyId, browserPlans?.list, planReadKey, browserPlans?.planStates)
   // 「連絡」1枚: the contacts the notices name, read into one store the rows and the card share (memory only).
   const contactReads = contactPorts?.reads
-  // A contact gone (not the member's to read now): the notices on screen were read before that, so main reads them again.
-  const [contacts] = useState(() => createContactStore((c, id) => readContact(c, id, contactReads), undefined, c => refreshNotices(c)))
+  // A contact gone (not the member's to read now): the notices on screen were read before that, so main reads them again;
+  // what that read still names is the server's to show.
+  const [contacts] = useState(() => createContactStore((c, id) => readContact(c, id, contactReads), undefined,
+    async c => { const again = await refreshNotices(c); return again.available ? noticedRecordIds(again) : null }))
   // A contact not read (offline) is asked again only when the PC is back online or the panel opens again (never on a timer).
   const [contactsAgain, setContactsAgain] = useState(0)
   useEventListener(window, 'online', () => setContactsAgain(k => k + 1))

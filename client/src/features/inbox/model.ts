@@ -276,6 +276,10 @@ export function contactsToRead(source: NoticesState, limit: number): string[] {
   return [...stamps].map(([id, v]) => `${id}@${v}`)
 }
 
+/** The records the notices name (a read of them made after a contact went: what the server still shows the member). */
+export const noticedRecordIds = (source: NoticesState): ReadonlySet<string> =>
+  new Set(source.available ? source.notices.items.map(n => n.recordId).filter(Boolean) : [])
+
 /** Within あなた待ち: by rank, then the nearest due (none last), then the newest. */
 function byNeed(a: InboxItem, b: InboxItem): number {
   if (a.rank !== b.rank) return a.rank - b.rank

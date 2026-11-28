@@ -45,8 +45,14 @@ export const shownView = (e: ContactEntry | undefined): ContactView | undefined 
 export const rowContact = (e: ContactEntry | undefined): ContactView | 'gone' | undefined =>
   (e?.kind === 'shown' ? e.view : e?.kind === 'gone' ? 'gone' : undefined)
 
+/**
+ * The notices read again after a contact became not the member's to read: the record ids they name (null: not read).
+ * Those ids the server still lists are its to show — their notices' own rows come back (`gone` is lifted); the others stay.
+ */
+export type NoticesAgain = (companyId: string) => Promise<ReadonlySet<string> | null>
+
 /** `onGone`: a contact became not the member's to read — the notices on screen are older than that and are read again. */
-export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA, onGone?: (companyId: string) => void): ContactStore {
+export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA, onGone?: NoticesAgain): ContactStore {
   let entries = new Map<string, ContactEntry>()
   /** The stamp each id was last asked at, and the newest read of it (an older answer landing later never wins). */
   const asked = new Map<string, string>()
@@ -98,8 +104,10 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
         // Not the member's to read (or removed): every id of that contact goes — an older view kept under its 返事のお願い
         // would show the title the server no longer shows them —, and no read already on its way may put it back.
         const gone: ContactEntry = { kind: 'gone' }
-        for (const id of groupOf(recordId)) { written.set(id, seq); entries.set(id, gone); groups.delete(id) }
-        onGone?.(companyId)
+        const ids = [...groupOf(recordId)]
+        const mark = seq
+        for (const id of ids) { written.set(id, mark); entries.set(id, gone); groups.delete(id) }
+        if (onGone) lift(companyId, started, ids, mark, onGone(companyId))
       } else {
         // Not read: asked again the next time the names are (a reconnect, the panel shown again) — never on a timer.
         asked.delete(recordId)
@@ -108,6 +116,21 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA,
       }
       notify()
     })
+  }
+
+  /**
+   * After the notices were read again: an id of the gone group the server still lists is forgotten (its notice is a plain
+   * row again, the server's to show), unless a read since wrote it or the company or era changed.
+   */
+  function lift(companyId: string, started: CompanyEra, ids: readonly string[], mark: number, again: Promise<ReadonlySet<string> | null>) {
+    void again.then(listed => {
+      if (!listed || !era.holds(started) || company !== companyId) return
+      const back = ids.filter(id => listed.has(id) && entries.get(id)?.kind === 'gone' && written.get(id) === mark)
+      if (back.length === 0) return
+      entries = new Map(entries)
+      for (const id of back) entries.delete(id)
+      notify()
+    }, () => {})
   }
 
   return {

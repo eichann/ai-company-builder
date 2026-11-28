@@ -540,11 +540,18 @@ pressing each record's own action.
   the store holds as `gone` (`rowContact` → `'gone'`, `inboxView`'s `ContactsOfRows`) makes **no row of any kind**:
   not the contact's, and not the plain notice row it would fall back to (no 「見られなくなりました」 row either; only the
   card that was open says 「この連絡は見つからないか、見られなくなりました。」 without a title). It counts nowhere and
-  「すべて確認した」 does not mark it. The store's `onGone` then asks main to read the notices again now (IPC
-  `notifications:refresh` → the watcher's `signal`, the company on screen only; additive, nothing returned), so the next
-  answer no longer lists it; nothing is marked read for it. Tests: `contactStore.test.ts` 「a contact gone after the notices
-  were read…」 and 「…asks for the notices again…」, `contact-card.spec.ts` 「taken off the contact's 「この人たちだけ」…」
-  (新着 and 確認したもの, `#refreshes`) — mutation-checked.
+  「すべて確認した」 does not mark it; nothing is marked read for it. The store's `onGone` then asks main to read the
+  notices again now (IPC `notifications:refresh` → the watcher's `refreshNow`: the company on screen only; it answers the
+  state of a look **started after the ask** — a look already on its way runs once more first — and `NO_NOTICES` when no
+  such look got an answer: offline, an older server, signed out, another company). **What that read still names is the
+  server's to show** (independent review: a 返事のお願い the member still reads must not vanish for the session): each id
+  of the gone group that the answer lists is forgotten (`lift`; its notice's own row comes back with the server's title for
+  it — never through the contact's view), unless a newer read wrote that id since or the era or company changed; the ids it
+  does not list stay `gone`. Nothing is read again for a lifted id (no loop: a new notice about it reads it as usual).
+  Tests: `contactStore.test.ts` 「a contact gone after the notices were read…」, 「…asks for the notices again…」, 「the notices
+  read again after the 404…」, 「a read of the notices that did not happen…」; `client/tests/notifications.test.ts` 「「read
+  again now」…」 (only a look started after the ask, never what was kept, never another company); `contact-card.spec.ts`
+  「taken off the contact's 「この人たちだけ」…」 (新着 and 確認したもの, `#refreshes`) — mutation-checked.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
   one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
   and a read answered after a company change show nothing; the newest read wins), `contactStore.test.ts` (one id's 404 takes the whole contact's
