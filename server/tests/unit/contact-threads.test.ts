@@ -412,6 +412,43 @@ describe('undo: what one finish wrote, both or neither', () => {
     expect(stateOf(f.id).state).toBe('handled')
   })
 
+  it('a change made in between — her AI\'s, or one that came back to the same state — refuses the undo (the card\'s version); nothing is taken back', async () => {
+    // Her AI moves the 返事のお願い's due: a field the 「もう返した」 entry never changed, so CHANGED_SINCE alone would pass it.
+    const f = await finished()
+    askedOn.add('u-alice')
+    ok(await engine.act(m('u-alice'), AI('u-alice'), f.rr, 'set_due', { expectedVersion: stateOf(f.rr).version, args: { due: '2026-11-20' } }))
+    const byAi = contacts.undo(m('u-alice'), PERSON, f.id, f.body)
+    expect(byAi).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT', part: 'replyRequest' } })
+    expect([stateOf(f.rr).state, stateOf(f.id).state, fieldsOf(f.rr).due]).toEqual(['closed', 'handled', '2026-11-20'])
+    // Reopened and closed again on the record card: the state is what the entry left (closed), but it is not her finish's.
+    const g = await finished()
+    ok(await engine.act(m('u-alice'), PERSON, g.rr, 'reopen', { expectedVersion: stateOf(g.rr).version }))
+    ok(await engine.act(m('u-alice'), PERSON, g.rr, 'close', { expectedVersion: stateOf(g.rr).version }))
+    const aba = contacts.undo(m('u-alice'), PERSON, g.id, g.body)
+    expect(aba).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT', part: 'replyRequest' } })
+    expect([stateOf(g.rr).state, stateOf(g.id).state]).toEqual(['closed', 'handled'])
+  })
+
+  it('the inbox\'s quiet note written after the answer (「Gmail でもアーカイブしました」) does not refuse it; with any other change since, it is refused', async () => {
+    const note = (id: string) => {
+      const r = writer.transition('a', { recordId: id, action: 'archived_there', expectedVersion: stateOf(id).version, to: null, actor: { id: 'acb:inbox', kind: 'external', source: 'ACB の受付' }, note: 'Gmail でもアーカイブしました', quiet: true })
+      if (!r.ok) throw new Error(r.reason)
+    }
+    const f = await finished()
+    note(f.id)
+    expect(ledger(f.id).at(-1)).toMatchObject({ action: 'archived_there', changes: [] })
+    const r = ok(contacts.undo(m('u-alice'), PERSON, f.id, f.body))
+    expect([r.interaction?.outcome, r.replyRequest.outcome]).toEqual(['done', 'done'])
+    expect([stateOf(f.id).state, stateOf(f.rr).state]).toEqual(['unsure', 'preparing'])
+    // A note and then the thread going on (the inbox moving it back to 届いた): a real change keeps the card's version.
+    const g = await finished()
+    note(g.id)
+    const went = writer.transition('a', { recordId: g.id, action: 'continued', expectedVersion: stateOf(g.id).version, to: 'received', actor: { id: 'acb:inbox', kind: 'external', source: 'ACB の受付' }, quiet: true })
+    if (!went.ok) throw new Error(went.reason)
+    expect(contacts.undo(m('u-alice'), PERSON, g.id, g.body)).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT', part: 'interaction' } })
+    expect([stateOf(g.id).state, stateOf(g.rr).state]).toEqual(['received', 'closed'])
+  })
+
   it('only a finish\'s entries, only her own contact: anyone else gets the missing answer', async () => {
     const f = await finished()
     const missing = contacts.undo(m('u-bob'), PERSON, 'interaction-0000000000000000', f.body)

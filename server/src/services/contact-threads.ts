@@ -14,7 +14,8 @@
  */
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
-import type { LedgerValue } from '../../shared/core/record-ledger'
+import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
+import { INBOX_ACTIONS, INBOX_ACTOR } from '../../shared/core/core-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type {
   ContactFinishResult, ContactPartResult, ContactReplyEnd, ContactReplyView, ContactUndoResult, ContactView,
@@ -49,6 +50,25 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const isVersion = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0
 const str = (v: LedgerValue | undefined): string | null => (typeof v === 'string' && v !== '' ? v : null)
 const badBody = () => refuse('bad-request', 'リクエストの形が正しくありません', { code: 'BAD_REQUEST' })
+
+/**
+ * The inbox's own notes that change nothing of a record: 「Gmail でもアーカイブしました」 (written right after a 「済んだ」, once
+ * Google answered), 「Gmail ではアーカイブ済み」 and 「Gmail の受信トレイに戻せませんでした」.
+ */
+const QUIET_NOTES: ReadonlySet<string> = new Set([INBOX_ACTIONS.archivedThere, INBOX_ACTIONS.leftInboxNoted, INBOX_ACTIONS.unarchiveFailed])
+const isQuietNote = (e: LedgerEntry) =>
+  QUIET_NOTES.has(e.action) && e.actorKind === INBOX_ACTOR.kind && e.actorId === INBOX_ACTOR.id && e.changes.length === 0 && e.fromState === e.toState
+
+/**
+ * The version a finish's undo is judged at: the one the card saw, moved past the inbox's quiet notes written since
+ * (only when every entry since is one) — the engine's undo then takes back the entry's own fields as for a card that saw
+ * them. Anything else written since — a person's or an AI's change, even one that came back to the same value — keeps
+ * the card's version, so the undo is refused (`VERSION_CONFLICT`) and that change is never taken back with it.
+ */
+function pastQuietNotes(ledger: readonly LedgerEntry[], expectedVersion: number): number {
+  const since = ledger.filter(e => e.version > expectedVersion)
+  return since.length > 0 && since.every(isQuietNote) ? Math.max(...since.map(e => e.version)) : expectedVersion
+}
 
 /** A refusal about one part (the engine's `step` → the part's name). */
 function aboutPart(r: Refusal, parts: readonly Part[]): Refusal {
@@ -242,7 +262,7 @@ export function createContactThreads(deps: ContactThreadDeps) {
         if (entry && !p.actions.includes(entry.action)) return refuse('conflict', NOT_A_FINISH.error, { code: NOT_A_FINISH.code, part: p.part })
         const undone = ledger.find(e => e.action === 'undo' && e.reversesVersion === p.version)
         if (entry && undone) results[p.part] = partResult(handle, p.recordId, 'already', undone.version)
-        else steps.push(p)
+        else steps.push({ ...p, expectedVersion: pastQuietNotes(ledger, p.expectedVersion) })
       }
       if (steps.length > 0) {
         const r = deps.engine.undoTogether(member, actor, steps.map(s => ({ recordId: s.recordId, body: { version: s.version, expectedVersion: s.expectedVersion } })))
