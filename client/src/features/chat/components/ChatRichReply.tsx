@@ -14,9 +14,9 @@ import { ChatFollowContext } from '../chatFollow'
 import { RICH_MAX_HEIGHT, RICH_UPDATE_MS, richPiecesOf } from '../richReply'
 import { frameContentOf, frameDocument, measureReply, shownFrame } from '../richReplyFrame'
 
-/** Heights already measured, by width and text: a reply drawn again (scrolled back, the window moved) keeps its place. */
+/** Heights already measured, by width, theme and text: a reply drawn again (scrolled back, the window moved) keeps its place. */
 const knownHeights = new Map<string, number>()
-const heightKey = (width: number, content: string) => `${Math.round(width)}|${content}`
+const heightKey = (width: number, isDark: boolean, content: string) => `${Math.round(width)}|${isDark ? 'd' : 'l'}|${content}`
 function rememberHeight(key: string, height: number) {
   knownHeights.set(key, height)
   if (knownHeights.size > 200) knownHeights.delete(knownHeights.keys().next().value as string)
@@ -68,7 +68,7 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
   const fill = useRef(async () => {})
   const schedule = useRef(() => {})
 
-  const knownHeight = width ? knownHeights.get(heightKey(width, content)) : undefined
+  const knownHeight = width ? knownHeights.get(heightKey(width, isDark, content)) : undefined
   const shownHeight = height ?? knownHeight ?? null
 
   // Near the screen or not; the width the frame is laid out at.
@@ -102,8 +102,8 @@ export function ChatRichReply({ content, fallback, onOpenLarge }: {
       const frameContent = frameContentOf(richPiecesOf(text), dark)
       const doc = frameDocument(frameContent, dark)
       const at = host.clientWidth
-      const key = heightKey(at, text)
-      const measured = knownHeights.get(key) ?? await measureReply(frameContent, at)
+      const key = heightKey(at, dark, text)
+      const measured = knownHeights.get(key) ?? await measureReply(frameContent, at, dark)
       rememberHeight(key, measured)
       const visible = Math.min(measured, RICH_MAX_HEIGHT)
       if (!hostRef.current || !latest.current.near) return

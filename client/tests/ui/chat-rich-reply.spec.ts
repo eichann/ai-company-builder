@@ -181,6 +181,34 @@ test.describe('in the chat', () => {
     await expect.poll(async () => (await shownFrame(page).boundingBox())?.height).toBe(20_000)
   })
 
+  // Codex review: the shown frame cannot say it grew, so its height is the tallest it can become.
+  test('what the member opens or switches in the frame (a step, a tab) and a taller dark layout are never cut off', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '手順とタブで')
+    const tall = (words: string) => Array.from({ length: 12 }, (_, i) => `<p>${words}${i + 1}</p>`).join('')
+    await reply(page, `${fence('acb-html', `<style>@media (prefers-color-scheme: dark) { .pad { padding-bottom: 400px } }</style><p class="pad">はじめ</p>
+<div class="acb-tabs"><input type="radio" name="t" id="t1" checked><label for="t1">短い</label><input type="radio" name="t" id="t2"><label for="t2">長い</label>
+<div class="acb-tab"><p>一行</p></div><div class="acb-tab">${tall('タブ')}</div></div>
+<details><summary>くわしく</summary>${tall('手順')}</details>`)}\n\n最後の行です。`)
+    await finish(page)
+    const inside = page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1')
+    const fits = async () => {
+      const content = await inside.locator('.acb-root').evaluate(el => el.getBoundingClientRect().height)
+      const frame = (await shownFrame(page).boundingBox())!.height
+      return frame + 1 >= content
+    }
+    await expect(inside.getByText('最後の行です。')).toBeVisible()
+    await inside.getByText('長い', { exact: true }).click()
+    await inside.getByText('くわしく').click()
+    await expect(inside.getByText('手順12')).toBeVisible()
+    expect(await fits(), 'opened and switched, everything still in the frame').toBe(true)
+    await chat(page, c => c.toggleTheme())
+    await expect.poll(() => page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('html').evaluate(el => el.classList.contains('dark'))).toBe(true)
+    await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').getByText('長い', { exact: true }).click()
+    await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').getByText('くわしく').click()
+    expect(await fits(), 'the dark layout, opened, still in the frame').toBe(true)
+  })
+
   test('a reply being written grows in its frame without a blank moment, redrawn at most about every 80 ms', async ({ page }) => {
     await openPreview(page, 'chat-header', { turn: 'manual' })
     await send(page, '比べて')

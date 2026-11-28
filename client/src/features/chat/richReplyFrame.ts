@@ -34,7 +34,7 @@ function cleanPiece(piece: RichPiece, isDark: boolean): { html: string; css: str
   const source = piece.kind === 'markdown' ? markdownHtml(piece.text, isDark) : piece.open ? writtenSoFar(piece.text) : piece.text
   const result = sanitizeReplyHtml(source)
   cleaned.set(key, result)
-  if (cleaned.size > 300) cleaned.delete(cleaned.keys().next().value as string)
+  if (cleaned.size > 100) cleaned.delete(cleaned.keys().next().value as string)
   return result
 }
 
@@ -207,11 +207,40 @@ function measureFrame(): Promise<HTMLIFrameElement> {
   return measurer
 }
 
+/** At most this many radio choices are tried per reply (see `tallestState`). */
+const MAX_CHOICES = 24
+
 /**
- * How tall `content` is at `width`: laid out in the hidden copy (its pictures decoded first). One at a time.
- * The copy is never pressed or hovered (inert, off screen) and runs nothing (no `allow-scripts`, and the policy).
+ * The tallest the reply can become when the member opens or switches what it holds — every `<details>` open, every
+ * check box either way, each choice of each radio group —, as the shown frame cannot tell the chat it grew.
+ * A reply with none of those is measured once.
  */
-export function measureReply(content: FrameContent, width: number): Promise<number> {
+function tallestState(root: HTMLElement): number {
+  const measure = () => Math.ceil(root.getBoundingClientRect().height)
+  let tallest = measure()
+  const details = Array.from(root.querySelectorAll('details'))
+  const boxes = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+  const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="radio"]')).slice(0, MAX_CHOICES)
+  if (!details.length && !boxes.length && !radios.length) return tallest
+  for (const d of details) d.open = true
+  for (const checked of [true, false]) {
+    for (const box of boxes) box.checked = checked
+    tallest = Math.max(tallest, measure())
+    // Each choice in turn (a choice unchecks the rest of its group).
+    for (const radio of radios) {
+      radio.checked = true
+      tallest = Math.max(tallest, measure())
+    }
+  }
+  return tallest
+}
+
+/**
+ * How tall `content` is at `width` in the app's theme, at its tallest (`tallestState`): laid out in the hidden copy
+ * (its pictures decoded first). One at a time. The copy is never pressed or hovered (inert, off screen) and runs
+ * nothing (no `allow-scripts`, and the policy).
+ */
+export function measureReply(content: FrameContent, width: number, isDark: boolean): Promise<number> {
   const run = async () => {
     const frame = await measureFrame()
     const doc = frame.contentDocument
@@ -219,10 +248,11 @@ export function measureReply(content: FrameContent, width: number): Promise<numb
     const styles = doc?.querySelectorAll('style')
     if (!doc || !root || !styles || styles.length < 2) return 0
     frame.style.width = `${Math.max(1, Math.round(width))}px`
+    doc.documentElement.classList.toggle('dark', isDark)
     styles[styles.length - 1].textContent = content.css
     root.innerHTML = content.body
     await Promise.all(Array.from(root.querySelectorAll('img')).map(img => img.decode().catch(() => undefined)))
-    return Math.ceil(root.getBoundingClientRect().height)
+    return tallestState(root)
   }
   const result = queue.then(run, run)
   queue = result.catch(() => undefined)
