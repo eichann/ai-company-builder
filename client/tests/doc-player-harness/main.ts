@@ -135,10 +135,21 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   })
   const picks: string[] = []
   let redirectTo: string | null = null
+  // A load that replaces one still under way sometimes reaches the session's hook without its page's id,
+  // and the hook refuses it (measured under CPU load: the playing page right after 準備, and the player
+  // stayed blank). Made certain here: A's first page load once the server let the picked video play (its
+  // playing page) is refused once, as the hook does then.
+  let playingRefused = false
+  let playerAId = -1
+  const playerAllowedToPlay = () => fake.requests.some(r => r.path.endsWith(A) && r.status === 206 && r.range === 'bytes=0-0')
   const players = createDrivePlayers({
     // The server's answers, with one page answer redirected on demand (the redirect guard).
     shell: server => createDrivePlayerShell({
       ...server,
+      owns: (pageId, url) => {
+        if (!playingRefused && /\/\?v=\d+$/.test(url) && server.owns(pageId, url) && pageId === playerAId && playerAllowedToPlay()) { playingRefused = true; return false }
+        return server.owns(pageId, url)
+      },
       serve: async request => {
         if (redirectTo && /\/\?v=/.test(request.url)) { const to = redirectTo; redirectTo = null; return new Response(null, { status: 302, headers: { Location: to } }) }
         return server.serve(request)
@@ -213,6 +224,7 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   // ［ここで再生］ on A's poster: not picked yet → the Picker (faked) → plays; seek to 80 %.
   const playerA = playerViews().find(v => v.getBounds().x === area.x + 100)!
   const pa = playerA.webContents
+  playerAId = pa.id
   result.keyboardBeforePress = { app: win.webContents.isFocused(), player: playerViews().some(v => v.webContents.isFocused()), doc: doc.isFocused(), windowFocused: win.isFocused() }
   // Pressed until it is taken (a press right after the player appeared or moved is not: clickjacking).
   for (let i = 0; i < 100 && !(await pa.executeJavaScript('!!document.querySelector("video")', true).catch(() => false)); i++) {
@@ -220,6 +232,7 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
     await wait(100)
   }
   result.picks = [...picks]
+  result.playingRefused = playingRefused
   result.played = await pa.executeJavaScript(`new Promise(resolve => {
     const v = document.querySelector('video')
     if (!v) { resolve({ ok: false, page: document.body.innerText }); return }

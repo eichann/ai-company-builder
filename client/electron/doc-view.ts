@@ -54,6 +54,16 @@ const SCROLL_WORLD = 1001
  * (measured, 2026-11-22).
  */
 const SCROLL_READ_MS = 1000
+/**
+ * A player's page load the session's hook refused is loaded again at most this many times. A load that
+ * replaces one still under way (［ここで再生］: 準備 → 選ぶ → 準備 → 再生 within milliseconds) sometimes
+ * reaches the hook without its page's id (`webContentsId`), so the hook refuses it and the player stayed
+ * blank, with no button (measured under CPU load, 2026-11-29). The hook stays as it is: the page is
+ * loaded again once nothing else is under way.
+ */
+const PLAYER_PAGE_RELOADS = 3
+/** Chromium's net error for a request a `webRequest` hook cancelled. */
+const ERR_BLOCKED_BY_CLIENT = -20
 
 /** A scroll position read from a document: two finite numbers, else none. */
 function scrollPosition(value: unknown): [number, number] | null {
@@ -640,11 +650,21 @@ export function createDrivePlayerShell(options: DrivePlayerShellOptions): DriveP
         if (!gone && !contents.isDestroyed() && stage) contents.executeJavaScript(stage).catch(() => {})
       }
       contents.on('did-finish-load', putStage)
+      // The page main asked for last, refused by the session's hook (above): asked again, a few times at most.
+      let current: string | null = null
+      let reloads = 0
+      contents.on('did-fail-load', (_event, code, _description, url, isMainFrame) => {
+        if (gone || !isMainFrame || code !== ERR_BLOCKED_BY_CLIENT || url !== current || reloads >= PLAYER_PAGE_RELOADS) return
+        reloads++
+        contents.loadURL(url).catch(() => {})
+      })
       return {
         id,
         load(url) {
           if (gone) return
           token = parseDrivePlayerUrl(url)?.token ?? null
+          current = url
+          reloads = 0
           contents.loadURL(url).catch(() => {})
         },
         place(placement) {

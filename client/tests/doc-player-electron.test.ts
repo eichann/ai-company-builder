@@ -37,6 +37,7 @@ interface Result {
   keyboardBeforePress: { app: boolean; player: boolean; doc: boolean; windowFocused: boolean }
   keyboardAfterLoads: { app: boolean; player: boolean; windowFocused: boolean }
   picks: string[]
+  playingRefused: boolean
   played: { ok: boolean; duration?: number; at?: number; page?: string }
   streamRequests: Array<{ range: string | null; status: number; cookie: string | null }>
   otherPlayerReach: string
@@ -142,6 +143,11 @@ test('［ここで再生］: not picked → the Picker, then the video plays and
   assert.ok(ranges.length >= 2, JSON.stringify(ranges))
   assert.ok(ranges.every(r => r.status === 206 && r.cookie === 'session=member' && /^bytes=\d+-\d*$/.test(r.range ?? '')), JSON.stringify(ranges))
   assert.ok(ranges.some(r => Number(/^bytes=(\d+)/.exec(r.range ?? '')?.[1]) >= 3 * 1024 * 1024), 'the bytes near the end (the index) were asked for')
+})
+
+test('a player\'s page load the session\'s hook refused (Electron left out its page\'s id: a load replacing one under way) is loaded again: the video plays, the player never stays blank', { skip }, () => {
+  assert.equal(result.playingRefused, true, 'control: the playing page\'s first load was refused')
+  assert.equal(result.played.ok, true, JSON.stringify(result.played))
 })
 
 test('another player\'s page cannot reach a player\'s video', { skip }, () => {
