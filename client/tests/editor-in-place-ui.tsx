@@ -4,7 +4,8 @@
 // window.__acbFiles / __acbWrites: the "disk" and every save; __acbExternalEdit(path, text) writes a
 // file as the AI would (and sends the watcher's event); __acbRequestClose() asks to close the window
 // as main does; __acbCloseAnswers lists the answers; __acbBackups every keep (the disk version
-// before an overwrite, or the edits given); __acbFailWrites: saves of these paths fail.
+// before an overwrite, or the edits given); __acbFailWrites: saves of these paths fail; __acbImages every
+// image kept beside a document (main names it; here a counter of a fixed second).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -35,6 +36,7 @@ const files: Record<string, string> = {
 const writes: Array<[string, string]> = []
 const backups: Array<{ reason: string; path: string; content: string | undefined }> = []
 const failWrites = new Set<string>()
+const images: Array<{ document: string; bytes: number[]; address: string }> = []
 const changes = emitter<Array<{ type: string; path: string }>>()
 const closeRequests = emitter<void>()
 const closeAnswers: string[] = []
@@ -50,6 +52,11 @@ installElectronAPI({
   backupBeforeOverwrite: async (_root: string, p: string) => {
     backups.push({ reason: 'editor_overwrite', path: p, content: files[p] })
     return { success: true, backupPath: `${ROOT}/.backups/2026-11-28T01-02-03-456_editor_overwrite` }
+  },
+  saveDocumentImage: async (document: string, bytes: ArrayBuffer) => {
+    const address = `images/20260101-000000${images.length ? `-${images.length + 1}` : ''}.png`
+    images.push({ document, bytes: [...new Uint8Array(bytes)], address })
+    return { success: true, address }
   },
   backupEdits: async (_root: string, p: string, content: string, reason = 'editor_edits') => {
     backups.push({ reason, path: p, content })
@@ -75,6 +82,7 @@ Object.assign(window, {
   __acbWrites: writes,
   __acbBackups: backups,
   __acbFailWrites: failWrites,
+  __acbImages: images,
   __acbCloseAnswers: closeAnswers,
   __acbRequestClose: () => closeRequests.emit(),
   __acbExternalEdit: (p: string, text: string) => { files[p] = text; changes.emit([{ type: 'change', path: p }]) },

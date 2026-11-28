@@ -11,6 +11,8 @@ import type { CommentSeverity } from '../../doc-review/model'
 import { FrontmatterNote, MarkdownPreview, PreviewSearchBar } from './MarkdownPreview'
 import { SelectionBubble, type BubbleMode } from './SelectionBubble'
 import { BlockMenu, TableBar } from './BlockTools'
+import { saveDocumentImage } from '../api'
+import { documentImageFileRefusal } from '../../../../shared/document-images'
 
 const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
 
@@ -77,6 +79,20 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   const folder = filePath.substring(0, filePath.lastIndexOf('/'))
   // Read when the editor is made: the host callback must stay the same, or the editor is made again.
   const startAt = useLatestRef({ folder, initialScrollRatio })
+  // A pasted or dropped image: kept beside the document by main (files-and-editor.md "Images in a
+  // document"); what was not kept is said in one line above the document, nothing is put in.
+  const [imageProblem, setImageProblem] = useState<string | null>(null)
+  const documentPath = useLatestRef(filePath)
+  const storeImage = useCallback(async (file: File): Promise<string | null> => {
+    const name = file.name || '画像'
+    const refused = documentImageFileRefusal(file)
+    if (refused) { setImageProblem(`${name}: ${refused}`); return null }
+    const result = await saveDocumentImage(documentPath.current, await file.arrayBuffer())
+      .catch(() => ({ success: false as const, error: '保存できませんでした' }))
+    if (result.success) { setImageProblem(null); return result.address }
+    setImageProblem(`${name}: ${result.error}`)
+    return null
+  }, [documentPath])
   const front = useMemo(() => previewFrontmatter(opened), [opened])
 
   // The editor is a widget outside React: made when its host appears, destroyed when it goes.
@@ -92,6 +108,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         onSelection,
         onBlockMenu,
         onTable: setTable,
+        storeImage,
       }))
       .then(result => {
         if (gone) { if (result.ok) result.surface.destroy(); return }
@@ -105,7 +122,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         }
       })
       .catch(() => { if (!gone) setState('unavailable') })
-  }, [opened, latestChange, startAt, onSelection, onBlockMenu])
+  }, [opened, latestChange, startAt, onSelection, onBlockMenu, storeImage])
 
   // The bubble's keys (command catalog, editor area): only while the focus is in this document, else
   // the key is the app's (⌘B the left column, ⌘K 探す).
@@ -179,6 +196,14 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
               <Button size="sm" onClick={onShowSource}>もとの書き方で直す</Button>
               <Button size="sm" variant="ghost" onClick={() => setTakenBack(false)}>閉じる</Button>
             </div>
+          </Callout>
+        </div>
+      )}
+      {imageProblem && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <Callout tone="warning" role="status">
+            <p>画像を入れられませんでした。{imageProblem}</p>
+            <div className="mt-2"><Button size="sm" variant="ghost" onClick={() => setImageProblem(null)}>閉じる</Button></div>
           </Callout>
         </div>
       )}

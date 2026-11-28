@@ -52,6 +52,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'fs:startDrag': { args: [IN_FILE], paths: [0] },
   'editor:backupBeforeOverwrite': { args: [IN, IN_FILE], paths: [0, 1] },
   'editor:backupEdits': { args: [IN, IN_FILE, 'x'], paths: [0, 1] },
+  'editor:saveImage': { args: [IN_FILE, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer], paths: [0] },
   'env:status': { args: [IN], paths: [0] },
   'env:update': { args: [IN, { A: '1' }], paths: [0] },
   'brokerKeys:moveFromEnv': { args: ['co', IN, 'OPENAI_API_KEY'], paths: [1] },

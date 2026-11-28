@@ -165,7 +165,8 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
 - **Standing instructions** (`finalSystemPrompt` → the request's `standingInstructions`): what holds for the whole
   conversation — `MEMBER_SCREEN_INSTRUCTION` (the reply is read in the app by members who are not engineers: plain
   Japanese, no Git or command words; it answers the preset's 「displayed in a terminal」), the working folder,
-  `.workspace/`, `externalRepositoryInstruction`, `skillFileInstruction`, the shelf, the record / company-file /
+  `.workspace/`, `externalRepositoryInstruction`, `skillFileInstruction`, `documentImageInstruction` (a document's images in
+  `images/` beside it, named as a pasted one: `client/shared/document-images.ts`), the shelf, the record / company-file /
   past-consultation / review / web tools' paragraphs, the sandbox. Claude Code puts them after its preset:
   `systemPrompt: { type: 'preset', preset: 'claude_code', append, snapshot: false }` (`agents/claude.ts`; `snapshot:
   false` renders it per request, so a company's change reaches a conversation already going); Codex puts them first in

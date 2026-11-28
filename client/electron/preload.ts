@@ -123,6 +123,7 @@ const api: ElectronAPI = {
     invoke('editor:backupBeforeOverwrite', rootPath, filePath),
   backupEdits: (rootPath: string, filePath: string, content: string, reason?: EditorEditsReason) =>
     invoke('editor:backupEdits', rootPath, filePath, content, reason),
+  saveDocumentImage: (documentPath: string, bytes: ArrayBuffer) => invoke('editor:saveImage', documentPath, bytes),
   createDirectory: (path: string) => invoke('fs:createDirectory', path),
   exists: (path: string) => invoke('fs:exists', path),
 

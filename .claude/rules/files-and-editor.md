@@ -450,8 +450,8 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   `tests/ui/editor-in-place.spec.ts` on `tests/editor-in-place-ui.html` (real keys, autosave, Enter in
   a list, ⌘⇧V, the AI writing the file with and without edits, closing the window, a refused
   document, ⌘F).
-- Next (PR4–5): pasting images into `images/`, ［AI に直してもらう］ (its part through the selection
-  slot, below). PR3 is "The 「/」 list, line starts and the table bar" below.
+- Next (PR5): ［AI に直してもらう］ (its part through the selection slot, below). PR3 is "The 「/」
+  list, line starts and the table bar" below, PR4 "Images in a document".
 
 ## The selection bubble (UX check 9 PR2, owner decision 2026-11-28)
 
@@ -543,6 +543,53 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   the list shows. Known: inside a quote a new list / divider is written `*` / `***` (the file's way is not applied
   after `>`; it reads back right). `doc-frame-protocol.test.ts`: the list's keys stay an HTML document's.
 - Bundle: the list and bar (~5 KB) are in the app's JS; the rest in the Milkdown chunk (372 KB of 430).
+
+## Images in a document (UX check 9 PR4, owner decision 2026-11-28)
+
+- **One rule** (`client/shared/document-images.ts`): a document's image goes in the folder `images/`
+  beside the document, named by the computer's local date and time to the second
+  (`20261129-143005.png`; the same second again `-2`, `-3`, …), and the document gets
+  `![](images/<name>)`. The same functions write the AI's one standing line (`documentImageInstruction`,
+  `chat-server.ts` with the standing instructions: the AI already put its images there; now it is told
+  the same name shape — `chat-and-agents.md` "What ACB tells the AI"). Beside the document, an image is
+  seen by whoever sees the document (a private folder's document → its images in that folder's clone).
+- **Ways in**: ⌘V in a document edited in place (only when the clipboard holds no text: Word, Excel and
+  web pages put a picture beside copied words, which must paste as words — `pastedImageFiles`) and a
+  Finder drop on it (`droppedFiles`; at the drop's place). Not in the 「/」 list (it would need a file
+  picker through main; paste and drop cover it). The source view (記号の画面) is unchanged.
+- **Main writes; the renderer hands the bytes and which document** (`editor:saveImage(documentPath,
+  bytes)`, `features/fs/ipc.ts`; port `EditorImageWrites` in `features/editor/api.ts`): the document
+  through `AllowedRoots.validate`, a Markdown name, a regular file (not a link), not at the top of a
+  company folder (a root folder is a department: 「会社フォルダのいちばん上にある文書には…」); the kind **from the bytes**
+  (`documentImageKind`: PNG, JPEG, GIF, WebP — never SVG, which can carry script and links and is opened
+  by other programs too; never what the renderer says), ≤ 20 MB (`MAX_DROP_FILE_SIZE`, a Finder drop's;
+  far under sync's `LARGE_FILE_THRESHOLD` 100 MB, so a pasted image never stops sharing); `images/`
+  through `validate` (a link out of the company is refused), the not-downloaded and `writeRefusal`
+  checks (reserved / private folder names, skill files, agent config), made alone (`mkdir`, not
+  recursive) and **`lstat` a folder** (a link even pointing inside, or a file named `images`, is
+  refused: 「…画像を置けるフォルダではないため…」), each name through `validate` and written with `wx`
+  (never replaces; a taken name tries the next). The answer is only the address; a disk error is a plain
+  sentence (「画像を保存できませんでした…」), never Node's text. The screen checks a
+  file's type and size first (`documentImageFileRefusal`) so a large file is never read.
+- **In the document** (`milkdownImages.ts`, behind the door: `InPlaceOptions.storeImage(file)` → the
+  address or null): kept first, then put in — on the empty top-level line holding the caret, else as a
+  new line right after the top-level block holding it (a list item never gains a paragraph); several
+  files one line each, in order; the document changed meanwhile → at the caret. Written back like
+  typing: `![](images/…)` plus its blank line; nothing else changes. A file not kept → one line above
+  the document 「画像を入れられませんでした。<name>: <reason>」 (［閉じる］), nothing put in. Shown from
+  `local-file://` like every image of the document (its version followed). Known: an image kept while the
+  document was closed or switched to the source is left in `images/` with nothing pointing to it; words
+  pasted from Word keep the editor's own paste (unchanged by this, `file://` pictures in its HTML included).
+- Tests: `tests/document-images.test.ts` (the kinds by bytes — SVG / HTML none —, the 20 MB limit under
+  sync's, names, the AI's line from the same functions), `tests/ipc-fs.test.ts` 「editor:saveImage …」
+  (the place, the clock fixed by `mock.timers`, `-2` / `-3`, an existing file kept, SVG / HTML / not bytes
+  / 20 MB / not Markdown refused; a link out, a link inside, a file named `images`, a not-downloaded
+  `images`, a reserved one, a skill's document, a document at the top, a folder named `.md`, a linked
+  document refused and nothing written; a disk error in plain words), `ipc-path-guard.test.ts`
+  (GUARDED), `markdownSplice.test.ts` (the empty line, after a paragraph, after a nested list, two
+  images: each exactly its line; a paste with words stays words), `chat-standing-instructions.test.ts`,
+  `tests/ui/editor-in-place.spec.ts` (⌘V and a Finder drop through the real editor; a PDF / SVG refused
+  in one line) — each guard mutation-checked.
 
 ## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
 

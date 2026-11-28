@@ -98,3 +98,13 @@ test('「返事の形：リッチ」 names the member\'s 今日のフォルダ a
   const apiKey = await turnOf({ replyStyle: 'rich', todayFolder: today, authMode: 'api-key' })
   assert.doesNotMatch(apiKey.system + apiKey.standing, /HTML ファイル/)
 })
+
+// Images in a document (files-and-editor.md "Images in a document"): the AI is told the very place and shape a pasted
+// image gets (both written from client/shared/document-images.ts), once for the conversation, not with every turn.
+test('the AI is told to put a document\'s image in images/ beside it, in the same shape as a pasted one', async () => {
+  const { documentImageMarkdown, documentImageName } = await import('../shared/document-images')
+  const { standing, system } = await turnOf({})
+  assert.ok(standing.includes('文書と同じフォルダの「images/」'), standing)
+  assert.ok(standing.includes(documentImageMarkdown(documentImageName(new Date(2026, 10, 29, 14, 30, 5), 'png'))), standing)
+  assert.doesNotMatch(system, /文書の画像/)
+})

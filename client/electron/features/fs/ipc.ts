@@ -4,7 +4,7 @@
 // folder name the member may not use (a private folder they cannot read) and
 // on a skill file they may not change, and a new file, rename, move or copy never replaces what is already there.
 //   dialog:selectDirectory, fs:* (fs:startDrag is a send; fs:openVideo hands a video to the OS's app), fs:watch /
-//   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite, editor:backupEdits
+//   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite, editor:backupEdits, editor:saveImage
 
 import fs from 'fs'
 import path from 'path'
@@ -19,6 +19,8 @@ import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-
 import { createCompanyWatchers } from './watchers'
 import { isVideoFileName } from '../../../shared/video-files'
 import { DROP_WORDS, dropRefusal } from '../../../shared/file-drop'
+import { LINK_ESCAPE_MESSAGE, OUTSIDE_ROOTS_MESSAGE } from '../../allowed-roots'
+import { DOCUMENT_IMAGE_FOLDER, DOCUMENT_IMAGE_WORDS, documentImageAddress, documentImageKind, documentImageName, documentImageRefusal } from '../../../shared/document-images'
 
 export interface FsDeps {
   paths: PathGuard
@@ -34,6 +36,8 @@ export interface FsDeps {
   reservedRefusal: (absPath: string) => Promise<string | null>
   /** Watcher batches, before they reach the window (the skills cache drops stale scans). */
   onFileChanges?: (changes: FileChange[]) => void
+  /** The clock a pasted image's name comes from (tests fix it). */
+  now?: () => Date
 }
 
 export interface FsFeature {
@@ -47,6 +51,7 @@ const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace'
 
 export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
   const { paths, shell, writeRefusal, reservedRefusal } = deps
+  const now = deps.now ?? (() => new Date())
   const watchers = createCompanyWatchers(changes => {
     deps.onFileChanges?.(changes)
     deps.window.send('fs:changes', changes)
@@ -202,6 +207,46 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     } catch (error) {
       console.error('[editor] backup of the edits failed:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
+  // An image pasted or dropped into a document edited in place (files-and-editor.md "Images in a
+  // document"): the renderer hands the bytes and which document; main makes the place and the name
+  // (`images/` beside it, the date and time, `wx`) and answers only the address to write.
+  ipc.handle('editor:saveImage', async (_, documentPath: string, bytes: unknown) => {
+    try {
+      const doc = paths.validate(documentPath)
+      if (!/\.(md|markdown)$/i.test(doc) || !(await fs.promises.lstat(doc)).isFile()) return { success: false, error: DOCUMENT_IMAGE_WORDS.failed }
+      const data = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : null
+      if (!data) return { success: false, error: DOCUMENT_IMAGE_WORDS.type }
+      const kind = documentImageKind(data)
+      const notAnImage = documentImageRefusal(data)
+      if (notAnImage || !kind) return { success: false, error: notAnImage ?? DOCUMENT_IMAGE_WORDS.type }
+      const root = paths.rootOf(doc)
+      if (root && await fs.promises.realpath(root) === await fs.promises.realpath(path.dirname(doc))) return { success: false, error: DOCUMENT_IMAGE_WORDS.topLevel }
+      const folder = paths.validate(path.join(path.dirname(doc), DOCUMENT_IMAGE_FOLDER))
+      const at = now()
+      const first = path.join(folder, documentImageName(at, kind))
+      const refused = notDownloadedRefusal(first) ?? await writeRefusal(first)
+      if (refused) return { success: false, error: refused }
+      await fs.promises.mkdir(folder).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'EEXIST') throw e })
+      // The folder itself, never a link (even one pointing inside) or a file named `images`.
+      if (!(await fs.promises.lstat(folder)).isDirectory()) return { success: false, error: DOCUMENT_IMAGE_WORDS.folder }
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const name = documentImageName(at, kind, attempt)
+        const target = paths.validate(path.join(folder, name))
+        try {
+          await fs.promises.writeFile(target, data, { flag: 'wx' })
+          return { success: true, address: documentImageAddress(name) }
+        } catch (error) {
+          if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error
+        }
+      }
+      return { success: false, error: NAME_TAKEN_MESSAGE }
+    } catch (error) {
+      // The allowed roots' refusals as they are; a disk error (EACCES, ENOSPC) in a plain sentence, not Node's text.
+      const message = error instanceof Error ? error.message : ''
+      return { success: false, error: message === LINK_ESCAPE_MESSAGE || message === OUTSIDE_ROOTS_MESSAGE ? message : DOCUMENT_IMAGE_WORDS.failed }
     }
   })
 

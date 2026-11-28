@@ -67,6 +67,7 @@ import type { ToolStopCheck } from '../shared/agent-stop'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
 import net from 'net'
+import { documentImageInstruction } from '../shared/document-images'
 
 /**
  * What an unattended step may use (ai-turns.md "Only the step's tools"): its record tools, its
@@ -454,6 +455,7 @@ export async function startChatServer(config: ChatServerConfig) {
         finalSystemPrompt += `\n\n【重要】スクリーンショット、テスト結果、一時ファイル、設定ファイル（.playwright/, test-results/ 等）など、ユーザーのコンテンツではない生成物は必ず「.workspace/」ディレクトリ内に出力してください。.workspace/ が存在しない場合は作成してください。作業ディレクトリのルートを汚さないでください。`
         finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
         finalSystemPrompt += `\n\n${skillFileInstruction()}`
+        finalSystemPrompt += `\n\n${documentImageInstruction()}`
         if (activeDepartment) {
           turnPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
         } else {
