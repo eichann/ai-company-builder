@@ -26,3 +26,15 @@ export interface MonotonicClock {
   /** Milliseconds since this process started; never goes back, never jumps with the wall clock. */
   monoMs(): number
 }
+
+/**
+ * Waiting on a monotonic clock (google-drive.md "A Google document's own changes": the observation's quiet period and
+ * the gap between its reads). Production: `performance.now()` and a timer; a test may run it on a virtual clock whose
+ * every wait moves it on at once, so what is read when does not depend on how busy the machine is.
+ */
+export interface MonotonicWait {
+  /** Milliseconds on a clock no setting of the system's time moves. */
+  monoMs(): number
+  /** Resolves once `monoMs()` has reached `atMs` (at once when it already has). */
+  sleepUntil(atMs: number): Promise<void>
+}

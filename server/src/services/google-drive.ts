@@ -41,7 +41,7 @@ import {
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
 import type { DriveAiStatus, DriveOverwriteConfirmation, DriveOverwriteDecision, DriveTrustedFolder, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
-import type { Clock, IdGenerator } from '../ports/clock'
+import type { Clock, IdGenerator, MonotonicWait } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { DriveConfirmAudience, DriveDocBaseline, DriveOverwriteConfirmationRow, DrivePickRow, DrivePutRow, DriveViewPickRow, GoogleDriveRepository, PickTicketDirectory } from '../ports/google-drive'
 import type { Member } from './access'
@@ -62,6 +62,8 @@ export interface GoogleDriveDeps {
   pickerScriptOrigin: string
   /** The waits of a Google document's baseline (read per use; `lib/config.ts` `driveDocTiming`). */
   docTiming?: () => DriveDocTiming
+  /** The clock those waits run on (monotonic: never the server clock port, which a setting of the system's time moves). */
+  wait: MonotonicWait
   /** Where the document checks' diagnostics go (default: console); never a file id, name, text or token. */
   log?: Pick<Console, 'warn'>
   /** sha256 of bytes, lower-case hex (composition: node's crypto). */
@@ -393,12 +395,10 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   }
 
   const docTiming = () => deps.docTiming?.() ?? DRIVE_DOC_TIMING_DEFAULTS
-  /** Waits until `performance.now()` reaches `atMs` (the observation's monotonic clock; never the server clock port). */
-  const sleepUntil = async (atMs: number) => {
-    const left = atMs - performance.now()
-    if (left > 0) await new Promise<void>(resolve => setTimeout(resolve, left))
-  }
-  const settle = () => sleepUntil(performance.now() + docTiming().settleMs)
+  /** The observation's monotonic clock (`deps.wait`; never the server clock port). */
+  const monoMs = () => deps.wait.monoMs()
+  const sleepUntil = (atMs: number) => deps.wait.sleepUntil(atMs)
+  const settle = () => sleepUntil(monoMs() + docTiming().settleMs)
 
   /**
    * A Google document's fingerprint (google-drive.md "A Google document's own changes"): the sha256 of its text as Drive
@@ -576,10 +576,10 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     if (typeof seen === 'string') return drop(seen)
     let reads = 1
     for (;;) {
-      if (reads >= DOC_BASELINE_MAX_READS || performance.now() + timing.gapMs - answeredAtMs > timing.budgetMs) {
+      if (reads >= DOC_BASELINE_MAX_READS || monoMs() + timing.gapMs - answeredAtMs > timing.budgetMs) {
         return drop('still-settling', ` (reads: ${reads})`)
       }
-      await sleepUntil(performance.now() + timing.gapMs)
+      await sleepUntil(monoMs() + timing.gapMs)
       const again = await snapshot()
       reads++
       if (typeof again === 'string') return drop(again)
@@ -1589,7 +1589,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         h.googleDrive.dropPut(id)
         return fence.refused
       }
-      const answeredAtMs = performance.now()
+      const answeredAtMs = monoMs()
       if (r.ok) {
         const j = isObj(r.json) ? r.json : {}
         const made = isDriveId(j.id) ? j.id : null

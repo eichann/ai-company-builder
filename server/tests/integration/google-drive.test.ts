@@ -41,6 +41,22 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const EMAILS: Record<string, string> = { 'm-owner': 'owner@div.example', 'm-sato': GOOGLE_SEED.member, 'm-tanaka': GOOGLE_SEED.colleague }
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
+/**
+ * The clock a Google document's observation waits on (`MonotonicWait`), virtual: each wait moves it on at once, and the
+ * fake's post-import moves (`afterMs`) count on it too — what the observation reads when no longer depends on how busy
+ * the machine is, and no test waits for real time.
+ */
+const virtual = vi.hoisted(() => ({ at: 0 }))
+vi.mock('../../src/adapters/system', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/adapters/system')>(),
+  systemMonotonicWait: {
+    monoMs: () => virtual.at,
+    async sleepUntil(atMs: number) {
+      virtual.at = Math.max(virtual.at, atMs)
+      await new Promise(resolve => setImmediate(resolve))
+    },
+  },
+}))
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockImplementation(async () =>
     currentUser.id ? { id: currentUser.id, email: `${currentUser.id}@x`, name: currentUser.id, image: null, emailVerified: true } : null),
@@ -114,7 +130,7 @@ const putBody = (over: Record<string, unknown> = {}, content: Buffer = PDF) => (
 })
 
 beforeAll(async () => {
-  google = createFakeGoogle()
+  google = createFakeGoogle({ monoMs: () => virtual.at })
   google.addClient({ clientId: CLIENT_ID, clientSecret: SECRET, redirectUris: [REDIRECT] })
   googleServer = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
@@ -1311,12 +1327,10 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     // Only the file's time moves after every read (its processing not over): the same.
     expect(await settling('ファイルが動き続ける.md', () => google.faults.settleFileAfterNextGets(100, 900)))
       .toEqual(['[google-drive] document baseline not kept: still-settling (reads: 12)'])
-    // The time budget (real time): reads 100 ms apart give up after 350 ms since the answer, long before the limit.
-    const budgeted = await settling('時間切れ.md', () => google.faults.settleRevisionAfterNextLists(100, 900), { gap: 100, budget: 350 })
-    expect(budgeted).toHaveLength(1)
-    const reads = Number(/^\[google-drive\] document baseline not kept: still-settling \(reads: (\d+)\)$/.exec(budgeted[0])?.[1])
-    expect(reads).toBeGreaterThanOrEqual(1)
-    expect(reads).toBeLessThanOrEqual(4)
+    // The time budget: reads 100 ms apart (at 0, 100, 200 and 300 ms on the observation's clock) give up before a fifth
+    // would come past 350 ms since the answer, long before the read limit.
+    expect(await settling('時間切れ.md', () => google.faults.settleRevisionAfterNextLists(100, 900), { gap: 100, budget: 350 }))
+      .toEqual(['[google-drive] document baseline not kept: still-settling (reads: 4)'])
   })
 
   it('times outside the window after the upload answer keep no baseline (outside-window): later than 30 s, or before the answer — the file\'s or the newest revision\'s; logged with timestamps only', async () => {
@@ -1439,9 +1453,9 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
   }
 
   /**
-   * A put whose post-import move (REAL_MOVE) happens `afterMs` of real time after the answer (the fake applies it before
-   * the next request from then on), with `timing`: whether the baseline holds the moved revision time, and the next
-   * update's outcome.
+   * A put whose post-import move (REAL_MOVE) happens `afterMs` after the answer on the observation's (virtual) clock (the
+   * fake applies it before the next request from then on), with `timing`: whether the baseline holds the moved revision
+   * time, and the next update's outcome.
    */
   async function observed(name: string, afterMs: number, timing: Partial<DocTiming>) {
     let doc: Json = {}
@@ -1452,14 +1466,14 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const kept = baseline(doc.id)
     const moved = kept.fingerprint !== null && Date.parse(kept.revisionAt) - Date.parse(kept.at) === REAL_MOVE.revisionMs
     // The next update comes once the move is surely due (it is applied before that update's first request).
-    await new Promise(resolve => setTimeout(resolve, afterMs))
+    virtual.at += afterMs
     const next = await ai(token0(), 'POST', '/put', docBody(NEXT, { name, updateFileId: doc.fileId }))
     return { moved, next: next.body.data?.drivePut?.state ?? next.body.code }
   }
   let actToken = ''
   const token0 = () => actToken
 
-  it('the observation waits for Drive\'s processing (real time): nothing read before the quiet period — reads only before the move would agree on the old time and every later update would be refused', async () => {
+  it('the observation waits for Drive\'s processing: nothing read before the quiet period — reads only before the move would agree on the old time and every later update would be refused', async () => {
     actToken = await tokenFor('m-sato', 'act')
     // The move comes 600 ms after the answer; the quiet period is 800 ms: both reads see it.
     expect(await observed('静かに待つ.md', 600, { quiet: 800, gap: 100 })).toEqual({ moved: true, next: 'done' })
@@ -1468,11 +1482,12 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect(await observed('待ちが短い.md', 600, { quiet: 400, gap: 100 })).toEqual({ moved: false, next: 'DRIVE_FILE_CHANGED_SINCE' })
   })
 
-  it('two reads must agree a gap apart (real time): a move between them is seen, and the settled time is the baseline\'s', async () => {
+  it('two reads must agree a gap apart: a move between them is seen, and the settled time is the baseline\'s', async () => {
     actToken = await tokenFor('m-sato', 'act')
     // The move 150 ms after the answer; the first read comes at once, the second 300 ms later and sees it, the third
     // agrees. Without the gap, two reads at once agree on the old time.
     expect(await observed('間で動く.md', 150, { quiet: 0, gap: 300 })).toEqual({ moved: true, next: 'done' })
+    expect(await observed('間がない.md', 150, { quiet: 0, gap: 0 })).toEqual({ moved: false, next: 'DRIVE_FILE_CHANGED_SINCE' })
   })
 
   it('the baseline is kept only when every revision and the file itself are the member\'s: another person\'s edit, on any page, a revision without its author, a page that cannot be read keep none', async () => {

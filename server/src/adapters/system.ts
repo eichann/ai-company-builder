@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { performance } from 'perf_hooks'
-import type { Clock, IdGenerator, MonotonicClock } from '../ports/clock'
+import type { Clock, IdGenerator, MonotonicClock, MonotonicWait } from '../ports/clock'
 import type { CompanyLock } from '../ports/transactions'
 import type { TokenDigest } from '../ports/key-broker'
 import { withCompanyLock } from '../lib/company-lock'
@@ -14,6 +14,15 @@ export const systemClock: Clock = {
 export const systemMonotonicClock: MonotonicClock = {
   bootId: randomUUID(),
   monoMs: () => performance.now(),
+}
+
+/** Waits on `performance.now()` with a timer. */
+export const systemMonotonicWait: MonotonicWait = {
+  monoMs: () => performance.now(),
+  async sleepUntil(atMs) {
+    const left = atMs - performance.now()
+    if (left > 0) await new Promise<void>(resolve => setTimeout(resolve, left))
+  },
 }
 
 export const randomIds: IdGenerator = {

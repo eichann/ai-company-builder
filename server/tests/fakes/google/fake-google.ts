@@ -133,6 +133,11 @@ export interface FakeGoogleOptions {
   refreshTokenLimit?: number
   /** Drive's export limit (10 MB). */
   exportLimitBytes?: number
+  /**
+   * The monotonic clock `moveTimeAfterNextImport({ afterMs })` counts on (default real time): a test passes the clock
+   * ACB's observation waits on (`MonotonicWait`), so a move is due at the same moment for both.
+   */
+  monoMs?: () => number
 }
 
 export interface FakeClient {
@@ -209,7 +214,8 @@ export interface FakeGoogleFaults {
    * upload is answered with one `modifiedTime`, and the file's then moves `ms` later (default 2000) with no edit and no
    * new revision. `revisionMs`: the newest revision's `modifiedTime` moves that much later too (real Google: the file's by
    * ~4 s, its one revision's by ~3 s); `fileTimeAs`: the file's time answered as this (malformed) value from then on, or as this function of the
-   * answered time gives it; `afterMs`: the move happens that much real time after the answer (default at once).
+   * answered time gives it; `afterMs`: the move happens that long after the answer on the fake's monotonic clock (`monoMs`,
+   * default real time; default at once).
    */
   moveTimeAfterNextImport(opts?: { ms?: number; revisionMs?: number; fileTimeAs?: string | ((answeredMs: number) => string); afterMs?: number }): void
   /**
@@ -420,6 +426,7 @@ const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})
 
 export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const now = options.now ?? (() => Date.now())
+  const monoMs = options.monoMs ?? (() => Date.now())
   const seed = options.seed ?? defaultGoogleSeed()
   const refreshLimit = options.refreshTokenLimit ?? 100
   const exportLimit = options.exportLimitBytes ?? 10 * 1024 * 1024
@@ -1001,13 +1008,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const last = f.history[f.history.length - 1]
       if (revisionMs !== null && last) last.modifiedTime = iso(answered + revisionMs)
     }
-    // `afterMs`: the move happens that long (real time) after the answer, seen by the first request from then on.
-    if (afterMs > 0) pendingMoves.push({ dueAt: Date.now() + afterMs, move })
+    // `afterMs`: the move happens that long (on `monoMs`) after the answer, seen by the first request from then on.
+    if (afterMs > 0) pendingMoves.push({ dueAt: monoMs() + afterMs, move })
     else move()
   }
   /** Moves due by now (`moveTimeAfterNextImport({ afterMs })`), applied before any request is answered. */
   function applyDueMoves(): void {
-    const t = Date.now()
+    const t = monoMs()
     for (const m of pendingMoves.filter(x => x.dueAt <= t)) { pendingMoves.splice(pendingMoves.indexOf(m), 1); m.move() }
   }
   const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => {
