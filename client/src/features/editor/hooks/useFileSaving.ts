@@ -170,7 +170,12 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
         setError('残している間に編集が続いたため、届いた版にしていません。もう一度選んでください。')
         return false
       }
-      updateFile(filePath, f => (f.content !== edits ? f : {
+      // Changed again while the edits were being kept: show that one to compare, replace nothing.
+      if (!await stillShown(filePath, compared)) return false
+      const now = fileContentsRef.current.get(filePath)?.external
+      if (now?.kind !== 'changed' || now.diskContent !== compared) return false
+      // A watcher event in the meantime is newer than the read above: never mark it clean.
+      updateFile(filePath, f => (f.content !== edits || f.external?.kind !== 'changed' || f.external.diskContent !== compared ? f : {
         ...f, content: compared, originalContent: compared, missing: false, external: undefined, comparing: false, changedWhileComparing: false,
       }))
       setNotice('届いた版にしました。あなたの編集はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')

@@ -113,6 +113,34 @@ test('a backup that cannot be written replaces nothing, either way, and says so'
   await expect(editor(page)).toContainText('私の追記')
 })
 
+test('a keep that was skipped (kept nowhere) counts as not kept: nothing replaced, either way', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await page.evaluate(() => { (window as unknown as { __acbFailBackups: { skip: boolean } }).__acbFailBackups.skip = true })
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(page.getByText('届いた版をバックアップに残せなかったため、保存していません。', { exact: false })).toBeVisible()
+  expect(await disk(page)).not.toContain('私の追記')
+  await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(page.getByText('あなたの編集をバックアップに残せなかったため、届いた版にしていません。', { exact: false })).toBeVisible()
+  await banner(page).getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(editor(page)).toContainText('私の追記')
+})
+
+test('［自分の版を保存］ when the file changes again while the arrived version is being kept: nothing written, compare again', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await page.evaluate(path => {
+    const w = window as unknown as { __acbDuringBackup?: () => void; __acbFiles: Record<string, string> }
+    w.__acbDuringBackup = () => { w.__acbFiles[path] += '\n\nAI がもう一度直しました。' }
+  }, FILE)
+  await compare(page).getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(compare(page)).toContainText('比べている間に、ファイルがまた変わりました。')
+  expect(await disk(page)).toContain('AI がもう一度直しました。')
+  expect(await disk(page)).not.toContain('私の追記')
+})
+
 test('the file changed again while comparing: nothing is saved or replaced, compare again', async ({ page }) => {
   await openWithEdits(page)
   await page.getByTestId('external-edit').click()
@@ -127,6 +155,22 @@ test('the file changed again while comparing: nothing is saved or replaced, comp
   await expect(editor(page)).toContainText('AI がもう一度直しました。')
   const kept = await backups(page)
   expect(kept.map(k => k.reason)).toEqual(['editor_edits'])
+})
+
+test('［届いた版を採用］ when the file changes again while the edits are being kept: the edits stay, compare again', async ({ page }) => {
+  await openWithEdits(page)
+  await page.getByTestId('external-edit').click()
+  await banner(page).getByRole('button', { name: '比べて選ぶ' }).click()
+  await page.evaluate(path => {
+    const w = window as unknown as { __acbDuringBackup?: () => void; __acbFiles: Record<string, string>; __acbFileChange: (p: string) => void }
+    w.__acbDuringBackup = () => { w.__acbFiles[path] += '\n\nAI がもう一度直しました。'; w.__acbFileChange(path) }
+  }, FILE)
+  await compare(page).getByRole('button', { name: '届いた版を採用' }).click()
+  await expect(compare(page)).toContainText('比べている間に、ファイルがまた変わりました。')
+  await expect(compare(page)).toContainText('AI がもう一度直しました。')
+  await expect(page.getByText('届いた版にしました。', { exact: false })).toHaveCount(0)
+  await banner(page).getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(editor(page)).toContainText('私の追記')
 })
 
 test('⌘S on a file changed elsewhere opens the compare view instead of overwriting', async ({ page }) => {

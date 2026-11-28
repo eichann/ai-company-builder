@@ -99,7 +99,7 @@ const closeAnswers: string[] = []
 let requestClose: (() => void) | null = null
 const pinned: string[] = []
 const backups: Array<{ reason: string; path: string; content: string | undefined }> = []
-const failBackups = { on: false }
+const failBackups = { on: false, skip: false }
 let emitChanges: ((changes: { type: string; path: string }[]) => void) | null = null
 Object.assign(window, {
   electronAPI: {
@@ -116,15 +116,21 @@ Object.assign(window, {
     answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
     createDirectory: async () => true,
     // Each keep is listed in __acbBackups (what was kept: the disk then, or the edits given); a
-    // spec sets __acbFailBackups to have them fail.
+    // spec sets __acbFailBackups.on to have them fail, .skip to have them kept nowhere ('internal'),
+    // and __acbDuringBackup to change the "disk" while one is being kept.
     backupBeforeOverwrite: async (_root: string, p: string) => {
       if (failBackups.on) return { success: false, error: 'EACCES' }
+      if (failBackups.skip) return { success: true, skipped: 'internal' }
       backups.push({ reason: 'editor_overwrite', path: p, content: files[p] })
+      ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
       return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }
     },
     backupEdits: async (_root: string, p: string, content: string) => {
       if (failBackups.on) return { success: false, error: 'EACCES' }
+      if (failBackups.skip) return { success: true, skipped: 'internal' }
       backups.push({ reason: 'editor_edits', path: p, content })
+      // What happens on "disk" while the edits are being kept (a spec sets it).
+      ;(window as unknown as { __acbDuringBackup?: () => void }).__acbDuringBackup?.()
       return { success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_edits` }
     },
     // The review's sidecars live next to the document (?view=html: its review, doc-frame.md "Review in the document view").
