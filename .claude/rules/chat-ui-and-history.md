@@ -8,6 +8,8 @@ paths:
   - "client/tests/chat-history-store.test.ts"
   - "client/src/features/chat/chat-rendering.test.ts"
   - "client/tests/chat-header-ui.*"
+  - "client/tests/chat-reply-cleaning-ui.*"
+  - "client/tests/ui/fixtures/reply-html-traps.ts"
   - "client/tests/ui-stream-limits.test.ts"
   - "client/shared/chat-server-api.ts"
   - "client/electron/chat-server.ts"
@@ -488,7 +490,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   labels, its `%%{init}%%` directives and front matter removed (`mermaidWithoutConfig`) and its settings `secure`; every
   SVG — mermaid's and the AI's — keeps only drawing elements (no script, foreignObject, image, a — unwrapped to a group —,
   animate / set, feImage), no `on*`, no reference but `#id`, no outside `url()`, no CSS with `@import`, fonts or
-  escapes (`sanitizeSvg`, parsed in an inert DOMParser document); and the result is an `<img src="data:image/svg+xml">`,
+  escapes (`svgCleaning.ts` `sanitizeSvg`, on the walk shared with a rich reply's HTML, "Cleaning the AI's markup"
+  below); and the result is an `<img src="data:image/svg+xml">`,
   so even what a sanitiser missed cannot run or load. Diagrams are drawn whatever 「返事の形」 (it only says whether the
   AI is told they are welcome: `client/shared/reply-style.ts`; `chat-and-agents.md` "What ACB tells the AI"). Each
   picture is drawn once per text and theme and kept (`watchDiagram`, ≤ 100 unwatched kept), one mermaid at a time.
@@ -505,6 +508,65 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   and with mermaid's directives honoured; an undrawable block stays code; the
   switch and the request; `SCREENSHOTS=<dir>`), `tests/chat-panel-helpers.test.ts` (the request reads it per request),
   `tests/chat-standing-instructions.test.ts` (the one line with the turn, only for リッチ and an agent that takes it).
+- **Cleaning the AI's markup** (one walk, two allowlists; owner 2026-11-28: the rule lives in one place).
+  `markupCleaning.ts` holds what every cleaner of the AI's markup shares: the text is parsed in an inert DOMParser
+  document (`parseInert`: nothing runs or loads while it is cut); `cleanTree` walks it once, removes comments and
+  processing instructions and every `on*` attribute whatever the allowlist says, and asks the allowlist's
+  `CleaningRules` only what to keep (an element kept, unwrapped — its words stay —, removed with its contents, or
+  replaced; an attribute's kept value or none; a last check once its inside is clean); `cssLoadsOrRuns` is the one
+  list of CSS that loads or runs something (an outside `url()`, `@import`, `@font-face`, `image-set` / `image()`,
+  `expression()`, `javascript:`, any escape). The two allowlists: a diagram's picture (`svgCleaning.ts`
+  `sanitizeSvg`, "Diagrams in a reply" — unchanged by the move, except that comments inside a picture now go too,
+  which draws the same) and a rich reply's HTML (`replyHtmlCleaning.ts` `sanitizeReplyHtml`, below). A gap found in
+  the walk is fixed there, for both.
+- **Rich replies: the cleaning of the AI's HTML** (owner decisions 2026-11-28, 「リッチな返信」; PR1 of 4: the
+  function and its tests only — nothing draws it yet; the closed frame, the AI's line and the buttons follow).
+  `sanitizeReplyHtml(markup) → { html, css }`, the first of the two guards (the second is the closed frame, PR2): what
+  it returns runs nothing, loads nothing, sends nothing, cannot leave the reply's box and does not move for ever,
+  **even drawn in a frame that would allow it** (the spec checks exactly that). Kept: text, headings, lists, tables,
+  emphasis, quotes, `details` / `summary`, sections, `class` / `style` / `title` / `lang` / `dir` / `role` /
+  `aria-label` / `aria-hidden` and a few per-element attributes (`colspan`, `open`, …). **Newly allowed** (owner):
+  `input` of type `radio` / `checkbox` only (`type`, `name`, `id`, `checked`, `value`) and `label` (`for`) — tabs and
+  toggles through `:checked`; every other input type, `form`, `button`, `select`, `textarea`, … go with their
+  contents, so nothing can be typed or sent —; `a` with an `http(s)` address only, with no user name or password
+  (`https://app.acb@evil.example/` reads as one place and goes to another; written back as the browser reads it; any
+  other link — `javascript:`, `data:`, `file:`, no scheme — keeps its words, not itself; `ping`, `target`, `download`
+  go); CSS `animation-*` / `transition-*` and `@keyframes`, cleaned like any declaration, **at most 3 animations on an
+  element, each at most 10 runs of at most 10 s, starting at most 10 s late** (`infinite`, longer, later and more are
+  dropped: no endless motion, not even a chain of delayed runs — independent review). Pictures:
+  a raster `data:image/(png|jpeg|gif|webp);base64` only; an inline `<svg>` or an SVG `data:` image goes through
+  `sanitizeSvg` with its CSS animation and transition taken out first (a reply's picture does not move: an SVG image
+  runs its own CSS motion, past the limits above — Codex review; the diagrams are not touched), must be well-formed
+  XML, and becomes `<img src="data:image/svg+xml;charset=utf-8,…">` in one spelling. Removed with contents: script, noscript, template, style (its CSS is read separately), link, meta, base,
+  title, head, xmp, noembed, noframes, iframe / frame / frameset, object, embed, portal, fencedframe, media, picture, canvas, map, dialog,
+  MathML; any other element (marquee, a custom element) is unwrapped. **CSS** (`<style>` text and `style`
+  attributes) is read by the browser's own parser (a constructed `CSSStyleSheet`, which loads nothing; escapes are
+  undone, custom properties keep theirs and are refused by `cssLoadsOrRuns`) and written back as listed properties
+  (or their longhands) — **a custom property only with a plain name (`--[A-Za-z0-9_-]{1,64}`) and a plain value
+  (colours, numbers, `var()`, `calc()`: no quotes, braces or semicolons)**, since the parser hands its name back with
+  escapes undone (independent review: an escaped name spelled `}` or `</style>` and ended the rule or the element) —
+  with values that hold no `url()` at all, `cross-fade`, `element()`, `paint()`, `src()`,
+  `attr()`, escapes or `<` (so the CSS can never end the `<style>` it is put in), no viewport units, `position` only
+  `static` / `relative` / `absolute`, `content` only a plain string, no viewport or container units (`vh`, `dvw`,
+  `cqw`, …); only style rules (their nested rules dropped),
+  `@media` / `@supports` around them and `@keyframes` stay — `@import`, `@font-face`, `@layer` and every other
+  at-rule go —, and no selector naming the document (`:root`, `:scope`, a top-level `&`, `:host`, `html`, `body`,
+  `::backdrop`, …; `*` and the like still match the frame's root, which the closed frame keeps apart — PR2 should
+  put its own CSS before the reply's or in a separate `<style>`, and clip the frame). **What is kept must read back
+  the same**: the sheet and each `style` are parsed again and must clean to themselves, and the sheet holds no `<`;
+  otherwise it is dropped whole (so nothing is left open to swallow the CSS that follows). Raster pictures may be
+  animated (GIF, APNG, WebP): the motion limits are CSS's only.
+  **A piece still being written** is cleaned the same way: the parsers close what is open, a tag cut inside an
+  attribute is no element. Anything that throws gives `{ html: '', css: '' }` (nothing rather than half cleaned).
+  Tests: `tests/ui/chat-reply-cleaning.spec.ts` (preview `chat-reply-cleaning-ui.html`, which exposes the function;
+  traps in `tests/ui/fixtures/reply-html-traps.ts` — both demo versions' and the parsers' corners): a reply as the AI
+  writes it keeps its look and scriptless parts; an independent audit of the allowlist finds nothing in the cleaned
+  traps and the result reads the same when cleaned again (no markup that changes on a second reading); the cleaned
+  traps drawn in an unsandboxed frame, pressed, hovered, checked and tabbed through run nothing, make no outside
+  request, stay in the frame, fix nothing over the app and run no endless animation — and the same frame with the
+  traps as written does all four (the checks can fail); every piece cut every 3 characters is as clean; CSS put after
+  the reply's (a sentinel rule, a sentinel declaration) still reads as its own.
+  Mutation-checked guard by guard (the PR lists them).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

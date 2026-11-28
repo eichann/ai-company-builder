@@ -1,5 +1,5 @@
 // Which code blocks of a reply are diagrams, and what of their text the drawing may use (pure: no DOM).
-// The drawing itself and its guards are diagramRenderer.ts; chat-ui-and-history.md "Diagrams in a reply".
+// The drawing itself and its guards are diagramRenderer.ts and svgCleaning.ts; chat-ui-and-history.md "Diagrams in a reply".
 
 export type DiagramKind = 'mermaid' | 'svg'
 export interface Diagram { kind: DiagramKind; source: string }
