@@ -65,6 +65,7 @@ import type { CompanyFolderKind } from './company-folder'
 import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame'
 import type { DocQuoteFound, DocViewReview } from './doc-review-frame'
 import type { ManualExportResult, ManualOpenResult } from './manual'
+import type { ReplyPageConsultation, ReplyPageSaveResult } from './reply-pages'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult, GoogleRelayService } from './google'
@@ -902,6 +903,8 @@ export interface IpcInvokeChannels {
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
   /** The main window's answer to appCommand:request (only the window asked may answer). */
   'appCommand:respond': { args: [requestId: string, answer: AppCommandAnswer]; result: void }
+  /** A rich reply kept as a page in the member's 今日のフォルダ's ページ/ (features/reply-pages): main builds the path. */
+  'replyPage:save': { args: [rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string]; result: ReplyPageSaveResult }
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (「Slack で許可」, slack-connector.md): the app holds no token; the sign-in URL stays in main.
@@ -1415,6 +1418,7 @@ export interface ElectronAPI {
   answerCloseRequest: Invoke<'app:closeResponse'>
   onAppCommandRequest: Subscribe<'appCommand:request'>
   answerAppCommand: Invoke<'appCommand:respond'>
+  saveReplyPage: Invoke<'replyPage:save'>
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (設定 → Slack): the member's view only, never a token or the sign-in URL.

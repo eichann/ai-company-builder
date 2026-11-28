@@ -523,7 +523,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   which draws the same) and a rich reply's HTML (`replyHtmlCleaning.ts` `sanitizeReplyHtml`, below). A gap found in
   the walk is fixed there, for both.
 - **Rich replies: the cleaning of the AI's HTML** (owner decisions 2026-11-28, 「リッチな返信」; PR1 of 4: the
-  function and its tests; PR2 draws it in the reply's closed frame, below; PR3 the AI's line; the buttons follow).
+  function and its tests; PR2 draws it in the reply's closed frame, below; PR3 the AI's line; PR4 the buttons, below).
   `sanitizeReplyHtml(markup) → { html, css }`, the first of the two guards (the second is the closed frame, PR2): what
   it returns runs nothing, loads nothing, sends nothing, cannot leave the reply's box and does not move for ever,
   **even drawn in a frame that would allow it** (the spec checks exactly that). Kept: text, headings, lists, tables,
@@ -607,7 +607,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
     `allow-scripts` and `allow-same-origin`** — `tests/frame-sandbox.test.ts` reads every string of the app's code
     (renderer, main, shared; comments left out) and fails on a file holding both, and pins the two sandboxes here
     exactly; the spec checks every frame on the chat page. Over **20,000 px** as written (`RICH_MAX_HEIGHT`) the frame stops there and 「この返事は長いため、
-    途中までを表示しています。続きは［大きく見る］で見られます。」 follows (`onOpenLarge`: the button comes with PR4).
+    途中までを表示しています。続きは［大きく見る］で見られます。」 follows, with a ［大きく見る］ button when the conversation can keep pages (`onOpenLarge`, below).
   - **Being written**: drawn again at most every 80 ms (`RICH_UPDATE_MS`), one drawing at a time. The shown frame is
     never rewritten: the next one loads out of sight and takes the old one's place once drawn (two animation frames
     after its `load`), so there is no empty moment; until the first frame has drawn, the chat's ordinary rendering
@@ -646,6 +646,45 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   fail). The policy is pinned whole. Mutation-checked: the sandbox, the policy, following, the double frame,
   near-screen drawing, the height, the tallest state, heights per theme and the theme rewrite each fail a test when
   taken out. `SCREENSHOTS=<dir>` shoots a reply light and dark.
+- **Rich replies: ［大きく見る］［ページとして残す］［コードとして見る］** (PR4 of 「リッチな返信」, owner decisions 2026-11-28 ①④).
+  `components/ChatRichReplyView.tsx` wraps every rich reply: three small icon buttons at its top right (a `toolbar`
+  「この返事の表示」), transparent until the pointer is over the reply or one of them has the keyboard's focus (always in
+  the tab order, after the reply; placed after the frame in the page's order, so drawn over it without a z-index).
+  - **［大きく見る］** keeps the reply as a page and runs `editor.viewDocument` on it (in a consultation's own window
+    `file.open`, as the page cards): the HTML viewer opens it (doc-frame.md: its own view, no network, an opaque origin,
+    that folder only). **［ページとして残す］** keeps the same page and shows it under the reply as a page card
+    (「ページとして残しました」, 「ページ・あなただけに見えます・<name>」), which opens it the same way. The same reply in the
+    same conversation keeps one file (remembered per conversation and text, ≤ 100) while it is still there (`fs:exists`;
+    moved or deleted → kept again under a free name); while the reply is still being written the two are disabled; a
+    refusal shows as an alert line.
+  - **The page is the AI's HTML as written** (owner ④): `richReplyPage.ts` `replyPageDocument` — the reply's Markdown as
+    the chat draws it, each ```` ```acb-html ```` / ```` ```acb-slide ```` block uncleaned, the app's tokens, typography and
+    ready-made boxes (`appCss`, `FRAME_CSS`); a small script of its own sets `.dark` from the computer's setting (the
+    reply's own `prefers-color-scheme` follows the computer there too). Only the viewer may hold it: the chat's frame
+    still draws the cleaned reply.
+  - **Main writes it** (`electron/features/reply-pages/ipc.ts`, `replyPage:save(rootPath, todayFolder, consultation,
+    html)`; `files-and-editor.md`): the renderer hands the company folder (checked by the allowed roots), the today
+    folder the chat requests already carry, which consultation (company and conversation id) and the page — never a
+    file path. Main builds `<root>/<today folder>/ページ/<name>.html` with `replyPageFolderOf` (only a today folder of the
+    app's shape: never the top level, never another place), refuses a department not on this computer, a folder not
+    downloaded and a reserved name (the folder's and the file's), checks the folder by real location before and after
+    making it and refuses a link anywhere from the department down to `ページ/` (Codex review: a link to a shared folder
+    inside the company folder passes the root check, and the page would be synced), names the page after
+    the consultation's stored title (`client/shared/reply-pages.ts` `replyPageBaseName`: path, Windows, control,
+    invisible and direction characters out, ≤ 40 characters, else 「AI の返事」) and creates it with `wx`, trying
+    「名前 (2).html」… up to 50: nothing is ever replaced. The buttons that keep a page show only where the conversation has
+    a today folder (`ReplyPagesContext`, given by `ChatConversation`): not in a consultation's own window.
+  - **［コードとして見る］** shows the reply as the chat's ordinary Markdown (its blocks as code, no frame); pressed again
+    (「整えた表示に戻す」, `aria-pressed`) the frame comes back.
+  Tests: `tests/ipc-reply-pages.test.ts` (the page in ページ/ named after the consultation, as written; a taken name gets
+  (2), (3) and the member's file is untouched; another root, a climb, another shape, the top level, a department not
+  here, a link out of the company folder and a link to a shared folder inside it are refused with nothing written
+  there; not a page refused; the name rule; mutation-checked: `wx`, the folder shape, the real-location check, the link
+  check), `tests/ipc-path-guard.test.ts` (`rootPath`
+  GUARDED), `tests/ui/chat-rich-reply.spec.ts` 「the reply's buttons」 (`chat-header-ui.html?pages=1`: hidden until
+  hover or focus, three buttons only with a today folder; disabled while written; ［大きく見る］ asks main once with the
+  uncleaned block and opens the viewer, the chat's frame still without the script, and a deleted page is kept again; ［ページとして残す］'s card and a refusal; ［コードとして見る］;
+  the 20,000 px line's button; mutation-checked: the focus rule, the one file per reply).
 - **Page cards in a reply** (step ② of 「図とページで返す」, 2026-11-28). A link in a reply to one `.html` / `.htm` file of the
   company folder (`pageCards.ts` `pageCardOf`: an absolute path under the company root or a path relative to it, below a
   folder — never the top level —, no `.` / `..` / empty segment, no scheme, query or fragment, no control, invisible or direction character (a shown name cannot lie), not hidden) is drawn as a

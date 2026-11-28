@@ -261,6 +261,7 @@ contract.invoke recordViews:forFile
 contract.invoke recordViews:search
 contract.invoke recordViews:topics
 contract.invoke recordsTable:page
+contract.invoke replyPage:save
 contract.invoke shell:openExternal
 contract.invoke skillShelf:editLocally
 contract.invoke skillShelf:openBackup
@@ -672,6 +673,7 @@ contract.type ElectronAPI.runBrowserWrite = runBrowserWrite: Invoke<'browserLine
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
+contract.type ElectronAPI.saveReplyPage = saveReplyPage: Invoke<'replyPage:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
 contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
@@ -1107,6 +1109,7 @@ contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': {
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'recordsTable:page' = 'recordsTable:page': { args: [companyId: string, query: RecordsTableQuery]; result: RecordsTablePage }
+contract.type IpcInvokeChannels.'replyPage:save' = 'replyPage:save': { args: [rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string]; result: ReplyPageSaveResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:openBackup' = 'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
@@ -1486,6 +1489,7 @@ main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, compa
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle recordsTable:page @ features/records-table/ipc.ts (companyId, query)
+main.handle replyPage:save @ features/reply-pages/ipc.ts (rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:openBackup @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
@@ -2076,6 +2080,8 @@ preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
 preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
 preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)
 preload saveOwnBrokerKey : (companyId: string, service: string, secret: string, displayName?: string | undefined) => Promise<OwnKeysResult>
+preload saveReplyPage -> invoke replyPage:save($0, $1, $2, $3)
+preload saveReplyPage : (rootPath: string, todayFolder: string, consultation: ReplyPageConsultation, html: string) => Promise<ReplyPageSaveResult>
 preload searchChatSessions -> invoke chatHistory:search($0, $1)
 preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
 preload searchRecords -> invoke recordViews:search($0, $1)

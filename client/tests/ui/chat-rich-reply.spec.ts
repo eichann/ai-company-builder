@@ -7,7 +7,8 @@ import { expectNoPageErrors, openPreview } from './helpers'
 import { ALL_TRAPS, GOOD_REPLY } from './fixtures/reply-html-traps'
 import { RICH_HTML_PIECES } from '../../shared/reply-style'
 
-type Control = { open(): boolean; send(chunk: unknown): void; text(id: string, delta: string): void; finish(): void; toggleTheme(): void }
+type Control = { open(): boolean; send(chunk: unknown): void; text(id: string, delta: string): void; finish(): void; toggleTheme(): void
+  viewed: string[]; opened: string[]; pagesOnDisk: Set<string>; pagesSaved: Array<{ rootPath: string; todayFolder: string; consultation: { companyId: string; sessionId: string }; html: string }> }
 type PageGlobals = { __acbChat: Control; __pwned?: unknown[] }
 
 const input = (page: Page) => page.locator('.cm-content[role="textbox"]').locator('visible=true')
@@ -450,5 +451,119 @@ test.describe('the frame alone (the cleaning skipped)', () => {
     expect(await page.locator('#reply').evaluate((el: HTMLIFrameElement) => el.contentDocument !== null), 'without the sandbox, the app can be reached').toBe(true)
     await page.frameLocator('#reply').locator('#top-link').click({ force: true }).catch(() => {})
     await expect.poll(() => page.url(), 'without the sandbox, a link moves the app away').not.toContain('/tests/chat-rich-reply-ui.html')
+  })
+})
+
+// ［大きく見る］［ページとして残す］［コードとして見る］ (chat-ui-and-history.md "Rich replies: ［大きく見る］…"): shown only
+// while the pointer is over the reply or a button has focus; the page is the AI's HTML as written, kept by main in the
+// today folder (chat-header-ui.html?pages=1 records what was asked) and opened by the editor's command only.
+test.describe('the reply\'s buttons', () => {
+  const RAW = '<p class="mine">そのまま</p><script>document.title = "ページの中だけで動く"</script>'
+  const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'この返事の表示' })
+  const opacity = (page: Page) => toolbar(page).evaluate(el => Number(getComputedStyle(el).opacity))
+
+  test('hidden until the pointer is over the reply or the keyboard reaches a button; three buttons with a today folder', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', GOOD_REPLY)}`)
+    await finish(page)
+    await expect(shownFrame(page)).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect.poll(() => opacity(page)).toBe(0)
+    await expect(toolbar(page).getByRole('button')).toHaveText(['', '', ''])
+    await expect(toolbar(page).getByRole('button', { name: '大きく見る' })).toBeAttached()
+    await expect(toolbar(page).getByRole('button', { name: 'ページとして残す' })).toBeAttached()
+    await shownFrame(page).hover()
+    await expect.poll(() => opacity(page)).toBe(1)
+    await page.mouse.move(5, 5)
+    await expect.poll(() => opacity(page)).toBe(0)
+    await toolbar(page).getByRole('button', { name: 'コードとして見る' }).focus()
+    await expect.poll(() => opacity(page)).toBe(1)
+    await page.keyboard.press('Shift+Tab')
+    await expect(toolbar(page).getByRole('button', { name: 'ページとして残す' })).toBeFocused()
+  })
+
+  test('［大きく見る］ keeps the AI\'s HTML as written in the today folder and opens it in the HTML viewer; again, the same file', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', RAW)}`)
+    // Still being written: nothing to keep yet.
+    await expect(shownFrame(page)).toBeVisible()
+    await expect(toolbar(page).getByRole('button', { name: '大きく見る' })).toBeDisabled()
+    await finish(page)
+    await shownFrame(page).hover()
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    const path = '/tmp/acb-preview/営業部/.personal/inbox/日付別/2026/20261128/ページ/AI の返事.html'
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual([path])
+    const saved = await chat(page, c => c.pagesSaved)
+    expect(saved).toHaveLength(1)
+    expect(saved[0].rootPath).toBe('/tmp/acb-preview')
+    expect(saved[0].todayFolder).toBe('営業部/.personal/inbox/日付別/2026/20261128')
+    expect(saved[0].consultation.companyId).toBe('preview-company')
+    expect(saved[0].html, 'the block as the AI wrote it, its script too').toContain(RAW)
+    expect(saved[0].html).toContain('<p>表です。</p>')
+    expect(saved[0].html).toMatch(/^<!doctype html>/)
+    // The frame in the chat still holds the cleaned reply: the script never reached it.
+    expect(await page.frameLocator('iframe[data-rich-reply-frame] >> nth=-1').locator('script').count()).toBe(0)
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual([path, path])
+    expect(await chat(page, c => c.pagesSaved.length), 'kept once').toBe(1)
+    // The member deleted it: kept again, under a new name (nothing replaced), and that one opens.
+    await chat(page, c => c.pagesOnDisk.clear())
+    await toolbar(page).getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed.at(-1))).toBe(path.replace('AI の返事.html', 'AI の返事 (2).html'))
+    expect(await chat(page, c => c.pagesSaved.length)).toBe(2)
+  })
+
+  test('［ページとして残す］ shows the page as a card for the member alone; the card opens it; a refusal is said', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, '表にして')
+    await reply(page, fence('acb-html', RAW))
+    await finish(page)
+    await shownFrame(page).hover()
+    await toolbar(page).getByRole('button', { name: 'ページとして残す' }).click()
+    const card = page.locator('[data-chat-page-card]')
+    await expect(card).toContainText('ページとして残しました')
+    await expect(card).toContainText('ページ・あなただけに見えます・AI の返事.html')
+    expect(await chat(page, c => c.viewed)).toEqual([])
+    await card.click()
+    await expect.poll(() => chat(page, c => c.viewed)).toEqual(['/tmp/acb-preview/営業部/.personal/inbox/日付別/2026/20261128/ページ/AI の返事.html'])
+
+    await send(page, 'もう一つ')
+    await reply(page, fence('acb-html', '<p>別の返事</p>'))
+    await finish(page)
+    await page.evaluate(() => { (window as unknown as { __acbPageRefusal: string }).__acbPageRefusal = 'ページを置く今日のフォルダが見つかりません。' })
+    await shownFrame(page).hover()
+    await toolbar(page).last().getByRole('button', { name: '大きく見る' }).click()
+    await expect(page.getByRole('alert').filter({ hasText: '今日のフォルダが見つかりません' })).toBeVisible()
+    expect(await chat(page, c => c.viewed)).toHaveLength(1)
+  })
+
+  test('［コードとして見る］ shows the reply as code, with no frame; pressed again, the frame comes back', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '表にして')
+    await reply(page, `表です。\n\n${fence('acb-html', GOOD_REPLY)}`)
+    await finish(page)
+    await expect(shownFrame(page)).toBeVisible()
+    // No today folder (a consultation's own window): only this button.
+    await expect(toolbar(page).getByRole('button')).toHaveCount(1)
+    const code = toolbar(page).getByRole('button', { name: 'コードとして見る' })
+    await code.focus()
+    await code.press('Enter')
+    await expect(frames(page)).toHaveCount(0)
+    await expect(page.locator('[data-assistant-text]').last()).toContainText('<table class="acb-compare">')
+    await expect(toolbar(page).getByRole('button', { name: '整えた表示に戻す' })).toHaveAttribute('aria-pressed', 'true')
+    await toolbar(page).getByRole('button', { name: '整えた表示に戻す' }).click()
+    await expect(shownFrame(page)).toBeVisible()
+  })
+
+  test('past 20,000 px, 「続きは［大きく見る］で」 opens the whole page', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual', pages: '1' })
+    await send(page, 'もっと長く')
+    await reply(page, 'とても長い返事です。\n\n```acb-html\n<div style="height: 30000px">高い</div>\n```')
+    await finish(page)
+    await page.locator('[data-rich-reply-over]').getByRole('button', { name: '大きく見る' }).click()
+    await expect.poll(() => chat(page, c => c.viewed)).toHaveLength(1)
+    expect((await chat(page, c => c.pagesSaved))[0].html).toContain('height: 30000px')
   })
 })

@@ -155,7 +155,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   refuse a target that exists (`code: 'name_taken'`,
   「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
   `electron/file-guards.ts`), except the same entry under another spelling (a case-only
-  rename) and the review's temporary save file renamed over its own sidecar. `fs:writeFile` is
+  rename) and the review's temporary save file renamed over its own sidecar. A rich reply kept as a page
+  (`replyPage:save`, `chat-ui-and-history.md` "Rich replies: ［大きく見る］…") is created with `wx` too, at a name main
+  chooses (「名前 (2).html」 when taken), in the today folder's `ページ/` only. `fs:writeFile` is
   saving and replaces on purpose (editor, sidecars). The tree checks typed names first
   (`client/shared/file-names.ts`: no `/ \ < > : " | ? *`, control characters, trailing space or
   dot, Windows device names, `.git`, > 255 bytes) and keeps the dialog open with the reason

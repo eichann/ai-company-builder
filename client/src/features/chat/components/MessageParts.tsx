@@ -5,7 +5,7 @@ import { Brain, CaretUp, CircleNotch, Info, LinkSimple } from '@phosphor-icons/r
 import type { ConsultationReference } from '../../../../shared/consultation-reference'
 import { ConsultationReferenceLink } from './ConsultationReference'
 import { MarkdownMessage } from './MarkdownMessage'
-import { ChatRichReply } from './ChatRichReply'
+import { ChatRichReplyView } from './ChatRichReplyView'
 import { hasRichBlock } from '../richReply'
 import { ChoicePromptRecordView } from './ChoicePrompt'
 import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../../shared/choice-prompt'
@@ -97,8 +97,8 @@ const TextPartView = memo(function TextPartView({ text, markdown, showCursor }: 
     // Like the Claude and ChatGPT apps: the AI's reply is plain text on the page, no bubble (owner FB 2026-11-27).
     <div data-assistant-text className="break-words text-[14px] leading-relaxed text-text">
       {markdown ? (
-        // A reply with ```acb-html / ```acb-slide is drawn whole in its closed frame, whatever 「返事の形」 (ChatRichReply).
-        hasRichBlock(text) ? <ChatRichReply content={text} fallback={<MarkdownMessage content={text} />} /> : <MarkdownMessage content={text} />
+        // A reply with ```acb-html / ```acb-slide is drawn whole in its closed frame, whatever 「返事の形」, with its three buttons.
+        hasRichBlock(text) ? <ChatRichReplyView text={text} writing={showCursor} /> : <MarkdownMessage content={text} />
       ) : (
         <div className="whitespace-pre-wrap">{text}</div>
       )}
