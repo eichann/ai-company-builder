@@ -149,7 +149,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       setError('保存できませんでした。少し待ってから、もう一度選んでください')
       return false
     }
-  }, [fileContentsRef, stillShown, rootPath, markSaved, setError, setNotice])
+  }, [fileContentsRef, stillShown, rootPath, markSaved, updateFile, setError, setNotice])
 
   /**
    * ［届いた版を採用］: keep the tab's edits in the backups, then show the version
