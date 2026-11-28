@@ -309,6 +309,7 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
             commentBox={selection?.commentBox}
+            aiFix={selection?.aiFix}
             // One preview per file: it restores that file's scroll position when mounted.
             key={activeFilePath}
             paneId={paneId}

@@ -52,6 +52,7 @@ import { AppInstructionChip } from './AppInstructionChip'
 import { TopicChip } from './TopicChip'
 import { patchChatSession, replyPageStillThere, saveReplyPage } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
+import { inlineFixTurnAnswer, type InlineFixReply } from '../../../../shared/inline-fix'
 import { chatErrorText } from '../chatErrorText'
 import { replyAsksTheMember } from '../aiTurns'
 
@@ -110,6 +111,8 @@ export type ChatInputRequest =
     /** The app's first message went out (its id) in this tab's new conversation (「この作業をする」 closes it by itself once done). */
     onSent?: (sent: { tabId: string; conversationId: string; messageId: string }) => void }
   | { kind: 'insertText'; text: string }
+  /** 「AI に直してもらう」: `message` sent into this tab's consultation (kept, `appSent`); `answer` gets the reply when that turn ends. */
+  | { kind: 'inlineFix'; message: string; answer: (reply: InlineFixReply) => void }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
    * record with this tab's conversation id; only when that wins, send the first message.
@@ -200,8 +203,13 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const steering = useSteering({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef })
   const { queuedSends, lastTurnAbortedRef, sendWhileRunning, cancelQueuedSend } = steering
 
+  // A 「AI に直してもらう」 request waiting for its turn to end (its message id once created).
+  const inlineFixRef = useRef<{ messageId: string | null; answer: (reply: InlineFixReply) => void } | null>(null)
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useStreamingChat(transport, ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
     lastTurnAbortedRef.current = isAbort || isDisconnect || isError
+    const fix = inlineFixRef.current
+    const fixAnswer = fix?.messageId ? inlineFixTurnAnswer(fix.messageId, { messageIds: finishedMessages.map(m => m.id), reply: message, isAbort, isError, isDisconnect }) : null
+    if (fix && fixAnswer) { inlineFixRef.current = null; fix.answer(fixAnswer) }
     suggestionTurnFinished(lastTurnAbortedRef.current)
     completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
     // Fetch and store Claude CLI session ID for resume persistence
@@ -443,6 +451,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // chat.insertText: the text goes into the composer. chat.newConsultation (e.g. a skill's 実行):
   // a new conversation, then its message is sent; waits for the history.
   useEffect(() => {
+    // 「AI に直してもらう」: sent into this consultation in the member's place; only while nothing else runs here.
+    if (inputRequest?.kind === 'inlineFix') {
+      if (!isShown || !historyReadyRef.current) return
+      onInputRequestConsumed?.()
+      const { message, answer } = inputRequest
+      if (tabBusy() || inlineFixRef.current) { answer({ ok: false, reason: 'busy' }); return }
+      const waiting = { messageId: null as string | null, answer }
+      inlineFixRef.current = waiting
+      // The turn's end answers it (above); a send that never went out (its save failed) is answered here.
+      void sendTurn(message, undefined, undefined, undefined, undefined, id => { waiting.messageId = id }, true)
+        .catch(() => {})
+        .finally(() => { if (inlineFixRef.current === waiting) { inlineFixRef.current = null; answer({ ok: false, reason: 'failed' }) } })
+      return
+    }
     if (isShown && inputRequest?.kind === 'insertText') {
       if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
       return

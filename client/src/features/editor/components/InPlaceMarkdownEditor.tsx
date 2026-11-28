@@ -1,4 +1,7 @@
+// Over ~300 lines: the document's surface and the parts drawn over and under it (bubble, 「/」 list, table bar,
+// the AI's fix) share the one editor handle and selection; split, each would re-wire the same handle.
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Callout, Button } from '../../../shared/ui/primitives'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useCommandHandler } from '../../../shared/commands/commands'
@@ -6,11 +9,13 @@ import { isMacControlKey, type KeyInput } from '../../../../shared/commands/defi
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
 import { previewFrontmatter } from '../markdownFrontmatter'
 import { IN_PLACE_REFUSAL_TEXT, loadInPlaceEngine, type InPlaceBlockMenu, type InPlaceMark, type InPlaceRefusal, type InPlaceSelection, type InPlaceSurface, type InPlaceTable, type TextSize } from '../inPlaceEditing'
-import type { CommentBoxProps } from '../selectionSlot'
+import type { AiFixPart, CommentBoxProps } from '../selectionSlot'
 import type { CommentSeverity } from '../../doc-review/model'
 import { FrontmatterNote, MarkdownPreview, PreviewSearchBar } from './MarkdownPreview'
 import { SelectionBubble, type BubbleMode } from './SelectionBubble'
 import { BlockMenu, TableBar } from './BlockTools'
+import { AiFixCard } from './AiFixCard'
+import { useAiFix } from '../hooks/useAiFix'
 import { saveDocumentImage } from '../api'
 import { documentImageFileRefusal } from '../../../../shared/document-images'
 
@@ -20,6 +25,18 @@ const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith
 export interface InPlaceComment {
   box: (props: CommentBoxProps) => ReactNode
   add: (selectedText: string, body: string, severity: CommentSeverity) => Promise<boolean>
+}
+
+/** ［AI に反映してもらう］ on a review comment: asked as soon as the document is open here (its quote's place in the text). */
+export interface CommentFixStart {
+  quote: string
+  body: string
+  /** The quote in the tab's text (`findTextInMarkdown`), or null when it is not found. */
+  at: { start: number; end: number } | null
+  /** Taken: the screen forgets it (a document opened afresh does not ask again). */
+  onStarted: () => void
+  /** ［レビューに戻る］ after the fix is adopted. */
+  onBackToReview: () => void
 }
 
 interface Props {
@@ -32,6 +49,9 @@ interface Props {
   previewRef: React.MutableRefObject<HTMLDivElement | null>
   initialScrollRatio: number | undefined
   comment?: InPlaceComment
+  /** The consultation's AI (the screen's part): ［AI に直してもらう］ in the bubble, a comment's reflection. */
+  aiFix?: AiFixPart
+  startFix?: CommentFixStart
 }
 
 /**
@@ -48,10 +68,24 @@ export function InPlaceMarkdownEditor(props: Props) {
     setHeld(h => ({ ...h, text }))
     onChange.current(text)
   }, [onChange])
-  return <Surface key={held.opening} {...props} onChange={changed} />
+  // A request to the AI still open when the document is opened afresh (its file changed from outside) is lost: said here.
+  const [fixLost, setFixLost] = useState(false)
+  return (
+    <>
+      {fixLost && (
+        <div className="px-8 pt-4">
+          <Callout tone="warning" role="status">
+            <p>AI に頼んでいる間に文書がほかから変わったため、AI の直し案は使えません。もう一度頼んでください。</p>
+            <div className="mt-2"><Button size="sm" variant="ghost" onClick={() => setFixLost(false)}>閉じる</Button></div>
+          </Callout>
+        </div>
+      )}
+      <Surface key={held.opening} {...props} onChange={changed} onFixLost={() => setFixLost(true)} />
+    </>
+  )
 }
 
-function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef, initialScrollRatio, comment }: Props) {
+function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef, initialScrollRatio, comment, aiFix, startFix, onFixLost }: Props & { onFixLost: () => void }) {
   const [state, setState] = useState<'opening' | 'open' | InPlaceRefusal>('opening')
   const [takenBack, setTakenBack] = useState(false)
   // Opened once with the text of its first render; a later outside change mounts a new Surface.
@@ -65,7 +99,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
   // the comment) keeps the words it was opened for while the document has no selection.
   const [bubble, setBubble] = useState<{ selection: InPlaceSelection; mode: BubbleMode } | null>(null)
   const onSelection = useCallback((selection: InPlaceSelection | null) => {
-    setBubble(b => (selection ? { selection, mode: b?.mode === 'size' ? 'size' : 'tools' } : b && (b.mode === 'link' || b.mode === 'comment') ? b : null))
+    setBubble(b => (selection ? { selection, mode: b?.mode === 'size' ? 'size' : 'tools' } : b && (b.mode === 'link' || b.mode === 'comment' || b.mode === 'aiFix') ? b : null))
   }, [])
   // The 「/」 list (its highlighted choice starts at the first again when what was typed changes) and the table bar.
   const [menu, setMenu] = useState<{ menu: InPlaceBlockMenu; index: number } | null>(null)
@@ -94,10 +128,21 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
     return null
   }, [documentPath])
   const front = useMemo(() => previewFrontmatter(opened), [opened])
+  const fixes = useAiFix(aiFix, filePath.substring(filePath.lastIndexOf('/') + 1), surfaceRef)
+  const lostRef = useLatestRef(() => { if (fixes.open()) onFixLost() })
+  // A comment's reflection, taken once when the document first opens here.
+  const [commentFix] = useState(startFix)
+  const askAboutComment = useLatestRef(() => {
+    if (!commentFix) return
+    commentFix.onStarted()
+    const surface = surfaceRef.current
+    const passage = commentFix.at && surface ? surface.passageAt(commentFix.at.start, commentFix.at.end) : null
+    fixes.ask(passage, '', { quote: commentFix.quote, body: commentFix.body })
+  })
 
   // The editor is a widget outside React: made when its host appears, destroyed when it goes.
   const host = useCallback((el: HTMLDivElement | null) => {
-    if (!el) { cancelRef.current(); surfaceRef.current?.destroy(); surfaceRef.current = null; return }
+    if (!el) { lostRef.current(); cancelRef.current(); surfaceRef.current?.destroy(); surfaceRef.current = null; return }
     let gone = false
     cancelRef.current = () => { gone = true }
     void loadInPlaceEngine()
@@ -115,6 +160,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         if (!result.ok) { setState(result.reason); return }
         surfaceRef.current = result.surface
         setState('open')
+        askAboutComment.current()
         const scroller = scrollRef.current
         const ratio = startAt.current.initialScrollRatio
         if (scroller && ratio && ratio > 0) {
@@ -122,7 +168,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
         }
       })
       .catch(() => { if (!gone) setState('unavailable') })
-  }, [opened, latestChange, startAt, onSelection, onBlockMenu, storeImage])
+  }, [opened, latestChange, startAt, onSelection, onBlockMenu, storeImage, lostRef, askAboutComment])
 
   // The bubble's keys (command catalog, editor area): only while the focus is in this document, else
   // the key is the app's (⌘B the left column, ⌘K 探す).
@@ -207,6 +253,17 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
           </Callout>
         </div>
       )}
+      {fixes.notice && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <Callout tone="info" role="status">
+            <p>{fixes.notice.text}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {fixes.notice.fromComment && commentFix && <Button size="sm" onClick={commentFix.onBackToReview}>レビューに戻る</Button>}
+              <Button size="sm" variant="ghost" onClick={fixes.closeNotice}>閉じる</Button>
+            </div>
+          </Callout>
+        </div>
+      )}
       <div ref={bodyRef} className="max-w-3xl mx-auto">
         <FrontmatterNote info={front.info} />
         <div ref={host} className={state === 'opening' ? 'invisible' : undefined} aria-label="文章（その場で直せます）" />
@@ -238,8 +295,13 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
           onSize={z => surfaceRef.current?.setSize(z)}
           onLink={href => surfaceRef.current?.setLink(href)}
           canComment={!!comment}
+          onAskAi={aiFix ? ask => { const passage = surfaceRef.current?.selectedPassage() ?? null; setBubble(null); fixes.ask(passage, ask) } : undefined}
         />
       ))}
+      {fixes.fix && aiFix && createPortal(
+        <AiFixCard ask={fixes.fix.ask} phase={fixes.fix.phase} preview={aiFix.preview} onAdopt={fixes.adopt} onCancel={fixes.putAway} />,
+        fixes.fix.host,
+      )}
     </div>
   )
 }

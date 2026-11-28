@@ -22,7 +22,7 @@ async function open(page: Page) {
 
 /** Selects `words` (their first occurrence) in the document, as a drag would. */
 async function select(page: Page, words: string) {
-  await doc(page).click()
+  await doc(page).click({ position: { x: 4, y: 4 } }) // a corner: the bubble of a selection before may stand over the middle
   await page.evaluate((text) => {
     const root = document.querySelector('[data-in-place-editor] .ProseMirror')!
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)

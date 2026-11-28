@@ -79,7 +79,37 @@ export interface InPlaceSurface {
   /** Esc on the 「/」 list: it closes, the 「/」 stays as typed. */
   closeBlockMenu(): void
   editTable(edit: TableEdit): void
+  /** The passage holding the selection last shown, or null (nothing selected, a change not written yet). */
+  selectedPassage(): InPlacePassage | null
+  /** The passage holding file offsets `start`..`end` of the text shown (a comment's quote), or null. */
+  passageAt(start: number, end: number): InPlacePassage | null
+  /** Shows `element` in the document's flow right under the passage (not part of the text); null takes it away. */
+  showBelow(passage: InPlacePassage, element: HTMLElement | null): void
+  /** What adopting `markdown` in place of the passage would change, written through the write-back. */
+  previewFix(passage: InPlacePassage, markdown: string): InPlaceFixPreview
+  /** Puts `markdown` in place of the passage, written like typing (the changed lines only); refused as previewFix. */
+  adoptFix(passage: InPlacePassage, markdown: string): InPlaceFixPreview
 }
+
+/**
+ * 「AI に直してもらう」's passage: the top-level blocks holding the selection or a comment's quote, as
+ * the file holds them, and a little text around them (files-and-editor.md "Asking the AI to fix a passage").
+ */
+export interface InPlacePassage {
+  /** The blocks' Markdown, byte for byte as in the file. */
+  markdown: string
+  /** Up to 600 characters before / after, cut at a line (never the `---` block). */
+  before: string
+  after: string
+  /** Where it is and the file's text when it was taken: a later change makes it stale. */
+  readonly at: { readonly nodeFrom: number; readonly nodeTo: number; readonly text: string }
+}
+
+/** What adopting a fix would write: the file's lines it replaces and adds. */
+export type InPlaceFixPreview =
+  | { ok: true; removed: string[]; added: string[] }
+  /** `changed`: the document changed since the passage was taken; `unwritable`: the fix cannot be written faithfully. */
+  | { ok: false; reason: 'changed' | 'unwritable' }
 
 export type InPlaceOpening = { ok: true; surface: InPlaceSurface } | { ok: false; reason: InPlaceRefusal }
 

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { CaretDown, ChatCircleText, Code, LinkBreak, LinkSimple, TextB, TextItalic, TextStrikethrough } from '@phosphor-icons/react'
+import { CaretDown, ChatCircleText, Code, LinkBreak, LinkSimple, Sparkle, TextB, TextItalic, TextStrikethrough } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
 import type { InPlaceMark, InPlaceSelection, TextSize } from '../inPlaceEditing'
+import { INLINE_FIX_LIMITS, INLINE_FIX_SUGGESTIONS } from '../../../../shared/inline-fix'
 
 /** The bubble's decorations with their keys (the command catalog's: editor.toggleBold …). */
 const MARKS: Array<{ mark: InPlaceMark; label: string; keys: string; Icon: typeof TextB }> = [
@@ -18,7 +19,7 @@ const TEXT_SIZES: Array<{ size: TextSize; label: string; keys: string }> = [
   { size: 3, label: '見出し3', keys: '⌘⌥3' },
 ]
 
-export type BubbleMode = 'tools' | 'size' | 'link' | 'comment'
+export type BubbleMode = 'tools' | 'size' | 'link' | 'comment' | 'aiFix'
 
 const TOOL = 'inline-flex h-control-sm min-w-[var(--size-control-sm)] items-center justify-center gap-1 rounded-small px-1.5 text-small text-text hover:bg-surface-sunken aria-pressed:bg-selected-bg aria-pressed:text-selected-text'
 
@@ -31,6 +32,8 @@ interface Props {
   onLink: (href: string | null) => void
   /** ［コメント］ shown only when the screen hands in the review's comment box. */
   canComment: boolean
+  /** ［AI に直してもらう］ shown only when the screen hands in the consultation's AI; it gets what was asked. */
+  onAskAi?: (ask: string) => void
 }
 
 /**
@@ -38,9 +41,9 @@ interface Props {
  * a link, ［コメント］. A press never takes the focus from the document (mouse down is held), so the
  * selection stays; the link's address box is the one field.
  */
-export function SelectionBubble({ selection, mode, onMode, onMark, onSize, onLink, canComment }: Props) {
+export function SelectionBubble({ selection, mode, onMode, onMark, onSize, onLink, canComment, onAskAi }: Props) {
   const top = selection.box.top - 44 < 8 ? selection.box.bottom + 8 : selection.box.top - 44
-  const left = Math.max(8, Math.min(selection.box.left, window.innerWidth - 480))
+  const left = Math.max(8, Math.min(selection.box.left, window.innerWidth - (mode === 'aiFix' ? 680 : 480)))
   return (
     <div
       role="toolbar"
@@ -52,6 +55,8 @@ export function SelectionBubble({ selection, mode, onMode, onMark, onSize, onLin
     >
       {mode === 'link' ? (
         <LinkField initial={selection.link ?? ''} onDone={href => { onMode('tools'); if (href !== null) onLink(href) }} />
+      ) : mode === 'aiFix' && onAskAi ? (
+        <AskField onDone={ask => { onMode('tools'); if (ask !== null) onAskAi(ask) }} />
       ) : (
         <>
           {MARKS.map(({ mark, label, keys, Icon }) => (
@@ -92,13 +97,16 @@ export function SelectionBubble({ selection, mode, onMode, onMark, onSize, onLin
               )}
             </div>
           )}
+          {(canComment || onAskAi) && <span className="mx-0.5 h-4 w-px bg-[color:var(--color-border)]" aria-hidden />}
           {canComment && (
-            <>
-              <span className="mx-0.5 h-4 w-px bg-[color:var(--color-border)]" aria-hidden />
-              <button type="button" className={TOOL} onClick={() => onMode('comment')}>
-                <ChatCircleText size={15} />コメント
-              </button>
-            </>
+            <button type="button" className={TOOL} onClick={() => onMode('comment')}>
+              <ChatCircleText size={15} />コメント
+            </button>
+          )}
+          {onAskAi && (
+            <button type="button" className={TOOL} onClick={() => onMode('aiFix')}>
+              <Sparkle size={15} />AI に直してもらう
+            </button>
           )}
         </>
       )}
@@ -124,6 +132,33 @@ function LinkField({ initial, onDone }: { initial: string; onDone: (href: string
         onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onDone(null) } }}
       />
       <Button type="submit" size="sm" variant="primary" disabled={!ok}>付ける</Button>
+    </form>
+  )
+}
+
+/** What to ask the AI: the ready-made asks, or the member's own words. */
+function AskField({ onDone }: { onDone: (ask: string | null) => void }) {
+  const [own, setOwn] = useState('')
+  return (
+    <form
+      className="flex flex-wrap items-center gap-1"
+      aria-label="AI に頼むこと"
+      onSubmit={e => { e.preventDefault(); if (own.trim()) onDone(own.trim()) }}
+    >
+      {INLINE_FIX_SUGGESTIONS.map(ask => (
+        <Button key={ask} type="button" size="sm" variant="ghost" onClick={() => onDone(ask)}>{ask}</Button>
+      ))}
+      <input
+        autoFocus
+        aria-label="ほかの頼み方"
+        placeholder="ほかの頼み方を書く"
+        maxLength={INLINE_FIX_LIMITS.ask}
+        className="h-control-sm w-52 rounded-small border border-border-control bg-bg px-2 text-small text-text outline-none focus:border-focus-border"
+        value={own}
+        onChange={e => setOwn(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onDone(null) } }}
+      />
+      <Button type="submit" size="sm" variant="primary" disabled={!own.trim()}>頼む</Button>
     </form>
   )
 }
