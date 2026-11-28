@@ -15,6 +15,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { EDITOR_SELECTION } from '../src/app/editorSelection'
+import { EDITOR_REVIEW_FRAME } from '../src/app/editorReviewFrame'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { installElectronAPI } from './ui/fixtures/electron-api'
@@ -133,7 +134,7 @@ function Preview() {
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="bg-amber-50 px-4 py-2 text-xs text-amber-900">表示確認用の人工データです。</div>
       <div className="h-[560px] w-[1000px]">
-        <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={open} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} />
+        <TabbedEditorPanel selection={EDITOR_SELECTION} reviewFrame={EDITOR_REVIEW_FRAME} openFiles={open} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} />
       </div>
     </main>
   )

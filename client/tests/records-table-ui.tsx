@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
+import { EDITOR_REVIEW_FRAME } from '../src/app/editorReviewFrame'
 import { recordIdOfTab, recordTabKey, viewTabKey } from '../src/features/editor/editorTabs'
 import { FindPalette } from '../src/features/search/components/FindPalette'
 import { RECORDS_TABLE_PALETTE_ACTION, RECORDS_TABLE_TAB_LOOK, RECORDS_TABLE_VIEW, renderRecordsTable, startRecordsTable } from '../src/features/records-table/entry'
@@ -119,7 +120,7 @@ export function Preview() {
         <button type="button" onClick={() => setPalette(true)}>⌘K を開く</button>
       </div>
       <div className="min-h-0 flex-1">
-        <TabbedEditorPanel openFiles={tabs} activeFilePath={active} onSelectFile={setActive} onCloseFile={close}
+        <TabbedEditorPanel reviewFrame={EDITOR_REVIEW_FRAME} openFiles={tabs} activeFilePath={active} onSelectFile={setActive} onCloseFile={close}
           recordLooks={{}}
           renderRecord={id => <p className="p-4" data-testid="record-page">記録のページ：{id}</p>}
           viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK }}

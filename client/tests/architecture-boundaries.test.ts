@@ -315,16 +315,10 @@ const featureOf = (clientPath: string, root = 'src/features/'): string | null =>
  * in the PR why app/ cannot compose the two through props or a slot
  * (renderer-structure.md, principle 2).
  */
-const PREVIEW_REVIEW = 'a Markdown preview tab shows its document\'s review (MarkdownPreviewPane), driven by the open file and the editor\'s scroll and selection'
 const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
-  'editor -> doc-review/components/ReviewBanner.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/ReviewSaveError.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/CompletedReviewBanner.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/ReviewHistoryDropdown.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/ReviewSidePanel.tsx': PREVIEW_REVIEW,
-  'editor -> doc-review/components/MarkdownDiffView.tsx': 'the preview and the editor\'s 「差分を見る」 show the snapshot diff of a reviewed document',
-  'editor -> doc-review/hooks/useMarkdownReview.ts': `${PREVIEW_REVIEW} (useEditorReview)`,
-  'editor -> doc-review/model.ts': 'the open document\'s review is marked seen (markReviewSeen, a pure function)',
+  // The review's parts and state reach the editor through its slots (app/editorReviewFrame.ts, app/editorSelection.ts).
+  'editor -> doc-review/model.ts':
+    'pure functions and types only: the open document\'s review marked seen (markReviewSeen), a quote found in the Markdown (findTextInMarkdown), the review\'s shapes the slots are typed with (Review, CommentSeverity, DocumentReading)',
   'files -> doc-review/model.ts':
     'the tree hides review sidecars and marks documents with reviews (pure functions: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
   'settings -> voice/components/VoicePromptSettings.tsx': 'the settings panel shows the voice input\'s prompt settings, owned by the voice feature',

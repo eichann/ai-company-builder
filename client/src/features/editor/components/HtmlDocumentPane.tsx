@@ -3,13 +3,8 @@
 // drawn by this page; `DocViewSession` owns it.
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowsIn, ArrowsOut, ChatCircleDots, Eye, LockSimple, Minus, Play, Plus, Stop, ArrowClockwise, X } from '@phosphor-icons/react'
-import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
-import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
-import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
-import { ReviewHistoryDropdown } from '../../doc-review/components/ReviewHistoryDropdown'
-import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
-import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
+import type { ReviewFrameSlot, SnapshotDiffHandle } from '../reviewFrameSlot'
 import type { SelectionSlot } from '../selectionSlot'
 import { anchorHtmlQuote, htmlReadableText, htmlReviewMarks } from '../htmlReview'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
@@ -47,6 +42,8 @@ interface HtmlDocumentPaneProps {
   onZoom?: (zoom: number) => void
   /** The document's review (as a Markdown preview's) and the file's text its quotes are found in. */
   review?: EditorReview['review']
+  /** The review's parts, handed in by the screen (reviewFrameSlot.ts). */
+  reviewFrame: ReviewFrameSlot
   content?: string
   /** The review's comment box, handed in by the screen (selectionSlot.ts). */
   commentBox?: SelectionSlot['commentBox']
@@ -58,7 +55,7 @@ const NOT_SHOWN: Readonly<Record<'hidden' | 'missing', string>> = {
   missing: 'この部分はいまの表示では見つかりません。資料の中のタブなどを切り替えてから、もう一度押してください。',
 }
 
-export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom, review, content = '', commentBox }: HtmlDocumentPaneProps) {
+export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom, review, reviewFrame: frame, content = '', commentBox }: HtmlDocumentPaneProps) {
   // The company the document is shown for: its session plays the document's Drive videos (the pane is
   // keyed by company and file, so another company is another view).
   const companyId = useAppStore(s => s.currentCompany?.id ?? null)
@@ -74,7 +71,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
   const [showDiff, setShowDiff] = useState(false)
   const [notShown, setNotShown] = useState<string | null>(null)
   const sideRef = useRef<HTMLDivElement>(null)
-  const diffRef = useRef<MarkdownDiffViewHandle | null>(null)
+  const diffRef = useRef<SnapshotDiffHandle | null>(null)
   const reviewing = !!review?.isReviewing
   const viewingCompleted = !!review?.isViewingCompleted
   const activeReview = review?.activeReview ?? null
@@ -98,16 +95,14 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
       data-testid="html-viewer"
       className={fullScreen ? 'fixed inset-0 z-overlay flex flex-col bg-bg' : 'h-full flex flex-col min-w-0'}
     >
-      {review?.saveError && <ReviewSaveError failure={review.saveError} onDismiss={review.dismissSaveError} />}
-      {review && reviewing && activeReview && <ReviewBanner activeReview={activeReview} onComplete={review.completeReview} onCancel={review.cancelReview} />}
-      {review && viewingCompleted && activeReview && (
-        <CompletedReviewBanner
-          activeReview={activeReview}
-          onClose={() => { review.closeViewingReview(); setShowDiff(false); setNotShown(null) }}
-          showDiff={showDiff}
-          onToggleDiff={() => setShowDiff(prev => !prev)}
-        />
-      )}
+      {review?.saveError && frame.saveError({ failure: review.saveError, onDismiss: review.dismissSaveError })}
+      {review && reviewing && activeReview && frame.banner({ activeReview, onComplete: review.completeReview, onCancel: review.cancelReview })}
+      {review && viewingCompleted && activeReview && frame.completedBanner({
+        activeReview,
+        onClose: () => { review.closeViewingReview(); setShowDiff(false); setNotShown(null) },
+        showDiff,
+        onToggleDiff: () => setShowDiff(prev => !prev),
+      })}
       <div role="toolbar" aria-label="資料の表示" className={HTML_TAB_BAR}>
         <HtmlViewToggle showing="document" onShowSource={onShowSource} />
         <span aria-hidden className="mx-1 h-4 border-l border-[color:var(--color-border)]" />
@@ -121,7 +116,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
         <span className="flex-1" />
         {review && !reviewing && !viewingCompleted && (
           <>
-            <ReviewHistoryDropdown reviews={review.completedReviews} onSelectReview={review.viewReview} />
+            {frame.history({ reviews: review.completedReviews, onSelectReview: review.viewReview })}
             <button type="button" className={TOOL} onClick={() => void review.startReview()} title="新しいレビューを開始する">
               <ChatCircleDots size={14} aria-hidden />レビューする
             </button>
@@ -163,7 +158,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
         {showDiff && activeReview?.snapshot ? (
           // 「変更を確認」: the page's words then (the snapshot keeps them, `htmlReading`) and now; the view closes meanwhile.
           <div className="flex-1 min-w-0 overflow-hidden">
-            <MarkdownDiffView ref={diffRef} snapshot={activeReview.snapshot} current={htmlReadableText(content)} />
+            {frame.diff({ ref: diffRef, snapshot: activeReview.snapshot, current: htmlReadableText(content) })}
           </div>
         ) : (
           // The document's own view is placed over this area; what is written here shows only when it is not.
@@ -177,14 +172,14 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
         )}
         {review && (reviewing || viewingCompleted) && activeReview && (
           <div ref={sideRef} className="flex min-h-0">
-            <ReviewSidePanel
-              review={activeReview}
-              onDeleteComment={reviewing ? review.deleteComment : undefined}
-              onToggleResolved={review.toggleResolved}
-              onClickComment={comment => showComment(comment.id, comment.selectedText)}
-              onAddReply={review.addReply}
-              readOnly={viewingCompleted}
-            />
+            {frame.sidePanel({
+              review: activeReview,
+              onDeleteComment: reviewing ? review.deleteComment : undefined,
+              onToggleResolved: review.toggleResolved,
+              onClickComment: comment => showComment(comment.id, comment.selectedText),
+              onAddReply: review.addReply,
+              readOnly: viewingCompleted,
+            })}
           </div>
         )}
       </div>

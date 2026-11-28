@@ -1,12 +1,7 @@
 import { useRef, useState } from 'react'
 import { Code, Eye, PencilSimple, ChatCircleDots } from '@phosphor-icons/react'
-import { ReviewBanner } from '../../doc-review/components/ReviewBanner'
-import { ReviewSaveError } from '../../doc-review/components/ReviewSaveError'
-import { CompletedReviewBanner } from '../../doc-review/components/CompletedReviewBanner'
-import { ReviewHistoryDropdown } from '../../doc-review/components/ReviewHistoryDropdown'
-import { ReviewSidePanel } from '../../doc-review/components/ReviewSidePanel'
-import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
+import type { ReviewFrameSlot, SnapshotDiffHandle } from '../reviewFrameSlot'
 import { MarkdownPreview } from './MarkdownPreview'
 import { InPlaceMarkdownEditor, type CommentFixStart } from './InPlaceMarkdownEditor'
 import { findTextInMarkdown } from '../../doc-review/model'
@@ -19,6 +14,8 @@ interface Props {
   filePath: string
   content: string
   review: EditorReview['review']
+  /** The review's parts, handed in by the screen (reviewFrameSlot.ts). */
+  reviewFrame: ReviewFrameSlot
   textSelection: EditorReview['textSelection']
   showDiff: boolean
   setShowDiff: React.Dispatch<React.SetStateAction<boolean>>
@@ -37,7 +34,7 @@ interface Props {
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox, aiFix,
+  paneId, filePath, content, review, reviewFrame: frame, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit, inPlace, commentBox, aiFix,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
   // ［AI に反映してもらう］: the review's reading view closes and the document opens here, where the fix is asked
@@ -60,25 +57,21 @@ export function MarkdownPreviewPane({
     : undefined
   // A review being made or read shows the document as it reads (its quotes are marked in the text).
   const editingHere = !!inPlace && !showDiff && !review.isReviewing && !review.isViewingCompleted
-  const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
+  const diffViewRef = useRef<SnapshotDiffHandle | null>(null)
   return (
     <div className="h-full flex flex-col">
-      {review.saveError && <ReviewSaveError failure={review.saveError} onDismiss={review.dismissSaveError} />}
-      {review.isReviewing && review.activeReview && (
-        <ReviewBanner
-          activeReview={review.activeReview}
-          onComplete={review.completeReview}
-          onCancel={review.cancelReview}
-        />
-      )}
-      {review.isViewingCompleted && review.activeReview && (
-        <CompletedReviewBanner
-          activeReview={review.activeReview}
-          onClose={() => { review.closeViewingReview(); setShowDiff(false) }}
-          showDiff={showDiff}
-          onToggleDiff={() => setShowDiff(prev => !prev)}
-        />
-      )}
+      {review.saveError && frame.saveError({ failure: review.saveError, onDismiss: review.dismissSaveError })}
+      {review.isReviewing && review.activeReview && frame.banner({
+        activeReview: review.activeReview,
+        onComplete: review.completeReview,
+        onCancel: review.cancelReview,
+      })}
+      {review.isViewingCompleted && review.activeReview && frame.completedBanner({
+        activeReview: review.activeReview,
+        onClose: () => { review.closeViewingReview(); setShowDiff(false) },
+        showDiff,
+        onToggleDiff: () => setShowDiff(prev => !prev),
+      })}
       {editingHere && review.otherInProgressReviews.length > 0 && (
         <div className="px-4 pt-2">
           <Callout tone="info">
@@ -94,11 +87,11 @@ export function MarkdownPreviewPane({
           onMouseUp={textSelection.handleMouseUp}
         >
           {showDiff && review.activeReview?.snapshot ? (
-            <MarkdownDiffView
-              ref={diffViewRef}
-              snapshot={review.activeReview.snapshot}
-              current={content}
-            />
+            frame.diff({
+              ref: diffViewRef,
+              snapshot: review.activeReview.snapshot,
+              current: content,
+            })
           ) : editingHere ? (
             <InPlaceMarkdownEditor
               paneId={paneId}
@@ -141,10 +134,10 @@ export function MarkdownPreviewPane({
           <div className="absolute top-3 right-3 flex items-center gap-2 opacity-60 hover:opacity-100 transition-opacity">
             {!review.isReviewing && !review.isViewingCompleted && (
               <>
-                <ReviewHistoryDropdown
-                  reviews={review.completedReviews}
-                  onSelectReview={review.viewReview}
-                />
+                {frame.history({
+                  reviews: review.completedReviews,
+                  onSelectReview: review.viewReview,
+                })}
                 {/* 依頼ボタンはUI非表示。review-request の仕組み自体は
                     Slack通知連携で再利用予定のため残してある。 */}
                 <button
@@ -191,11 +184,11 @@ export function MarkdownPreviewPane({
           })}
         </div>
         {(review.isReviewing || review.isViewingCompleted) && review.activeReview && (
-          <ReviewSidePanel
-            review={review.activeReview}
-            onDeleteComment={review.isReviewing ? review.deleteComment : undefined}
-            onToggleResolved={review.toggleResolved}
-            onClickComment={(comment) => {
+          frame.sidePanel({
+            review: review.activeReview,
+            onDeleteComment: review.isReviewing ? review.deleteComment : undefined,
+            onToggleResolved: review.toggleResolved,
+            onClickComment: (comment) => {
               if (showDiff && diffViewRef.current) {
                 // Scroll to the text in the diff view
                 diffViewRef.current.scrollToText(comment.selectedText)
@@ -208,11 +201,11 @@ export function MarkdownPreviewPane({
                   setTimeout(() => mark.classList.remove('ring-2', 'ring-amber-400'), 1500)
                 }
               }
-            }}
-            onAddReply={review.addReply}
-            onAskAi={reflectComment}
-            readOnly={review.isViewingCompleted}
-          />
+            },
+            onAddReply: review.addReply,
+            onAskAi: reflectComment,
+            readOnly: review.isViewingCompleted,
+          })
         )}
       </div>
     </div>

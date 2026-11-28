@@ -45,6 +45,7 @@ paths:
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
   - "client/src/app/editorSelection.ts"
+  - "client/src/app/editorReviewFrame.ts"
   - "client/scripts/check-bundle-size.mjs"
   - "client/tests/doc-review-ui.*"
   - "client/tests/file-tree-ui.*"
@@ -340,7 +341,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, the compare
   view's two choices), `useMarkdownView.ts` (preview / source mode, scroll positions; the
   preview pane is keyed by file so each file restores its own),
-  `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
+  `useEditorReview.ts` (the review of the active document, its state from the review frame slot:
+  "The review frame"); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `ExternalCompareView`, `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`; a file's `---` frontmatter is left out of the preview and its `name` /
   `description` shown in a small quiet box above it — `markdownFrontmatter.ts`, owner 2026-11-23: a
@@ -483,9 +485,21 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   write (`editor-selection-bubble.spec.ts` checks the keys' order). The document then shows as
   reviewed (reading view, its comment beside it). `useTextSelection` moved from doc-review to
   `editor/hooks/` (the selection is the editor's). With this, `FEATURE_IMPORT_EXCEPTIONS` lost
-  `editor -> doc-review/components/CommentPopover.tsx` and `…/hooks/useTextSelection.ts`; the
-  review's banners, side panel, history, snapshot diff, its state hook and `model.ts` stay (the review
-  shown around a document is not a selection part — moving it is the review's own slot, not this PR).
+  `editor -> doc-review/components/CommentPopover.tsx` and `…/hooks/useTextSelection.ts` (the rest
+  of the review went with "The review frame", below).
+- **The review frame** (`reviewFrameSlot.ts` `ReviewFrameSlot`, 2026-11-29): the review shown around
+  a document — its state (`useReview`: doc-review's `useMarkdownReview`), the banners above it
+  (`saveError`, `banner`, `completedBanner`), ［レビュー履歴］ (`history`), the side panel (`sidePanel`)
+  and the snapshot diff in its place (`diff`, also the 「比べる」 of a file changed on disk,
+  `ExternalCompareView`) — is handed to `TabbedEditorPanel` (`reviewFrame`, required) by
+  `app/editorReviewFrame.ts`, doc-review's parts as they are. The editor keeps deciding which document
+  is reviewed and how it is read (`useEditorReview`: HTML's `htmlReading`, the 「seen」 mark), where each
+  part stands (`MarkdownPreviewPane`, `HtmlDocumentPane`) and what each press does; the editor's own
+  port of the review's state is `OpenDocumentReview`. `useReview` is a hook: the screen hands in one
+  that never changes (a module constant). With this the editor imports nothing of doc-review but
+  `model.ts` (pure functions and types: `findTextInMarkdown`, `markReviewSeen`, `CommentSeverity`,
+  `Review`, `DocumentReading`; `ReviewSaveFailure` moved there from the hook for the port's type).
+  Nothing changed on screen or in the sidecars (the same elements in the same places).
 - Tests: `tests/ui/editor-selection-bubble.spec.ts` (bubble and keys, each written as its one line;
   size; link by ⌘K and off; ［コメント］ → the review file and the reviewed view; ⌘B / ⌘K the app's
   outside the document — mutation-checked: Milkdown's keys left on, the `acceptsKey`),
@@ -771,7 +785,8 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   outside the computer; state in `hooks/useMarkdownReview.ts` (the selection that starts a comment is
   the editor's: `features/editor/hooks/useTextSelection.ts`, the box reached through the selection
   slot, "The selection bubble"); banners, side panel, popover, history and the snapshot diff in
-  `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
+  `components/` (the editor reaches them and the hook only through its slots, composed in `app/`:
+  "The review frame"). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching, merging edits), `api.test.ts` (atomic write, retries, unreadable files, one at a
   time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).

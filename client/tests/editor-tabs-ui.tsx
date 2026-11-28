@@ -19,6 +19,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { EDITOR_SELECTION } from '../src/app/editorSelection'
+import { EDITOR_REVIEW_FRAME } from '../src/app/editorReviewFrame'
 import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
 import { useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
@@ -266,7 +267,7 @@ export function Preview() {
           <ResizeHandle label="ファイルツリーとエディタの境目" onResizeStart={() => { leftAtStart.current = leftWidth }} onResize={offset => setLeftWidth(leftAtStart.current + offset)} />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
+              <TabbedEditorPanel selection={EDITOR_SELECTION} reviewFrame={EDITOR_REVIEW_FRAME} openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
             </div>
             <ResizeHandle direction="vertical" label="エディタと下のパネルの境目" onResizeStart={() => {}} onResize={() => {}} />
             <div style={{ height: 40, flexShrink: 0 }} />
@@ -276,7 +277,7 @@ export function Preview() {
         </div>
       ) : (
         <div className="h-[420px] w-[760px]" style={tabsView ? { height: 420 } : undefined}>
-          <TabbedEditorPanel selection={EDITOR_SELECTION} openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
+          <TabbedEditorPanel selection={EDITOR_SELECTION} reviewFrame={EDITOR_REVIEW_FRAME} openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
         </div>
       )}
       {htmlView && (
