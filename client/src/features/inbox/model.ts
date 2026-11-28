@@ -241,13 +241,16 @@ function noticeRow(n: NotificationItem, section: InboxSection, badge: InboxItem[
   }
 }
 
-/** The contact a record belongs to, as the inbox's store last read it (a 来た連絡 or a 返事のお願い of it), or undefined. */
-export type ContactsOfRows = (recordId: string) => ContactView | undefined
+/**
+ * The contact a record belongs to, as the inbox's store last read it (a 来た連絡 or a 返事のお願い of it), `'gone'` when the
+ * server answered that it is not the member's to read (any id of it), or undefined (not read).
+ */
+export type ContactsOfRows = (recordId: string) => ContactView | 'gone' | undefined
 
 /** The types 「連絡」1枚 stands for: their notices are one row per contact (inbox.md "One contact"). */
 export const CONTACT_RECORD_TYPES: ReadonlySet<string> = new Set(['interaction', 'reply_request'])
 
-function contactOf(n: NotificationItem, contacts: ContactsOfRows | undefined): ContactView | undefined {
+function contactOf(n: NotificationItem, contacts: ContactsOfRows | undefined): ContactView | 'gone' | undefined {
   return contacts && n.recordId && CONTACT_RECORD_TYPES.has(n.recordType) ? contacts(n.recordId) : undefined
 }
 
@@ -329,6 +332,9 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   // Unread first (newest first), so a row's line is its newest unread notice; read ones only find a row of their own.
   for (const n of [...notices.filter(x => !x.read), ...notices.filter(x => x.read)]) {
     const contact = contactOf(n, contacts)
+    // The notices were read before the contact stopped being the member's to read: none of them is a row (not even a plain
+    // notice's, which would show the title the server no longer shows them) until they are read again without it.
+    if (contact === 'gone') continue
     const key = contact ? `contact:${contact.interaction.id}` : n.recordId ? `record:${n.recordId}` : `notice:${n.id}`
     const row = rows.get(key)
     const stop = isWaitingStop(n) ? STOP_NOTICES[n.kind]! : null
@@ -352,7 +358,7 @@ export function inboxView(source: NoticesState, meetings: readonly MeetingNews[]
   for (const row of rows.values()) {
     if (row.action.kind !== 'openContact' || row.stop) continue
     const view = contacts?.(row.action.contactId)
-    if (!view) continue
+    if (!view || view === 'gone') continue
     const look = contactLook(view)
     row.badge = { tone: look.status.tone, word: look.status.word }
     if (contactPlace(view) === 'seen') row.section = 'seen'

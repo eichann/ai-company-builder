@@ -5,7 +5,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import { NO_NOTICES, type NoticesState } from '../../../shared/notifications-app'
 
 /** Following a company's turn and notices: main checks with the server (start, every 5 minutes, signals). */
-export type NoticesReads = ElectronPort<'watchNotifications' | 'getNotificationsState' | 'onNotificationsChanged' | 'getNotificationSettings'>
+export type NoticesReads = ElectronPort<'watchNotifications' | 'getNotificationsState' | 'onNotificationsChanged' | 'getNotificationSettings' | 'refreshNotifications'>
 /** The morning's 「今日のあなたの番」 Mac notification was clicked (the inbox opens; the channel keeps its old name). */
 export type NoticesClicks = ElectronPort<'onNotificationsOpenTasks'>
 
@@ -35,6 +35,14 @@ export function subscribeNotices(companyId: string, listener: () => void, reads:
 
 export async function getNoticesState(companyId: string, reads: NoticesReads = window.electronAPI): Promise<NoticesState> {
   return (await reads.getNotificationsState(companyId)) ?? NO_NOTICES
+}
+
+/**
+ * Main reads the company on screen again now (another company: nothing) and tells as usual (`notifications:changed`):
+ * for when the renderer learnt that the notices it shows are older than what the server would answer.
+ */
+export function refreshNotices(companyId: string, reads: NoticesReads = window.electronAPI) {
+  void Promise.resolve(reads.refreshNotifications(companyId)).catch(() => {})
 }
 
 export function markNoticesRead(companyId: string, ids: string[] | 'all', writes: NoticesWrites = window.electronAPI) {

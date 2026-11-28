@@ -138,3 +138,22 @@ test('a contact whose reply is over with a やること left is in 「確認し�
   await card(page).locator('[data-contact-task="task-prev01a"]').click()
   await expect(page.locator('#opened')).toHaveText('record task-prev01a')
 })
+
+test('taken off the contact\'s 「この人たちだけ」: once a read answers missing, no row shows its title — neither the contact\'s nor a notice\'s — and main is asked to read the notices again (Codex review)', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { contact: 'own' })
+  await expect(row(page)).toContainText('A社 見積のご相談')
+  await page.evaluate(() => (window as unknown as { __acbInbox: { takenOff: () => void } }).__acbInbox.takenOff())
+  // Opening reads the contact again: the server now answers it as missing, while the notices on screen are the old ones.
+  await row(page).getByRole('button', { name: '開く', exact: true }).click()
+  await expect(card(page)).toContainText('この連絡は見つからないか、見られなくなりました。')
+  await expect(row(page)).toHaveCount(0)
+  for (const key of ['record:interaction-prev01a', 'record:reply_request-prev01a']) await expect(page.locator(`[data-inbox-row="${key}"]`)).toHaveCount(0)
+  await expect(page.locator('[data-inbox-row]').filter({ hasText: 'A社 見積のご相談' })).toHaveCount(0)
+  await expect(page.locator('#refreshes')).not.toHaveText('0')
+  // Opening marked its notices read: they are not in 「確認したもの」 either.
+  await page.getByRole('group', { name: '受け箱の絞り込み' }).getByRole('button', { name: /^確認したもの/ }).click()
+  await expect(page.locator('[data-inbox-row]').first()).toBeVisible()
+  await expect(page.locator('[data-inbox-row]').filter({ hasText: 'A社 見積のご相談' })).toHaveCount(0)
+  for (const key of ['contact:interaction-prev01a', 'record:interaction-prev01a', 'record:reply_request-prev01a']) await expect(page.locator(`[data-inbox-row="${key}"]`)).toHaveCount(0)
+  expectNoPageErrors(state)
+})

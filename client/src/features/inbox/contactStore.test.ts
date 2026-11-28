@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { NoticesState } from '../../../shared/notifications-app'
 import type { ContactReadResult, ContactView } from '../../../shared/contact-card'
-import { createContactStore, shownView } from './contactStore'
+import { createContactStore, rowContact } from './contactStore'
 import { inboxView, INBOX_NEWS_SINCE } from './model'
 
 const SECRET = 'B社 役員人事の件（この人たちだけ）'
@@ -45,7 +45,7 @@ test('the 来た連絡 answering 404 takes its 返事のお願い\'s cached view
     assert.equal(store.entry(id)?.kind, 'gone', id)
   }
   assert.doesNotMatch(JSON.stringify([...store.snapshot()]), /役員人事/)
-  const rows = inboxView(notices, [], undefined, INBOX_NEWS_SINCE, id => shownView(store.snapshot().get(id)))
+  const rows = inboxView(notices, [], undefined, INBOX_NEWS_SINCE, id => rowContact(store.snapshot().get(id)))
   assert.doesNotMatch(JSON.stringify(rows), /役員人事/)
 })
 
@@ -82,4 +82,45 @@ test('a read started after the 404 that the server answers again (put back on th
   store.want('co-a', [`${R}@2`])
   await settle()
   assert.equal(store.view(I)?.interaction.title, SECRET)
+})
+
+/** The notices main read before the member was taken off the list: the server's notice about I carried its title then. */
+const noticeAboutI: NotificationItem = {
+  id: 'n2', kind: 'intake_unsure', recordId: I, recordType: 'interaction', recordTitle: SECRET, version: 1,
+  text: `「${SECRET}」を確かめてください`, createdAt: '2026-11-27T00:30:00Z', read: true,
+}
+const staleNotices: NoticesState = { available: true, myTurn: { total: 0, items: [] }, notices: { available: true, unread: 1, items: [noticeAboutR, noticeAboutI] } }
+
+test('a contact gone after the notices were read is no row at all: not its contact row, not the plain notice rows it fell back to', async () => {
+  let answer: ContactReadResult = { success: true, contact: view }
+  const store = createContactStore(async () => answer)
+  store.want('co-a', [`${R}@2`, `${I}@1`])
+  await settle()
+  const before = inboxView(staleNotices, [], undefined, INBOX_NEWS_SINCE, id => rowContact(store.snapshot().get(id)))
+  assert.match(JSON.stringify(before), /役員人事/)
+  // Taken off 「この人たちだけ」 (the card opened, read again): the notices on screen are still the ones from before.
+  answer = GONE
+  store.refresh('co-a', I)
+  await settle()
+  const after = inboxView(staleNotices, [], undefined, INBOX_NEWS_SINCE, id => rowContact(store.snapshot().get(id)))
+  assert.doesNotMatch(JSON.stringify(after), /役員人事/)
+  assert.deepEqual([...after.waiting, ...after.news, ...after.moving, ...after.seen], [])
+  assert.deepEqual(after.counts, { waiting: 0, news: 0, seen: 0, elsewhere: 0 })
+  assert.deepEqual(after.newsNoticeIds, [])
+})
+
+test('a contact becoming gone asks for the notices again (for its company); a shown or failed read does not', async () => {
+  let answer: ContactReadResult = { success: true, contact: view }
+  const asked: string[] = []
+  const store = createContactStore(async () => answer, undefined, c => asked.push(c))
+  store.want('co-a', [`${I}@1`])
+  await settle()
+  answer = { success: false, gone: false, offline: true, error: '連絡を読めませんでした' }
+  store.refresh('co-a', I)
+  await settle()
+  assert.deepEqual(asked, [])
+  answer = GONE
+  store.refresh('co-a', I)
+  await settle()
+  assert.deepEqual(asked, ['co-a'])
 })

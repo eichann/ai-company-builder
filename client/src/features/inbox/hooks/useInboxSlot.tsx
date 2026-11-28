@@ -5,7 +5,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { NOTICES_OFFLINE_TEXT, type MeetingNewsRow, type NoticesState } from '../../../../shared/notifications-app'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
-import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../../notifications/api'
+import { getNoticeSettings, markNoticesRead, refreshNotices, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../../notifications/api'
 import { InboxChips, InboxList, KindChips, type InboxRowButton } from '../components/InboxList'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
@@ -13,7 +13,7 @@ import { hasFullAccessIn, readContact, type ContactReads, type ContactWrites } f
 import { useInboxBrowserPlans, type InboxBrowserPlanList, type InboxPlanStates } from './useInboxBrowserPlans'
 import { useContacts } from './useContacts'
 import { ContactCard } from '../components/ContactCard'
-import { CONTACT_ROW_READS, createContactStore, shownView } from '../contactStore'
+import { CONTACT_ROW_READS, createContactStore, rowContact } from '../contactStore'
 import { contactsToRead, inboxView, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 import { CONTACT_NAME } from '../../../../shared/thing-words'
 import { besideCardOf, INBOX_PAGE, kindCounts, limitShowing, narrowed, orderOf, paged, sectionsOf, type BesideCard, type InboxKind } from '../workModel'
@@ -98,13 +98,14 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, onMee
   const plans = useInboxBrowserPlans(companyId, browserPlans?.list, planReadKey, browserPlans?.planStates)
   // 「連絡」1枚: the contacts the notices name, read into one store the rows and the card share (memory only).
   const contactReads = contactPorts?.reads
-  const [contacts] = useState(() => createContactStore((c, id) => readContact(c, id, contactReads)))
+  // A contact gone (not the member's to read now): the notices on screen were read before that, so main reads them again.
+  const [contacts] = useState(() => createContactStore((c, id) => readContact(c, id, contactReads), undefined, c => refreshNotices(c)))
   // A contact not read (offline) is asked again only when the PC is back online or the panel opens again (never on a timer).
   const [contactsAgain, setContactsAgain] = useState(0)
   useEventListener(window, 'online', () => setContactsAgain(k => k + 1))
   const contactsShown = useContacts(contacts, companyId, useMemo(() => contactsToRead(notices, CONTACT_ROW_READS), [notices]), contactsAgain)
   // Rebuilt from every answer main hands over (nothing of its own is kept but the contacts' last answers).
-  const view = useMemo(() => inboxView(notices, meetings, plans.inbox, newsSince, id => shownView(contactsShown.get(id))),
+  const view = useMemo(() => inboxView(notices, meetings, plans.inbox, newsSince, id => rowContact(contactsShown.get(id))),
     [notices, meetings, plans.inbox, newsSince, contactsShown])
   const available = !!companyId && notices.available
 

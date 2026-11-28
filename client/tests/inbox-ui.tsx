@@ -10,6 +10,8 @@
 // run nobody knows the result of); `?plans=off`: switched off (no list handed in, as AppShell does). Every
 // `listBrowserPlans` reaching main counts in `#plan-reads`; a run, cancel or confirm shows in `#acted`.
 // `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
+// `window.__acbInbox.takenOff()` (with `?contact=`): taken off the contact's list — its reads answer missing; `#refreshes`
+// counts the inbox asking main to read the notices again (held back: the notices read before stay on the page).
 // `&chatcard=1`: the draft's card as a consultation shows it, outside the inbox (its ［任せる］ runs it there).
 // `?many=N` (working through the inbox, notifications.md "Working through the inbox"): N more 新着 on a fixed clock
 // (2026-11-27), so the list has more than its first 15 rows; `&approvals=N` N more approvals waiting (approving lands,
@@ -215,6 +217,9 @@ function Preview() {
   const [planReads, setPlanReads] = useState(0)
   // Every read of the notices main hands over (`#state-reads`): going down the list must ask nothing more.
   const [stateReads, setStateReads] = useState(0)
+  // Each 「read the notices again now」 the inbox asked main for (`#refreshes`): its answer is held back here, so the page
+  // keeps the notices read before (what a member sees until main's read comes back).
+  const [refreshes, setRefreshes] = useState(0)
   installElectronAPI({
     listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
     getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: MANUAL ? 'haishin.example.net' : 'manager.linestep.net' } }),
@@ -229,6 +234,7 @@ function Preview() {
     confirmBrowserExecution: async () => { setActed('confirm'); return { ok: false, offline: true, message: '（見本）' } },
     watchNotifications: async () => {},
     getNotificationsState: async () => { setStateReads(n => n + 1); return state },
+    refreshNotifications: async () => { setRefreshes(n => n + 1) },
     onNotificationsChanged: changed.subscribe,
     markNotificationsRead: async (companyId, ids) => {
       if (params.get('offline') === '1') throw new Error('offline')
@@ -287,6 +293,7 @@ function Preview() {
       <pre id="acted">{acted}</pre>
       <pre id="plan-reads">{planReads}</pre>
       <pre id="state-reads">{stateReads}</pre>
+      <pre id="refreshes">{refreshes}</pre>
       {params.get('chatcard') === '1' && <section aria-label="相談のカード"><BrowserPlanCard companyId="co-preview" planId={DRAFT} /></section>}
       <div className="mt-auto h-[480px]" style={params.get('narrow') === '1' ? { width: 360 } : undefined}>{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
       {inbox?.dialog}
@@ -305,6 +312,10 @@ Object.assign(window, {
     /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
     planApprovedElsewhere() {
       browserInbox = { ...browserInbox, plans: [] }
+    },
+    /** Taken off the contact's 「この人たちだけ」: the server answers its reads as missing (the notices on screen stay). */
+    takenOff() {
+      contactNow = null
     },
     /** `&firstread=offline`: the server is reached again and the PC says it is online. */
     reconnect() {

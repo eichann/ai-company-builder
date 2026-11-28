@@ -534,6 +534,17 @@ pressing each record's own action.
   (`useContacts`' `again`, from `useInboxSlot`) — only the failed ones are read, never on a timer, never per draw
   (`contactPress.test.ts` 「a first read that failed…」, `contact-card.spec.ts` 「…back online…」). No new count, kind or
   server call per list beyond these reads.
+- **A contact gone is no row at all** (Codex review after #940): the server already leaves a record the member can no
+  longer read out of `/me/notifications` (`notifications.md` "Read access is checked when read"), but the notices on
+  screen were read before — they still name its records with the title the server showed then. So a notice whose record
+  the store holds as `gone` (`rowContact` → `'gone'`, `inboxView`'s `ContactsOfRows`) makes **no row of any kind**:
+  not the contact's, and not the plain notice row it would fall back to (no 「見られなくなりました」 row either; only the
+  card that was open says 「この連絡は見つからないか、見られなくなりました。」 without a title). It counts nowhere and
+  「すべて確認した」 does not mark it. The store's `onGone` then asks main to read the notices again now (IPC
+  `notifications:refresh` → the watcher's `signal`, the company on screen only; additive, nothing returned), so the next
+  answer no longer lists it; nothing is marked read for it. Tests: `contactStore.test.ts` 「a contact gone after the notices
+  were read…」 and 「…asks for the notices again…」, `contact-card.spec.ts` 「taken off the contact's 「この人たちだけ」…」
+  (新着 and 確認したもの, `#refreshes`) — mutation-checked.
 - Tests: `src/features/inbox/contactModel.test.ts` (buttons by state and `may`, the draft's main button, both parts in
   one request and both entries in the undo, the refusals' words, the place), `contactPress.test.ts` (a press, an undo
   and a read answered after a company change show nothing; the newest read wins), `contactStore.test.ts` (one id's 404 takes the whole contact's

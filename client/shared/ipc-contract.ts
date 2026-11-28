@@ -770,6 +770,8 @@ export interface IpcInvokeChannels {
   /** The company on screen (null: none); starts the 5-minute check. */
   'notifications:watch': { args: [companyId: string | null]; result: void }
   'notifications:state': { args: [companyId: string]; result: NoticesState }
+  /** Read the company on screen again now (the inbox learnt that what it shows is older than the server's answer). */
+  'notifications:refresh': { args: [companyId: string]; result: void }
   'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
   'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
   'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
@@ -1350,6 +1352,7 @@ export interface ElectronAPI {
   retryAiTurn: Invoke<'aiTurns:retry'>
   watchNotifications: Invoke<'notifications:watch'>
   getNotificationsState: Invoke<'notifications:state'>
+  refreshNotifications: Invoke<'notifications:refresh'>
   markNotificationsRead: Invoke<'notifications:markRead'>
   getNotificationSettings: Invoke<'notifications:settings'>
   setNotificationSetting: Invoke<'notifications:setSetting'>

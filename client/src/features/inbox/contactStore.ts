@@ -35,10 +35,18 @@ export interface ContactStore {
   snapshot: () => ReadonlyMap<string, ContactEntry>
 }
 
-/** A contact's view out of an entry (a row needs only what was shown). */
+/** A contact's view out of an entry. */
 export const shownView = (e: ContactEntry | undefined): ContactView | undefined => (e?.kind === 'shown' ? e.view : undefined)
 
-export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA): ContactStore {
+/**
+ * What a row may use of an entry (`inboxView`'s `ContactsOfRows`): the view, `'gone'` — no row at all, since the notices on
+ * screen were read before the server stopped showing it and still carry its title —, or undefined (not read: the notice's row).
+ */
+export const rowContact = (e: ContactEntry | undefined): ContactView | 'gone' | undefined =>
+  (e?.kind === 'shown' ? e.view : e?.kind === 'gone' ? 'gone' : undefined)
+
+/** `onGone`: a contact became not the member's to read — the notices on screen are older than that and are read again. */
+export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA, onGone?: (companyId: string) => void): ContactStore {
   let entries = new Map<string, ContactEntry>()
   /** The stamp each id was last asked at, and the newest read of it (an older answer landing later never wins). */
   const asked = new Map<string, string>()
@@ -91,6 +99,7 @@ export function createContactStore(read: ContactRead, era: EraPort = SCREEN_ERA)
         // would show the title the server no longer shows them —, and no read already on its way may put it back.
         const gone: ContactEntry = { kind: 'gone' }
         for (const id of groupOf(recordId)) { written.set(id, seq); entries.set(id, gone); groups.delete(id) }
+        onGone?.(companyId)
       } else {
         // Not read: asked again the next time the names are (a reconnect, the panel shown again) — never on a timer.
         asked.delete(recordId)
