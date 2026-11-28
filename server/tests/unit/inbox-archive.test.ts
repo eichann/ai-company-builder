@@ -68,6 +68,8 @@ let archiveCalls: Array<{ userId: string; refs: string[]; back: boolean }> = []
 let refuseArchivedEntry = false
 /** Pointers whose change the fake mailbox refuses (Google answering 500). */
 let failOn = new Set<string>()
+/** While set, the fake mailbox's archive (not a put-back) waits for it: Google still answering. */
+let holdArchive: Promise<void> | null = null
 
 const m = (userId: string): Member => ({ companyId: 'a', userId, role: ROLES[userId] ?? 'member' })
 const handle = () => source.forCompany('a')
@@ -108,6 +110,7 @@ beforeEach(() => {
   archiveAllowed = new Set()
   archiveCalls = []
   failOn = new Set()
+  holdArchive = null
   refuseArchivedEntry = false
   nowMs = Date.parse('2026-11-02T01:00:00.000Z')
   conn = new Database(':memory:')
@@ -163,6 +166,7 @@ beforeEach(() => {
     async archive(_co, userId, refs, back) {
       if (!archiveAllowed.has(userId)) return { changed: [], stop: 'not-allowed' as const }
       archiveCalls.push({ userId, refs, back })
+      if (!back && holdArchive) await holdArchive
       const changed: string[] = []
       for (const r of refs) {
         if (failOn.has(r)) return { changed, stop: 'failed' as const }
@@ -528,6 +532,27 @@ describe('review of #607 (2): what one close took out is what its undo puts back
     expect(archiveCalls).toEqual([{ userId: 'u-alice', refs, back: false }, { userId: 'u-alice', refs, back: true }])
     expect(ledger(first.id).some(e => e.action === 'archived_there')).toBe(false)
     expect(notices().filter(n => n.kind === 'mail_archived')).toEqual([])
+  })
+
+  it('her 済んだ taken back while Google was still archiving: no note on the reopened contact, and the mail goes back', async () => {
+    archiveAllowed.add('u-alice')
+    const s = await aliceMail()
+    unsure(s.id)
+    told = []
+    let release!: () => void
+    holdArchive = new Promise(r => { release = r })
+    ok(await engine.act(m('u-alice'), person('u-alice'), s.id, 'settle', { expectedVersion: stateOf(s.id).version }))
+    const settled = ledger(s.id).at(-1)!
+    expect(settled.action).toBe('settle')
+    // The archive call is out; she presses ［元に戻す］ before Google answers.
+    ok(await engine.undo(m('u-alice'), person('u-alice'), s.id, { version: settled.version, expectedVersion: settled.version }))
+    expect(stateOf(s.id).state).toBe('unsure')
+    release()
+    await inbox.whenIdle()
+    expect(ledger(s.id).some(e => e.action === 'archived_there')).toBe(false)
+    expect(notices().filter(n => n.kind === 'mail_archived')).toEqual([])
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [s.msg.sourceRef], back: false }, { userId: 'u-alice', refs: [s.msg.sourceRef], back: true }])
+    expect(gone.has(`u-alice|${s.msg.threadRef}`)).toBe(false)
   })
 
   it('a later message of her thread read from Bob\'s mailbox is never archived with her permission', async () => {
