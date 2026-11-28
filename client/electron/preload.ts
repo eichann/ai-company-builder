@@ -21,6 +21,7 @@ import type { GoogleFeature, GoogleRelayService } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { SetWatchChoice } from '../shared/job-proposals'
+import type { JobCandidateInput } from '../../shared/core/job-proposals'
 import type { RecordsTableQuery } from '../shared/records-table'
 import type { AfterMeetingChange } from '../shared/after-meeting'
 import type { DocViewBounds } from '../shared/doc-frame'
@@ -202,6 +203,7 @@ const api: ElectronAPI = {
   getMyJobProposals: (companyId: string) => invoke('jobProposals:mine', companyId),
   withdrawJobProposal: (companyId: string, proposalId: string) => invoke('jobProposals:withdraw', companyId, proposalId),
   discardJobCandidate: (companyId: string, candidateId: string) => invoke('jobProposals:discard', companyId, candidateId),
+  reviseJobCandidate: (companyId: string, candidateId: string, fingerprint: string, input: JobCandidateInput) => invoke('jobProposals:revise', companyId, candidateId, fingerprint, input),
   getSetWatchSkills: (companyId: string) => invoke('jobProposals:setWatchSkills', companyId),
   createSetWatchCandidate: (companyId: string, choice: SetWatchChoice) => invoke('jobProposals:createSetWatch', companyId, choice),
   getJobRepeatAsk: (companyId: string) => invoke('jobRepeatAsks:get', companyId),

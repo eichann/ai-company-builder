@@ -8,8 +8,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createJobProposalsApi } from '../electron/features/jobs/proposals'
-import { proposalDefinition } from '../../shared/core/job-proposals'
-import { jobProposalRefusalText, JOB_PROPOSAL_REFUSED_TEXT } from '../shared/job-proposals'
+import { proposalDefinition, type JobCandidateInput } from '../../shared/core/job-proposals'
+import { jobProposalRefusalText, jobReviseRefusalText, JOB_PROPOSAL_REFUSED_TEXT } from '../shared/job-proposals'
 
 const C = 'jc.' + 'a'.repeat(32)
 const P = 'jp.' + 'b'.repeat(32)
@@ -127,4 +127,34 @@ test('the zone the server names is kept only as a zone id', async () => {
     const x = await shown(odd)
     assert.ok(x.success && x.candidate !== null && x.candidate.timeZone === null, String(odd))
   }
+})
+
+const INPUT: JobCandidateInput = { skill: 'minutes-summary', trigger: { every: 'week', weekday: 'tue', at: '09:00', businessDaysBefore: 0 }, check: { kind: 'new_meetings' }, reads: [], deliverable: null, readRecords: false, mailDrafts: false, minutes: 15, missed: { policy: 'skip', expiresAfterMinutes: 60 } }
+const FP2 = 'sha256:' + 'e'.repeat(64)
+
+test('「その場で直す」: the whole input and the fingerprint shown, with the session, to the revise route; the answer as the server rebuilt it', async () => {
+  const h = api(() => ok({ id: C, definition: DEF, fingerprint: FP2, createdAt: 'x', expiresAt: '2026-11-23T00:00:00Z', proposal: null, timeZone: 'Asia/Tokyo' }))
+  const r = await h.api.revise('co', C, FP, INPUT)
+  assert.ok(r.success && r.candidate.id === C && r.candidate.fingerprint === FP2 && r.candidate.definition.schema === 4)
+  assert.deepEqual(h.calls.map(c => [c.method, c.path, c.body, c.headers.Cookie]), [['POST', `/me/job-candidates/${C}/revise`, { fingerprint: FP, input: INPUT }, 's=SESSION']])
+  // Nothing but the input the one parser takes is sent: an extra key (a name, free text), a hidden place, a bad id or fingerprint → no call.
+  const bad = api(() => ok({}))
+  for (const [c, f, i] of [[C, FP, { ...INPUT, name: '自由な名前' }], [C, FP, { ...INPUT, reads: ['.claude/skills'] }], ['jc.x/../submit', FP, INPUT], [C, 'sha256:short', INPUT], [C, FP, null]] as const) {
+    const out = await bad.api.revise('co', c, f, i)
+    assert.ok(!out.success && out.code === 'BAD_REQUEST')
+  }
+  assert.deepEqual(bad.calls, [])
+  // An answer the card cannot show (another candidate's) is not taken as the change.
+  const odd = await api(() => ok({ id: 'jc.' + 'e'.repeat(32), definition: DEF, fingerprint: FP2, expiresAt: 'x' })).api.revise('co', C, FP, INPUT)
+  assert.equal(odd.success, false)
+})
+
+test('a refused change is said in the app\'s words: no place named — not the server\'s, not the one chosen', async () => {
+  const refuse = (code: string) => api(() => ({ status: 409, body: { success: false, code, error: '営業/人事評価 は読めません' } })).api
+  const place = await refuse('JOB_CANDIDATE_PLACE').revise('co', C, FP, { ...INPUT, check: { kind: 'new_files', path: '総務部/人事評価' } })
+  assert.ok(!place.success && place.code === 'JOB_CANDIDATE_PLACE' && place.error === jobReviseRefusalText('JOB_CANDIDATE_PLACE'))
+  assert.ok(!place.error.includes('人事') && !place.error.includes('総務') && place.error.includes('元の内容に戻しました'))
+  for (const code of ['JOB_SKILL_MISSING', 'JOB_VERSION_FINGERPRINT', 'JOB_CANDIDATE_NOT_REVISABLE']) assert.notEqual(jobReviseRefusalText(code), JOB_PROPOSAL_REFUSED_TEXT, code)
+  const offline = await api(() => ({ status: 503, body: {} })).api.revise('co', C, FP, INPUT)
+  assert.ok(!offline.success && offline.offline)
 })

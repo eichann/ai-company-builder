@@ -98,8 +98,12 @@ export interface JobCandidateInput {
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype
 const SKILL_REF_RE = /^[A-Za-z0-9_-]{1,100}$/
-/** A place a candidate may name: a grant's path (`jobPathProblem`) with no hidden segment (`.claude`, `.acb`…: never listed). */
-const candidatePath = (p: unknown): p is string => jobPathProblem(p) === null && !(p as string).split('/').some(s => s.startsWith('.'))
+/**
+ * A place a candidate may name: a grant's path (`jobPathProblem`) with no hidden segment (`.claude`, `.acb`…: never listed).
+ * Also what the app's card offers to choose from (UX 段3 #13): the server checks the rest (exists, the member's to read / write).
+ */
+export const isJobCandidatePlace = (p: unknown): p is string => jobPathProblem(p) === null && !(p as string).split('/').some(s => s.startsWith('.'))
+const candidatePath = isJobCandidatePlace
 const MAX_READS = 10
 
 /** The candidate's input, strictly (an unknown key or value is a problem; codes only, never the values sent). */

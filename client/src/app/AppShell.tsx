@@ -23,6 +23,7 @@ import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
 import { recordIdOfTab, recordTabKey, tabDepartmentLabels, viewTabKey, type RecordTabLook } from '../features/editor/editorTabs'
 import { RECORDS_TABLE_TAB_LOOK, RECORDS_TABLE_VIEW, renderRecordsTable, startRecordsTable } from '../features/records-table/entry'
 import { MANUAL_TAB_LOOK, MANUAL_VIEW, renderManual, type ManualTarget } from '../features/editor/manual'
+import { JOB_PROPOSAL_TAB_LOOK, JOB_PROPOSAL_VIEW, renderJobProposalTab, type JobProposalTabTarget } from '../features/chat/jobProposalTab'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
 import { FileTreePanel, type FileTreeControls } from '../features/files/components/FileTreePanel'
@@ -408,6 +409,12 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   useCommandHandler('help.openManual', ({ page, anchor }) => {
     setManualTarget(t => ({ page: page ?? 'index', anchor: anchor ?? null, request: t.request + 1 }))
     openTab(viewTabKey(MANUAL_VIEW))
+  })
+  // ［大きく開く（タブ）］ on a consultation's 「定期の仕事の案」: the same card as a tab (features/chat/jobProposalTab).
+  const [jobProposalTarget, setJobProposalTarget] = useState<JobProposalTabTarget | null>(null)
+  useCommandHandler('jobProposal.open', ({ companyId, candidateId }) => {
+    setJobProposalTarget({ companyId, candidateId })
+    openTab(viewTabKey(JOB_PROPOSAL_VIEW))
   })
   // A task list row opens its item as the preview tab, like a single click in the file tree.
   const openListItem = useCallback((item: { id: string; title: string; type: string; typeLabel: string; state: string | null; implements?: string[] }) => {
@@ -849,8 +856,9 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
                         onPinFile={handlePinFile}
                         navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
                         renderRecord={middleCard}
-                        viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK, [MANUAL_VIEW]: MANUAL_TAB_LOOK }}
+                        viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK, [MANUAL_VIEW]: MANUAL_TAB_LOOK, [JOB_PROPOSAL_VIEW]: JOB_PROPOSAL_TAB_LOOK }}
                         renderView={name => name === MANUAL_VIEW ? renderManual(manualTarget)
+                          : name === JOB_PROPOSAL_VIEW ? renderJobProposalTab(jobProposalTarget, currentCompany?.id ?? null)
                           : name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
                         gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
                         aside={activeFilePath && !activeRecordId && rootPath && sharedFolder

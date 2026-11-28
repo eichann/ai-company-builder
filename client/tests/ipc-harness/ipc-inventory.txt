@@ -191,6 +191,7 @@ contract.invoke jobProposals:candidate
 contract.invoke jobProposals:createSetWatch
 contract.invoke jobProposals:discard
 contract.invoke jobProposals:mine
+contract.invoke jobProposals:revise
 contract.invoke jobProposals:setWatchSkills
 contract.invoke jobProposals:submit
 contract.invoke jobProposals:withdraw
@@ -666,6 +667,7 @@ contract.type ElectronAPI.resumeJob = resumeJob: Invoke<'jobs:resume'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryJobOccurrence = retryJobOccurrence: Invoke<'jobs:retryOccurrence'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
+contract.type ElectronAPI.reviseJobCandidate = reviseJobCandidate: Invoke<'jobProposals:revise'>
 contract.type ElectronAPI.rewatchJob = rewatchJob: Invoke<'jobs:rewatch'>
 contract.type ElectronAPI.runBrowserPlan = runBrowserPlan: Invoke<'browserPlans:run'>
 contract.type ElectronAPI.runBrowserWrite = runBrowserWrite: Invoke<'browserLines:runWrite'>
@@ -1037,6 +1039,7 @@ contract.type IpcInvokeChannels.'jobProposals:candidate' = 'jobProposals:candida
 contract.type IpcInvokeChannels.'jobProposals:createSetWatch' = 'jobProposals:createSetWatch': { args: [companyId: string, choice: SetWatchChoice]; result: SetWatchCandidateResult }
 contract.type IpcInvokeChannels.'jobProposals:discard' = 'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
 contract.type IpcInvokeChannels.'jobProposals:mine' = 'jobProposals:mine': { args: [companyId: string]; result: MyJobProposalsResult }
+contract.type IpcInvokeChannels.'jobProposals:revise' = 'jobProposals:revise': { args: [companyId: string, candidateId: string, fingerprint: string, input: JobCandidateInput]; result: JobCandidateReviseResult }
 contract.type IpcInvokeChannels.'jobProposals:setWatchSkills' = 'jobProposals:setWatchSkills': { args: [companyId: string]; result: SetWatchSkillsResult }
 contract.type IpcInvokeChannels.'jobProposals:submit' = 'jobProposals:submit': { args: [companyId: string, candidateId: string, fingerprint: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
@@ -1416,6 +1419,7 @@ main.handle jobProposals:candidate @ features/jobs/proposals.ts (companyId, cand
 main.handle jobProposals:createSetWatch @ features/jobs/proposals.ts (companyId, choice)
 main.handle jobProposals:discard @ features/jobs/proposals.ts (companyId, candidateId)
 main.handle jobProposals:mine @ features/jobs/proposals.ts (companyId)
+main.handle jobProposals:revise @ features/jobs/proposals.ts (companyId, candidateId, fingerprint, input)
 main.handle jobProposals:setWatchSkills @ features/jobs/proposals.ts (companyId)
 main.handle jobProposals:submit @ features/jobs/proposals.ts (companyId, candidateId, fingerprint)
 main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, proposalId)
@@ -2064,6 +2068,8 @@ preload retryJobOccurrence -> invoke jobs:retryOccurrence($0, $1, $2)
 preload retryJobOccurrence : (companyId: string, jobId: string, occurrenceId: string) => Promise<JobActionResult>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)
 preload retryTaskRun : (companyId: string, runId: string) => Promise<TaskWriteResult>
+preload reviseJobCandidate -> invoke jobProposals:revise($0, $1, $2, $3)
+preload reviseJobCandidate : (companyId: string, candidateId: string, fingerprint: string, input: JobCandidateInput) => Promise<JobCandidateReviseResult>
 preload rewatchJob -> invoke jobs:rewatch($0, $1, $2, $3)
 preload rewatchJob : (companyId: string, jobId: string, version: number, recordId: string) => Promise<JobActionResult>
 preload runBrowserPlan -> invoke browserPlans:run($0, $1, $2)

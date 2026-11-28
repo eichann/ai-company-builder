@@ -2305,6 +2305,59 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     main looks for its proposal in `GET /me/job-proposals` by the candidate's id, so a reopened conversation (or one older
     than 24 hours) still shows what became of it; none → 「この案はもう見られません（…24時間たったか、あなたが今は読めない場所が
     含まれています）」 — never which.
+  - **The card changed in place** (UX 段3 #13, owner decisions 2026-11-28 「12・13番」 2–6; the app's half of `revise` above;
+    `src/features/chat/components/JobProposalEditRows.tsx`, `jobProposalEdit.ts`, `hooks/useJobProposalChoices.ts`). Before
+    it is sent, a schema-4 candidate whose definition `proposalInputOf` reads back shows its values as rows (いつ・曜日 / 日・
+    時刻, 何があったら動くか and its place, the Skill, 読む場所 (× / ＋足す), 置く場所 (or 置かない), やることや記録, メール, 1回の時間,
+    動けなかった回); each underlined value, pressed, becomes a list right there (edit-in-place: no separate edit box, nothing
+    typed) and a choice is the change. **The card sends the whole input with the fingerprint shown** (IPC
+    `jobProposals:revise` → `POST /me/job-candidates/:id/revise`, `client/electron/features/jobs/proposals.ts`, session only;
+    main runs `parseJobCandidateInput` first and sends nothing else — an extra key, a hidden place, a bad id or fingerprint
+    → `BAD_REQUEST`, no call). **Only the member's press**: no AI tool, chat-server route or record token reaches it (the
+    server's revise is session-only too); in the renderer only the card calls it (`job-proposal-tools.test.ts`). The
+    sender window is not checked, as for every `jobProposals:*` handler: only the app's own windows have the preload, and
+    the card shows in the main window and in a consultation's own window alike. While the server checks: the chosen value
+    shows, 「直した案をサーバーで確かめています…」 (`role="status"`, the card `aria-busy`), and **nothing else is offered**
+    (every press and value disabled — no 出す on content the server has not answered) **in any card of the candidate**: the
+    change in flight and the input sent are kept per candidate, not per card (`src/features/chat/jobProposalRevising.ts`,
+    `hooks/useJobProposalRevising.ts`; Codex review), so the chat's card and the tab's wait together. What is sent is
+    normalised first (`normalizedInput`: the check's place joins the read places and is left out again when last, exactly
+    as `proposalInputOf(proposalDefinition(…))` gives it back; independent review), so the words and the comparison are of
+    what will come back; ＋足す does not offer the check's own place. Then the store takes the
+    server's rebuilt candidate as the member's act (`putJobProposal`: a read on its way never puts the old one back) and
+    the card says 「直した案をサーバーで確かめました。出すのはこの案です（曜日：月曜 → 火曜）」 (`changeText`). **Refused** →
+    the card shows the server's content again (the change goes back) and says why in the app's fixed words
+    (`jobReviseRefusalText`): `JOB_CANDIDATE_PLACE` 「選んだ場所は、いまのあなたは使えません（…）。元の内容に戻しました。」 —
+    **never a place name**, neither the server's (it sends none) nor the one the member chose (a private folder's name
+    must not be added by the screen) —, `JOB_SKILL_MISSING`, `JOB_SKILL_NOT_HERE`, `JOB_VERSION_FINGERPRINT` (changed
+    elsewhere: read again, choose again), `JOB_CANDIDATE_NOT_REVISABLE`; `JOB_REVISE_READ_AGAIN_CODES` read the candidate
+    again. An answer that never came: the card reads the candidate again by itself (the unknown-answer path above) and
+    judges by whether it now holds what was sent (`sameInput` against the input kept per candidate, so a card shown again or the tab judges the same). **What is offered** (never sent; the server decides):
+    the departments (`api:getDepartments`) and, in a company with the shared folder, the folders on this computer three
+    levels deep (`readDirectoryTree`; not downloaded ones are not there) and the company Skills' folder names
+    (`.claude/skills/*`, `isValidSkillName`), read once when the member first opens a place or Skill list; every place
+    passes `isJobCandidatePlace` (`shared/core/job-proposals.ts`, the server's own rule: no hidden or reserved segment);
+    the candidate's own values are always among them. A company without the shared folder offers departments only and its
+    shelf Skill is not changeable here (decision on the safe side). Times on 30 minutes (a time already chosen stays),
+    1回の時間 5–120 minutes. **The name stays the server's** (decision 3: 「名前は「すること」と「いつ」から自動で付きます」).
+    「出す前に知っておくこと」 (decision 4): the first note shown, the other three folded (「ほかに出す前に知っておくこと（3）」).
+    After 出す, and for anything `proposalInputOf` does not read, the card shows the lines as before.
+  - **Opened large** (decision 5; the shape of #943's approval card): ［大きく開く（タブ）］ on a consultation's card runs the
+    command `jobProposal.open { companyId, candidateId }` (class `view`, not for the AI); `AppShell` opens the screen tab
+    `viewTabKey(JOB_PROPOSAL_VIEW)` (`src/features/chat/jobProposalTab.tsx`, one tab: another candidate shows in it), which
+    draws the same `JobProposalCard` from the same store — a change or a press in either shows in both — and only for the
+    company on screen. Offered only where a handler exists (`useCommandAvailable`: not in a consultation's own window);
+    the tab's card has no ［大きく開く］. A candidate is not a record, so it is not kept across a restart nor in
+    「片づけたタブ」 (a screen tab).
+  - **Not in the inbox** (decision 6): a candidate not sent yet is the member's own draft of 24 hours; nothing about it
+    reaches 受け箱 (no notice, no row). 「これで管理者に出す」 stays the member's own press.
+  - Test (UX 段3 #13): `src/features/chat/jobProposalEdit.test.ts` (what a change says, the round trip with `proposalInputOf`,
+    key order, another 毎日／毎週／毎月 parses, places without hidden / reserved folders, Skills by the name rule),
+    `tests/job-proposals-ipc.test.ts` (the revise's body and session, nothing sent for a bad input, an answer of another
+    candidate not taken, no place in a refusal), `tests/job-proposal-tools.test.ts` (only the session module names the route
+    and registers the IPC, only the card calls it), `tests/ui/job-proposal-card.spec.ts` (`job-proposal-card-ui.html`:
+    changed in place and 出す sends the new fingerprint; while checking nothing can be pressed; a refused place goes back
+    and names no place; 出す on content changed elsewhere is refused and read again; the folded notes; the tab; a change from the chat's card holds the tab's card too; a lost answer judged by reading the candidate). `jobProposalEdit.test.ts` also: what is sent is what comes back (`normalizedInput`).
   - **The submit is the member's press only**: the handler (`client/electron/features/jobs/proposals.ts`, session cookies) is
     registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
     card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it — and, since 4b-4 PR6b, 「定期の仕事」's

@@ -41,13 +41,14 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { JobActionResult, JobFeedbackResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
-import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult, SetWatchCandidateResult, SetWatchChoice, SetWatchSkillsResult } from './job-proposals'
+import type { JobCandidateDiscardResult, JobCandidateResult, JobCandidateReviseResult, JobProposalResult, MyJobProposalsResult, SetWatchCandidateResult, SetWatchChoice, SetWatchSkillsResult } from './job-proposals'
 import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingAutoReadResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { MeetingAutoReadMode } from '../../shared/core/minutes'
+import type { JobCandidateInput } from '../../shared/core/job-proposals'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { RecordsTablePage, RecordsTableQuery } from './records-table'
@@ -654,6 +655,7 @@ export interface IpcInvokeChannels {
   'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
   /** 「やめる」: the candidate not submitted yet is discarded on the server (the member's own press). */
   'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
+  'jobProposals:revise': { args: [companyId: string, candidateId: string, fingerprint: string, input: JobCandidateInput]; result: JobCandidateReviseResult }
   /** 「見張りを足す」 (4b-4 PR6b): the department Skills the member reads, with whether each can run a set watch. */
   'jobProposals:setWatchSkills': { args: [companyId: string]; result: SetWatchSkillsResult }
   /** 「見張りを足す」: a set watch's candidate from the member's choices (the server builds the rest), shown before 「管理者に出す」. */
@@ -1279,6 +1281,7 @@ export interface ElectronAPI {
   getMyJobProposals: Invoke<'jobProposals:mine'>
   withdrawJobProposal: Invoke<'jobProposals:withdraw'>
   discardJobCandidate: Invoke<'jobProposals:discard'>
+  reviseJobCandidate: Invoke<'jobProposals:revise'>
   getSetWatchSkills: Invoke<'jobProposals:setWatchSkills'>
   createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
   getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
