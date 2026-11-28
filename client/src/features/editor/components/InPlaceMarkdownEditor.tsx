@@ -45,6 +45,8 @@ interface Props {
   /** The tab's text: what the editor shows, and what it was told last. */
   content: string
   onChange: (text: string) => void
+  /** Changes and deletes of the file from outside seen so far (it grows): with edits kept, the text shown stays the same. */
+  outsideChanges: number
   onShowSource: () => void
   previewRef: React.MutableRefObject<HTMLDivElement | null>
   initialScrollRatio: number | undefined
@@ -85,7 +87,7 @@ export function InPlaceMarkdownEditor(props: Props) {
   )
 }
 
-function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef, initialScrollRatio, comment, aiFix, startFix, onFixLost }: Props & { onFixLost: () => void }) {
+function Surface({ paneId, filePath, content, onChange, outsideChanges, onShowSource, previewRef, initialScrollRatio, comment, aiFix, startFix, onFixLost }: Props & { onFixLost: () => void }) {
   const [state, setState] = useState<'opening' | 'open' | InPlaceRefusal>('opening')
   const [takenBack, setTakenBack] = useState(false)
   // Opened once with the text of its first render; a later outside change mounts a new Surface.
@@ -128,7 +130,7 @@ function Surface({ paneId, filePath, content, onChange, onShowSource, previewRef
     return null
   }, [documentPath])
   const front = useMemo(() => previewFrontmatter(opened), [opened])
-  const fixes = useAiFix(aiFix, filePath.substring(filePath.lastIndexOf('/') + 1), surfaceRef)
+  const fixes = useAiFix(aiFix, filePath.substring(filePath.lastIndexOf('/') + 1), surfaceRef, outsideChanges)
   const lostRef = useLatestRef(() => { if (fixes.open()) onFixLost() })
   // A comment's reflection, taken once when the document first opens here.
   const [commentFix] = useState(startFix)

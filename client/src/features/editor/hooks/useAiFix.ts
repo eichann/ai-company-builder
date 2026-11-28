@@ -16,12 +16,19 @@ export interface AiFix {
   phase: AiFixPhase
   /** It reflects a review comment (adopting it then says the comment stays unresolved). */
   fromComment: boolean
+  /** The file's changes from outside seen when it was asked: another one since makes it stale. */
+  outside: number
 }
+
+/** Asked before the file changed (or went) from outside, and not refused yet. */
+const staleAt = (fix: AiFix, outsideChanges: number) => fix.outside !== outsideChanges && fix.phase.kind !== 'refused'
 
 const REFUSED = {
   changed: 'AI に頼んでいる間に文書が変わったため、この直し案は使えません。もう一度頼んでください。',
+  outside: 'AI に頼んでいる間にこのファイルがほかで変わったか消されたため、この直し案は使えません。上の知らせで確かめてから、もう一度頼んでください。',
   unwritable: 'この直し案は、ファイルにそのまま書き戻せない書き方のため使えません。',
   html: 'この直し案には、文書になかった HTML の書き方が入っているため使えません。',
+  remoteImage: 'この直し案には、文書になかったインターネット上の画像が入っているため使えません。',
   tooLong: '選んだ所が長すぎるため、AI に頼めませんでした。もう少し短い所を選んでください。',
   noPassage: '選んだ所を AI に渡せませんでした。文字を選び直してから、もう一度頼んでください。',
   noQuote: 'コメントの言葉が文書に見つからないため、AI に頼めませんでした。',
@@ -31,9 +38,12 @@ const REFUSED = {
  * 「AI に直してもらう」 on a document edited in place (files-and-editor.md "Asking the AI to fix a
  * passage"): the one request at a time, its answer checked against the document as it is now, and
  * adopting it through the surface (the write-back). The answer of a request put away is dropped.
+ * `outsideChanges` counts the file's changes and deletes from outside (editor-disk-state.ts): with the
+ * member's edits kept the text shown stays the same, so a fix asked before one is refused by this count.
  */
-export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceRef: MutableRefObject<InPlaceSurface | null>) {
+export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceRef: MutableRefObject<InPlaceSurface | null>, outsideChanges: number) {
   const [fix, setFix] = useState<AiFix | null>(null)
+  const outside = useLatestRef(outsideChanges)
   // One line above the document (a refusal before anything was asked, a comment's fix adopted).
   const [notice, setNotice] = useState<{ text: string; fromComment: boolean } | null>(null)
   const fixRef = useLatestRef(fix)
@@ -56,7 +66,7 @@ export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceR
     const id = ++seq.current
     const host = document.createElement('div')
     surface.showBelow(passage, host)
-    const next: AiFix = { id, ask: comment ? 'コメントを反映' : asked, passage, host, phase: { kind: 'waiting' }, fromComment: !!comment }
+    const next: AiFix = { id, ask: comment ? 'コメントを反映' : asked, passage, host, phase: { kind: 'waiting' }, fromComment: !!comment, outside: outside.current }
     fixRef.current = next
     setFix(next)
     // Only the passage and a little around it go (the whole file never does).
@@ -82,12 +92,13 @@ export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceR
         fixRef.current = updated
         setFix(updated)
       })
-  }, [part, fileName, surfaceRef, fixRef, putAway])
+  }, [part, fileName, surfaceRef, fixRef, putAway, outside])
 
   const adopt = useCallback(() => {
     const shown = fixRef.current
     if (!shown || shown.phase.kind !== 'proposal') return
-    const result = surfaceRef.current?.adoptFix(shown.passage, shown.phase.markdown) ?? { ok: false as const, reason: 'changed' as const }
+    const result = staleAt(shown, outside.current) ? { ok: false as const, reason: 'outside' as const }
+      : surfaceRef.current?.adoptFix(shown.passage, shown.phase.markdown) ?? { ok: false as const, reason: 'changed' as const }
     if (!result.ok) {
       const updated = { ...shown, phase: { kind: 'refused' as const, message: REFUSED[result.reason] } }
       fixRef.current = updated
@@ -98,10 +109,12 @@ export function useAiFix(part: AiFixPart | undefined, fileName: string, surfaceR
     // The comment is never resolved for the member (owner decision): they check and press it.
     if (shown.fromComment) setNotice({ text: 'AI の直しを採用しました。コメントは解決にしていません。確かめて、よければレビューで［解決］を押してください。', fromComment: true })
     surfaceRef.current?.focus()
-  }, [fixRef, surfaceRef, putAway])
+  }, [fixRef, surfaceRef, putAway, outside])
 
   /** Whether a request is still open (its answer would be lost if the document were opened afresh). */
-  const open = useCallback(() => fixRef.current !== null && fixRef.current.phase.kind !== 'refused', [fixRef])
+  const open = useCallback(() => fixRef.current !== null && fixRef.current.phase.kind !== 'refused' && !staleAt(fixRef.current, outside.current), [fixRef, outside])
 
-  return { fix, notice, ask, adopt, putAway, open, closeNotice: () => setNotice(null) }
+  // A change from outside since it was asked shows it refused at once, whatever the AI answered (no ［採用］).
+  const shown = fix && staleAt(fix, outsideChanges) ? { ...fix, phase: { kind: 'refused' as const, message: REFUSED.outside } } : fix
+  return { fix: shown, notice, ask, adopt, putAway, open, closeNotice: () => setNotice(null) }
 }

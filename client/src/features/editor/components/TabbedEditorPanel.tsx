@@ -329,7 +329,8 @@ export function TabbedEditorPanel({
             previewRef={scroll.mdPreviewRef}
             initialScrollRatio={scroll.ratioOf(activeFilePath)}
             onShowEditor={() => handleSetMdViewMode('editor')}
-            inPlace={inPlaceEditing && !isReadOnly(activeFilePath) ? { onChange: handleContentChange } : null}
+            // The disk's changes and deletes seen (editor-disk-state.ts): an AI fix asked before one is not adopted.
+            inPlace={inPlaceEditing && !isReadOnly(activeFilePath) ? { onChange: handleContentChange, outsideChanges: activeFile.outsideChanges ?? 0 } : null}
             onEdit={() => {
               handleSetMdViewMode('editor')
               if (isActivePreviewTab && onPinFile && activeFilePath) {

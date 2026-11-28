@@ -20,6 +20,8 @@ const requests = (page: Page) => page.evaluate(() => (window as unknown as { __a
 const answer = (page: Page, reply: unknown) => page.evaluate(r => (window as unknown as { __acbAnswerFix: (r: unknown) => void }).__acbAnswerFix(r), reply)
 const external = (page: Page, path: string, text: string) =>
   page.evaluate(([p, t]) => (window as unknown as { __acbExternalEdit: (p: string, t: string) => void }).__acbExternalEdit(p, t), [path, text] as const)
+const externalDelete = (page: Page, path: string) =>
+  page.evaluate(p => (window as unknown as { __acbExternalDelete: (p: string) => void }).__acbExternalDelete(p), path)
 
 async function open(page: Page) {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
@@ -86,14 +88,20 @@ test('asking hands over only the passage and a little around it; the fix shows r
   await expect.poll(() => saved(page)).toBe(TEXT.replace('までに送る', 'までにお送りします'))
 })
 
-test('the fix is drawn as the chat draws a reply (no image loaded); raw HTML the passage did not have is never offered', async ({ page }) => {
+test('the fix is drawn as the chat draws a reply (no image loaded); raw HTML or an image on the internet the passage did not have is never offered', async ({ page }) => {
   await open(page)
   await ask(page, '来週は研修です', '3行に縮めて')
-  await answer(page, { ok: true, reply: '```acb-fix\n予定です。**研修**です。![図](https://example.com/t.png)\n```' })
+  await answer(page, { ok: true, reply: '```acb-fix\n予定です。**研修**です。![図](images/図.png)\n```' })
   await expect(card(page).locator('[data-ai-fix-preview] strong')).toHaveText('研修')
   await expect(card(page).locator('[data-ai-fix-preview]')).toContainText('画像「図」')
   expect(await card(page).locator('[data-ai-fix-preview] img').count()).toBe(0)
   await card(page).getByRole('button', { name: 'やめる' }).click()
+
+  await ask(page, '来週は研修です', '3行に縮めて')
+  await answer(page, { ok: true, reply: '```acb-fix\n予定です。![](https://tracker.example/p.png)\n```' })
+  await expect(card(page)).toContainText('文書になかったインターネット上の画像が入っている')
+  await expect(card(page).getByRole('button', { name: '採用' })).toHaveCount(0)
+  await card(page).getByRole('button', { name: '閉じる' }).click()
 
   await ask(page, '来週は研修です', '3行に縮めて')
   await answer(page, { ok: true, reply: '```acb-fix\n予定です。<img src=x onerror="window.__pwned=1"><b>太</b>\n```' })
@@ -148,6 +156,34 @@ test('a document changed while the AI was asked is never fixed: typed into, or c
   await answer(page, { ok: true, reply: '```acb-fix\n別の文\n```' })
   await expect(card(page)).toHaveCount(0)
   expect((await files(page))[DOC]).toBe(TEXT.replace('最後の段落', '外からの段落'))
+})
+
+test('with edits not saved yet, a change or a delete from outside while asked makes the fix unusable (the edits stay)', async ({ page }) => {
+  await open(page)
+  // Typed and not saved yet (the clock stands still, so autosave's second never passes): a change from outside then
+  // keeps these edits on screen.
+  await page.clock.pauseAt(new Date('2026-01-01T00:10:00'))
+  await doc(page).getByText('最後の段落はそのままです。').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('追記')
+  await ask(page, '来週は研修です')
+  await external(page, DOC, TEXT.replace('最後の段落', '外からの段落'))
+  await expect(page.getByText('このファイルは外部で変更されました')).toBeVisible()
+  await answer(page, { ok: true, reply: '```acb-fix\n予定を書きます。来週は研修でございます。\n```' })
+  await expect(card(page)).toContainText('ほかで変わったか消されたため')
+  await expect(card(page).getByRole('button', { name: '採用' })).toHaveCount(0)
+  await expect(doc(page)).toContainText('そのままです。追記')
+
+  // Answered first, then the file is deleted from outside: ［採用］ goes and nothing is written (nor the file made again).
+  await card(page).getByRole('button', { name: '閉じる' }).click()
+  await ask(page, '来週は研修です')
+  await answer(page, { ok: true, reply: '```acb-fix\n予定を書きます。来週は研修でございます。\n```' })
+  await expect(card(page).getByRole('button', { name: '採用' })).toBeVisible()
+  await externalDelete(page, DOC)
+  await expect(card(page)).toContainText('ほかで変わったか消されたため')
+  await expect(card(page).getByRole('button', { name: '採用' })).toHaveCount(0)
+  await expect(doc(page)).not.toContainText('ございます')
+  expect(await saved(page)).toBeUndefined()
 })
 
 test('a review comment\'s ［AI に反映してもらう］ asks with the comment, shows the fix in the document, and never resolves the comment', async ({ page }) => {

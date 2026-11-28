@@ -2,7 +2,7 @@
 // document in place"): the real TabbedEditorPanel with `inPlaceEditing` (as AppShell passes it), the
 // preload API faked. Fictional documents only.
 // window.__acbFiles / __acbWrites: the "disk" and every save; __acbExternalEdit(path, text) writes a
-// file as the AI would (and sends the watcher's event); __acbRequestClose() asks to close the window
+// file as the AI would (and sends the watcher's event), __acbExternalDelete(path) removes it so; __acbRequestClose() asks to close the window
 // as main does; __acbCloseAnswers lists the answers; __acbBackups every keep (the disk version
 // before an overwrite, or the edits given); __acbFailWrites: saves of these paths fail; __acbImages every
 // image kept beside a document (main names it; here a counter of a fixed second); __acbFixRequests /
@@ -88,6 +88,7 @@ Object.assign(window, {
   __acbCloseAnswers: closeAnswers,
   __acbRequestClose: () => closeRequests.emit(),
   __acbExternalEdit: (p: string, text: string) => { files[p] = text; changes.emit([{ type: 'change', path: p }]) },
+  __acbExternalDelete: (p: string) => { delete files[p]; changes.emit([{ type: 'unlink', path: p }]) },
 })
 
 useAuthStore.setState({ user: { id: 'u-yamada', email: 'demo@example.com', name: '山田', image: null, emailVerified: true } })

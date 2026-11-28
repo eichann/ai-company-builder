@@ -830,6 +830,51 @@ test('a fix is refused when the document changed while the AI was asked, and whe
   assert.equal(saved(spliced, view), MEETING.replace('名刺の発注', '名刺の発注（50枚）'))
 })
 
+test('raw HTML is judged as the Markdown reader reads it: a tag broken over lines, in capitals or slipped into a comment is still new HTML', () => {
+  const text = '# メモ\n\n午前に分ける案がある。<!-- 確認中 --> <br>\n\n次の行はそのまま。\n'
+  const { spliced, view } = open(text)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '午前に分ける'))!
+  assert.equal(passage.markdown, '午前に分ける案がある。<!-- 確認中 --> <br>')
+  const refused = { ok: false, reason: 'html' }
+  const cases: Array<[string, string]> = [
+    ['a line break inside the tag', '午前に分ける案があります。<img\nsrc="https://example.com/t.png">'],
+    ['a line break inside an attribute', '午前に分ける案があります。<img src="https://example.com/t.png" alt="a\nb">'],
+    ['capitals', '午前に分ける案があります。<IMG SRC="https://example.com/t.png">'],
+    ['a tag after the passage\'s own comment', '午前に分ける案があります。<!-- 確認中 --><img src="https://example.com/t.png">'],
+    ['a tag inside the passage\'s comment', '午前に分ける案があります。<!-- 確認中 <img src="https://example.com/t.png"> -->'],
+    ['a new comment', '午前に分ける案があります。<!-- 送信先 https://example.com -->'],
+    ['a block of HTML over lines', '午前に分ける案があります。\n\n<div\nstyle="display:none">\n<a href="https://example.com">x</a>\n</div>'],
+    ['a tag in a table cell', '| 案 |\n|---|\n| 午前<Img Src="https://example.com/t.png"> |'],
+  ]
+  for (const [what, fix] of cases) assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, fix), refused, what)
+  // The passage's own HTML may stay, and a tag written as code is words, not HTML.
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります。<!-- 確認中 --> <br>').ok)
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '午前に分ける案があります（`<img src="https://example.com/t.png">` は書きません）。').ok)
+  assert.equal(saved(spliced, view), text, 'nothing was written')
+})
+
+test('an image on the internet the passage did not have is never taken from the AI; the passage\'s own and an image beside the document are', () => {
+  const text = '# メモ\n\n図のとおりです。![旧図](https://example.com/old.png)\n\n次の行はそのまま。\n'
+  const { spliced, view } = open(text)
+  const passage = aiFix.selectedPassage(view, spliced, rangeOf(view, '図のとおり'))!
+  const refused = { ok: false, reason: 'remoteImage' }
+  const cases: Array<[string, string]> = [
+    ['a new https image', '図のとおりです。![旧図](https://example.com/old.png)![](https://tracker.example/p.png?d=1)'],
+    ['http, in capitals', '図のとおりです。![図](HTTP://tracker.example/p.png)'],
+    ['without a scheme', '図のとおりです。![図](//tracker.example/p.png)'],
+    ['a scheme without slashes', '図のとおりです。![図](https:tracker.example/p.png)'],
+    ['a backslash for a slash', '図のとおりです。![図](/\\tracker.example/p.png)'],
+    ['a tab inside the scheme', '図のとおりです。![図](<ht\ttps://tracker.example/p.png>)'],
+    ['by reference', '図のとおりです。![図][p]\n\n[p]: https://tracker.example/p.png'],
+    ['inside a link', '[![図](https://tracker.example/p.png)](images/a.png) 図のとおりです。'],
+    ['in a table cell', '| 図 |\n|---|\n| ![](https://tracker.example/p.png) |'],
+  ]
+  for (const [what, fix] of cases) assert.deepEqual(aiFix.previewFix(view, spliced, view.state.doc, passage, fix), refused, what)
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '図のとおりでございます。![旧図](https://example.com/old.png)').ok, 'the passage\'s own')
+  assert.ok(aiFix.previewFix(view, spliced, view.state.doc, passage, '図のとおりです。![新図](images/20261129-120000.png)').ok, 'an image beside the document')
+  assert.equal(saved(spliced, view), text, 'nothing was written')
+})
+
 test('a comment\'s quote finds the block holding it; the fix shown under it is never written', async () => {
   const host = document.createElement('div')
   document.body.appendChild(host)

@@ -62,6 +62,15 @@ export function milkdownCodec(ctx: Ctx): MarkdownCodec {
       walk(tree(md), 'root')
       return out
     },
+    rawHtml: (md: string) => {
+      const out: string[] = []
+      const walk = (node: MdNode) => {
+        if (node.type === 'html' && typeof node.value === 'string') out.push(node.value)
+        for (const c of node.children ?? []) walk(c)
+      }
+      walk(tree(md))
+      return out
+    },
   }
 }
 

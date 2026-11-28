@@ -25,7 +25,7 @@ interface Props {
   /** 編集: to the source, keeping a preview tab. */
   onEdit: () => void
   /** Edit the document right here (files-and-editor.md "Editing a document in place"); absent: read only. */
-  inPlace?: { onChange: (text: string) => void } | null
+  inPlace?: { onChange: (text: string) => void; outsideChanges: number } | null
   /** The review's comment box, handed in by the screen (selectionSlot.ts): ［コメント］ and a review's selection. */
   commentBox?: SelectionSlot['commentBox']
   /** The consultation's AI (selectionSlot.ts): ［AI に直してもらう］, and ［AI に反映してもらう］ on a completed review's comment. */
@@ -98,6 +98,7 @@ export function MarkdownPreviewPane({
               filePath={filePath}
               content={content}
               onChange={inPlace.onChange}
+              outsideChanges={inPlace.outsideChanges}
               onShowSource={onShowEditor}
               previewRef={previewRef}
               initialScrollRatio={initialScrollRatio}

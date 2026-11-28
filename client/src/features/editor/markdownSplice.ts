@@ -26,6 +26,8 @@ export interface MarkdownCodec {
   visibleText(md: string): string
   /** Where each text block of `md` is (paragraph, heading, code, table cell, block HTML), in document order. */
   textblocks(md: string): Array<{ start: number; end: number }>
+  /** Every raw HTML part of `md` (tags, comments, HTML blocks) as the reader reads it, at any depth; code is words, not HTML. */
+  rawHtml(md: string): string[]
 }
 
 /** Why a document is not edited in place: shown to the member, who edits the source instead. */
@@ -161,6 +163,11 @@ export class SplicedDocument {
     } catch {
       return null
     }
+  }
+
+  /** The raw HTML parts of `md` as the editor's reader reads them (a fix may keep the passage's own, never bring new ones). */
+  rawHtml(md: string): string[] {
+    return this.codec.rawHtml(md)
   }
 
   /**

@@ -631,12 +631,26 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
 - **Adopting goes through the write-back** (`adoptFix`): refused when the file's text or the shown document changed since the
   passage was taken (`fixedDocument`: 「AI に頼んでいる間に文書が変わったため…」), when the fix holds a block kind the
   editor does not keep or text it would lose (`SplicedDocument.read`: footnotes …), raw HTML tags the passage did not
-  have (`htmlTags`: the preview never shows them — a tracking image, a hidden link), or is empty. Two faithful ways are
+  have (the preview never shows them — a tracking image, a hidden link: judged by the editor's own Markdown reader,
+  `SplicedDocument.rawHtml` — every `html` node at any depth, tags, comments and HTML blocks, compared whole — never by a
+  pattern, so a tag broken over lines or attributes, in capitals or slipped into a comment is HTML all the same, and a
+  tag written as code is words), an image on the internet the passage did not have (owner decision 2026-11-29: a
+  planted instruction's tracking image — the document is opened on other computers and in other apps; `remoteImages` over
+  the nodes the reader made, so a reference-style image counts; the address read as a browser's URL parser reads it —
+  tabs and line breaks dropped, outer spaces and controls trimmed, `\` as `/` — then `http:` / `https:` with or without
+  `//`, or `//host` (`onTheInternet`, Codex review); the passage's own and an
+  image beside the document, `images/…`, are taken), or is empty. Two faithful ways are
   tried — the AI's Markdown as written over the passage (`writeSource`: reads back as the screen shows, neighbours keep their
   bytes) and the write-back's smallest edit (`write`) — and the one changing fewer lines is written (a tie: the AI's), so a
   list the AI rewrote with `-` bullets changes only the line whose words changed, and a table is written as the AI wrote
   it. The tracker writes it like typing, with the write chosen for exactly that document (`adopted`); saving, ⌘S and the
-  external-change band as for typing. The file changed from outside while asked (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
+  external-change band as for typing. **With edits not saved yet**, a change or a delete from outside keeps the member's
+  text on screen (only the external-change band shows), so the text check cannot see it: the tab counts every change and
+  delete from outside it sees (`outsideChanges` in `client/shared/editor-disk-state.ts`: `applyDiskDecision` for the
+  watcher's reload, missing mark or conflict, and `withExternal` — the one place that sets `external` — also for a change a
+  save or a compare button reads first; never our own save or the same version seen again), the request keeps the count it was asked at
+  (`useAiFix`), and a request asked before another one shows refused at once, whatever the AI answered — no ［採用］, adopting
+  refused too — with 「AI に頼んでいる間にこのファイルがほかで変わったか消されたため…」. The file changed from outside while asked with no edits (the document opens afresh) → 「AI に頼んでいる間に文書がほかから
   変わったため…」 above it; the answer is dropped. `〔〕` in the answer become the passage's `【】` again when the passage had
   `【】` and no `〔〕` (`restoreBrackets`: outside text reaches the AI with them replaced).
 - **A comment is never resolved for the member** (owner): adopting a comment's fix says 「コメントは解決にしていません…」 with
@@ -645,13 +659,17 @@ of symbols to fix a word. **What was not edited never changes by one byte.**
   stored in already) and the AI's reply follows it (`chat-ui-and-history.md`). Whether a fix was adopted is not recorded.
 - Tests: `markdownSplice.test.ts` (the passage of a nested list byte for byte, ≤ 600 around, no frontmatter; a selection to
   the next block's start and to a list's first words; a `-` list fix written as its one `*` line; 「表にして」 written as
-  the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; a comment's quote → its block; the card
+  the AI wrote it, only the paragraph's lines; changed meanwhile / footnote / new raw HTML / empty refused, nothing written; raw HTML read by the reader — a tag over lines,
+  a line break in an attribute, capitals, a tag beside or inside the passage's own comment, a new comment, an HTML block, a tag in a
+  table cell refused, the passage's own HTML and a tag in code kept; a new image on the internet — https, HTTP, `//host`,
+  `https:host`, `/\host`, a tab inside the scheme, by reference, inside a link, in a table — refused, the passage's own and `images/…` kept; a comment's quote → its block; the card
   shown in the flow and not written), `tests/inline-fix.test.ts` (the message's outside-text blocks, a passage that spells a
   footer, the ask as a quoted line, the comment as outside text, the command's limits, `contextAround`, the answer's
   block, `restoreBrackets`, the pane's answer read strictly, a turn answering only its own request),
   `tests/ui/editor-ai-fix.spec.ts` (asking hands over the passage only and the card stands right after the list;
-  ［採用］ writes one line; the fix drawn without raw HTML or script; ［やめる］ before and after the answer, the dropped answer,
-  a refusal; typing meanwhile and a change from outside refused; a completed review's comment → its words handed over, the
+  ［採用］ writes one line; the fix drawn without raw HTML or script, a new image on the internet refused; ［やめる］ before and after the answer, the dropped answer,
+  a refusal; typing meanwhile and a change from outside refused; with edits not saved, a change from outside before the answer and a
+  delete after it refused, the edits kept, nothing written; a completed review's comment → its words handed over, the
   fix adopted, no reply file, the review file byte for byte, ［レビューに戻る］), `tests/ui/chat-panel.spec.ts` 「chat.askToFix…」
   — each guard mutation-checked (the staleness check, the kept kinds, no new HTML, the outside-text wrapping, the limits, the line cut,
   the next-block rule, the fewer-lines choice, the request id, the busy refusal, the chat's renderer, the comment left
