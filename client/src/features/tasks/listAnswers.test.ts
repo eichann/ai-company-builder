@@ -5,7 +5,8 @@
 // the list of the company now shown, while a newer read of another company replaces it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { nextListState, type TaskListState } from './listAnswers'
+import { answerStillWanted, nextListState, type TaskListState } from './listAnswers'
+import { currentCompanyEra, endCompanyEra } from '../../shared/lib/companyEra'
 import type { TaskListData, TaskListResult } from '../../../shared/tasks'
 
 const list = (name: string): TaskListResult => ({ success: true, data: { available: true, listDepartmentIds: null, items: [], me: name } as TaskListData })
@@ -49,4 +50,14 @@ test('A → B: A\'s read answering after B\'s list is shown never replaces it; a
   s = nextListState(s, 'co-b', 8, { success: false, offline: true, error: 'つながりません' })
   assert.equal(s.companyId, 'co-b')
   assert.equal(s.data, null)
+})
+
+test('a read of the company left behind (an undo reload after a switch) or of an earlier session never reaches the list', () => {
+  const era = currentCompanyEra()
+  assert.equal(answerStillWanted('A', era, 'A'), true)
+  assert.equal(answerStillWanted('A', era, 'B'), false, 'another company now')
+  assert.equal(answerStillWanted('A', era, undefined), false, 'signed out')
+  endCompanyEra()
+  assert.equal(answerStillWanted('A', era, 'A'), false, 'the same company in a new session')
+  assert.equal(answerStillWanted('A', currentCompanyEra(), 'A'), true)
 })
