@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useImperativeHandle, useState, type Ref } from 'react'
+import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
 import { Check, LockSimple, SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, SubHeading } from '../../../shared/ui/primitives'
 import { DEFAULT_VOICE_INSTRUCTIONS, VOICE_FIXED_PROMPT, VOICE_INSTRUCTIONS_MAX_LENGTH } from '../../../../shared/voice-prompt'
@@ -14,7 +15,8 @@ const ipcMessage = (error: unknown, fallback: string) => {
   return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') || fallback
 }
 
-export function VoicePromptSettings() {
+/** `unsavedRef`: the settings ask before closing while the edited instructions are not saved. */
+export function VoicePromptSettings({ unsavedRef }: { unsavedRef?: Ref<UnsavedChanges> } = {}) {
   const [saved, setSaved] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -29,6 +31,25 @@ export function VoicePromptSettings() {
     return () => { cancelled = true }
   }, [])
 
+  const run = async (action: () => Promise<{ instructions: string }>): Promise<string | null> => {
+    setBusy(true); setError(''); setJustSaved(false)
+    try {
+      const next = await action()
+      setSaved(next.instructions); setDraft(next.instructions)
+      setJustSaved(true)
+      setTimeout(() => setJustSaved(false), 2000)
+      return null
+    } catch (e) {
+      const message = ipcMessage(e, '保存できませんでした。もう一度お試しください')
+      setError(message)
+      return message
+    } finally {
+      setBusy(false)
+    }
+  }
+  const save = () => run(() => setVoicePrompt(draft))
+  useImperativeHandle(unsavedRef, () => ({ pending: () => (saved !== null && draft !== saved ? '音声入力の整え方の指示' : null), save }))
+
   if (saved === null) {
     return <div className="flex items-center gap-2 text-body text-zinc-500 dark:text-zinc-400"><SpinnerGap size={14} className="animate-spin" />読み込み中…</div>
   }
@@ -37,20 +58,6 @@ export function VoicePromptSettings() {
   const dirty = draft !== saved
   const isDefaultDraft = draft === DEFAULT_VOICE_INSTRUCTIONS
 
-  const run = async (action: () => Promise<{ instructions: string }>) => {
-    setBusy(true); setError(''); setJustSaved(false)
-    try {
-      const next = await action()
-      setSaved(next.instructions); setDraft(next.instructions)
-      setJustSaved(true)
-      setTimeout(() => setJustSaved(false), 2000)
-    } catch (e) {
-      setError(ipcMessage(e, '保存できませんでした。もう一度お試しください'))
-    } finally {
-      setBusy(false)
-    }
-  }
-  const save = () => run(() => setVoicePrompt(draft))
   const reset = () => {
     if (!isDefaultDraft && !window.confirm('整え方の指示を初期値に戻しますか？\n編集した内容は消えます。')) return
     void run(() => resetVoicePrompt())
@@ -84,7 +91,7 @@ export function VoicePromptSettings() {
           className="h-72 w-full resize-y rounded-control border border-zinc-200 bg-white px-4 py-3 text-body leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500"
         />
         <div className="mt-1.5 flex items-center justify-between gap-4 text-xs">
-          <span className="text-zinc-500 dark:text-zinc-400">{dirty ? '未保存の変更があります' : isDefaultDraft ? '初期値を使用中' : '編集した指示を使用中'}</span>
+          <span className="text-zinc-500 dark:text-zinc-400">{dirty ? 'まだ保存していません' : isDefaultDraft ? '初期値を使用中' : '編集した指示を使用中'}</span>
           <span id="voice-prompt-count" className={`tabular-nums ${tooLong ? 'text-red-600 dark:text-red-300' : 'text-zinc-400 dark:text-zinc-500'}`}>
             {draft.length.toLocaleString('ja-JP')} / {VOICE_INSTRUCTIONS_MAX_LENGTH.toLocaleString('ja-JP')}文字
           </span>

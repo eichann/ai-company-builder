@@ -4,7 +4,8 @@
 // in one go from a sticky footer. Model: shared/sparse-paths.ts (everything is
 // downloaded except the folders left out; no re-including inside a folder that
 // is left out). Applying: electron/sync/sparse.ts via useSparseCheckout.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react'
+import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
 import { CaretRight, FolderSimple, FolderSimpleDashed, Lock, MagnifyingGlass, SpinnerGap, X, CheckCircle, WifiSlash, WarningCircle } from '@phosphor-icons/react'
 import { useSparseCheckout } from '../../../shared/hooks/useSparseCheckout'
 import { findUncommittedChanges, getFolderSizes, onDownloadProgress } from '../api'
@@ -40,7 +41,7 @@ interface Props {
   departments: DepartmentConfig[]
 }
 
-export function DownloadFoldersSection({ rootPath, companyId, departments }: Props) {
+export function DownloadFoldersSection({ rootPath, companyId, departments, unsavedRef }: Props & { unsavedRef?: Ref<UnsavedChanges> }) {
   const sparse = useSparseCheckout({ rootPath })
   const applied = sparse.excludedPaths
   // null = not edited: the draft is what is applied.
@@ -151,29 +152,35 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
     setPhase(p => (p.kind === 'applying' ? { kind: 'applying', receivedBytes } : p))
   }), [rootPath])
 
-  const runApply = useCallback(async () => {
+  // null = applied; else why not (said in the footer too).
+  const runApply = useCallback(async (): Promise<string | null> => {
     setPhase({ kind: 'applying', receivedBytes: 0 })
     const result = await sparse.apply(draft)
     if (result.success) {
       setEdited(null)
       setPhase({ kind: 'done' })
       window.setTimeout(() => setPhase(p => (p.kind === 'done' ? { kind: 'idle' } : p)), 2600)
-    } else {
-      setPhase({ kind: 'failed', offline: !!result.offline, message: result.error ?? '変更できませんでした' })
+      return null
     }
+    setPhase({ kind: 'failed', offline: !!result.offline, message: result.error ?? '変更できませんでした' })
+    return result.offline ? 'インターネットにつながっているときにダウンロードできます。何も変更していません。' : `適用できませんでした：${result.error ?? '変更できませんでした'}`
   }, [sparse, draft])
 
-  const startApply = useCallback(async () => {
+  // '' = the member is asked first about changes in a folder being left out (the confirm below).
+  const startApply = useCallback(async (): Promise<string | null> => {
     if (diff.excluded.length > 0) {
       setPhase({ kind: 'checking' })
       const res = await findUncommittedChanges(rootPath, diff.excluded)
       if (res.success && res.files.length > 0) {
         setPhase({ kind: 'confirm', files: res.files })
-        return
+        return ''
       }
     }
-    await runApply()
+    return runApply()
   }, [diff.excluded, rootPath, runApply])
+
+  // The settings ask before closing while the choice is not applied (適用 = 保存 here).
+  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty ? 'ダウンロードするフォルダの変更（まだ適用していません）' : null), save: startApply }))
 
   const busy = phase.kind === 'applying' || phase.kind === 'checking'
 

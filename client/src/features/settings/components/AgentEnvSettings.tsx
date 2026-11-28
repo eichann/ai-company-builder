@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useImperativeHandle, useState, type Ref } from 'react'
+import type { UnsavedChanges } from '../../../shared/lib/unsavedChanges'
 import { Button, Callout, SubHeading } from '../../../shared/ui/primitives'
 import { getAgentEnvPassthrough, setAgentEnvPassthrough } from '../api'
 
@@ -13,7 +14,8 @@ const TEXTAREA = 'h-32 w-full resize-none rounded-control border border-zinc-200
 
 const parse = (text: string) => text.split(/[\s,]+/).map(name => name.trim()).filter(Boolean)
 
-export function AgentEnvSettings() {
+/** `unsavedRef`: the settings ask before closing while the names typed are not saved. */
+export function AgentEnvSettings({ unsavedRef }: { unsavedRef?: Ref<UnsavedChanges> } = {}) {
   const [text, setText] = useState('')
   const [saved, setSaved] = useState<string[] | null>(null)
   const [refused, setRefused] = useState<{ invalid: string[]; denied: string[] }>({ invalid: [], denied: [] })
@@ -29,7 +31,7 @@ export function AgentEnvSettings() {
     return () => { alive = false }
   }, [])
 
-  const save = async () => {
+  const save = async (): Promise<string | null> => {
     setStatus('saving')
     try {
       const result = await setAgentEnvPassthrough(parse(text))
@@ -37,12 +39,15 @@ export function AgentEnvSettings() {
       setText(result.names.join('\n'))
       setRefused({ invalid: result.invalid, denied: result.denied })
       setStatus('saved')
+      return null
     } catch {
       setStatus('error')
+      return '保存できませんでした。もう一度お試しください'
     }
   }
 
   const dirty = saved !== null && parse(text).join('\n') !== saved.join('\n')
+  useImperativeHandle(unsavedRef, () => ({ pending: () => (dirty ? 'AIに渡す環境変数の変更' : null), save }))
 
   return (
     <div className="space-y-4">
@@ -75,11 +80,11 @@ export function AgentEnvSettings() {
         </div>
       )}
       <div className="flex items-center gap-3">
-        <Button variant="primary" onClick={save} disabled={!dirty || status === 'saving'}>
+        <Button variant="primary" onClick={() => void save()} disabled={!dirty || status === 'saving'}>
           {status === 'saving' ? '保存中…' : '保存'}
         </Button>
         <span role="status" className="text-small text-zinc-500 dark:text-zinc-400">
-          {status === 'saved' ? '保存しました。AIへの次の依頼から反映されます。' : status === 'error' ? '保存できませんでした。もう一度お試しください' : 'このPCにだけ保存され、同期されません。'}
+          {status === 'saved' ? '保存しました。AIへの次の依頼から反映されます。' : status === 'error' ? '保存できませんでした。もう一度お試しください' : dirty ? 'まだ保存していません。保存すると、AIへの次の依頼から反映されます。' : 'このPCにだけ保存され、同期されません。'}
         </span>
       </div>
     </div>

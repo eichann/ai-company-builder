@@ -327,6 +327,8 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   useCommandHandler('file.search', () => setShowFileSearch(true))
   useCommandHandler('find.byName', () => setShowFileSearch(true))
   useCommandHandler('settings.openOwnKey', ({ service }) => {
+    // Already open: stay where the member is (a new focus would remount the settings and drop what they typed).
+    if (showSettings) return
     setSettingsFocus({ service, at: Date.now() })
     setShowSettings(true)
   })
@@ -543,7 +545,7 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
     open: bottomOpen && !bottomPanel, onToggle: () => setBottomOpen(o => !o),
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
-    onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
+    onOpenJobs: () => { if (!showSettings) setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
     renderApprovalCard: id => approvalCard(id, ''),
     renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
     // 「ブラウザ操作」's plans: main decides (the switch is per PC, agent-browser.md "This PC's opt-in"); switched off,
