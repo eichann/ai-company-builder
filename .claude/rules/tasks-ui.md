@@ -275,7 +275,9 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
   (`data-work-card`, both marked `commandArea('list', key)`). ↑ ↓ from a row move the row's focus with it; from the
   item's own frame they keep the focus there; never from a field, a menu, a dialog or a button inside the item.
   Enter on a row shows its item and moves the focus into it; Esc in the item puts the focus back on its row. With
-  nothing of the list shown, ↓ / ↑ go back to **the place** (the last item shown from that list), else the first / last.
+  nothing of the list shown, ↓ / ↑ go back to **the place** (the last item shown from that list — by a key or a
+  click, `show`), else the first / last. Another company or a sign-out forgets every list's order, place and notice
+  (`forgetAllWork`, `appStore` beside `forgetAllShown`): a 取り消す of the last company never shows on the next one.
 - **Finishing the item shown** (the card's end button, the list's ☑ on that row; `TaskCard` / `RecordCard` /
   `TaskListPanel` hand `onEnded` / `onCompleted` an `undo` of that one-step press's entry): the next item (the one
   after it; the last one → the one before) takes its place, and the list says 「『…』を片づけました。次の件です」 with
@@ -292,7 +294,7 @@ side that shows the items) and `ui/WorkThrough.tsx` (`WorkThroughBar`, `WorkThro
 - Tests: `src/shared/lib/workThrough.test.ts` (neighbours and ends, the place, the next after the last, 「n / N」, one
   order per list), `src/features/tasks/model.test.ts` (`workOrder`), `src/shared/commands/commands.test.ts` (the
   second key), `tests/ui/tasks-layout.spec.ts` (「working through the list…」, 「finishing the item shown…」, 「the last
-  item…」, 「a 案件's やること…」; `skill-layout-ui.html?tasks=1&work=1`, `&rows=N`) — mutation-checked.
+  item…」, 「back from another tab…」, 「a 案件's やること…」; `src/shared/lib/workThrough.test.ts` also `forgetAllWork`; `skill-layout-ui.html?tasks=1&work=1`, `&rows=N`) — mutation-checked.
 
 ## The card (S7c, `TaskCard.tsx`, `client/shared/task-card.ts`)
 
