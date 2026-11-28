@@ -4,6 +4,7 @@ import {
   applyDiskDecision,
   backupStamp,
   canAutosave,
+  decideCompareChoice,
   decideOnDiskEvent,
   decideSave,
   editorOverwriteBackupPlan,
@@ -80,6 +81,16 @@ test('save: unchanged disk writes; changed disk asks; disk = my edits is already
   assert.deepEqual(decideSave(dirty('v1', 'mine'), 'mine'), { action: 'already-saved' })
   // The AI wrote before the watcher event arrived: the save itself catches it.
   assert.equal(decideSave({ content: 'mine', originalContent: 'v1' }, 'ai-not-yet-seen').action, 'ask')
+})
+
+test('a compare choice acts only on the version the member was shown', () => {
+  // Still the version compared: go.
+  assert.deepEqual(decideCompareChoice(dirty('v1', 'mine'), 'ai', 'ai'), { action: 'go' })
+  // Changed again (or gone) meanwhile: nothing is done, compare again with what is there now.
+  assert.deepEqual(decideCompareChoice(dirty('v1', 'mine'), 'ai', 'ai-2'), { action: 'compare-again', external: { kind: 'changed', diskContent: 'ai-2' } })
+  assert.deepEqual(decideCompareChoice(dirty('v1', 'mine'), 'ai', null), { action: 'compare-again', external: { kind: 'deleted' } })
+  // The disk now holds the edits themselves: nothing left to choose.
+  assert.deepEqual(decideCompareChoice(dirty('v1', 'mine'), 'ai', 'mine'), { action: 'already-saved' })
 })
 
 test('backup location: .backups/<ts>_editor_overwrite/<rel>', () => {

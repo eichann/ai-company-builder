@@ -10,6 +10,8 @@ const ROOT = '/Users/demo/会社'
 const SCRIPT = `${ROOT}/コンテンツG/台本.md`
 const LONG_DOC = `${ROOT}/営業部/議事録.md`
 
+/** A confirm of any kind (a dangerous one is an alertdialog). */
+const anyDialog = (page: Page) => page.locator('[role="dialog"], [role="alertdialog"]')
 const editor = (page: Page) => page.locator('.cm-content[role="textbox"]')
 const tab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const closeButton = (page: Page, path: string) => page.locator('div.group', { has: tab(page, path) }).getByRole('button')
@@ -103,6 +105,45 @@ test('closing a tab with edits saves them first; a clean tab just closes', async
   await closeButton(page, `${ROOT}/営業部/顧客リスト.csv`).click()
   await expect(tab(page, `${ROOT}/営業部/顧客リスト.csv`)).toHaveCount(0)
   expect(await writes(page)).toHaveLength(1)
+})
+
+test('closing a tab whose file changed elsewhere keeps it open and shows the compare view: nothing written, nothing dropped', async ({ page }) => {
+  await open(page)
+  await typeAtEnd(page, '\n閉じる前の追記')
+  // Changed on disk before the watcher tells the tab: the save on closing finds it.
+  await page.evaluate(p => { (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles[p] += '\nAI の追記' }, SCRIPT)
+  await closeButton(page, SCRIPT).click()
+  await expect(page.getByTestId('external-compare')).toBeVisible()
+  await expect(tab(page, SCRIPT)).toHaveCount(1)
+  await expect(anyDialog(page)).toHaveCount(0)
+  expect(await writes(page)).toEqual([])
+  await expect(editor(page)).toHaveCount(0)
+  await page.getByRole('button', { name: '比べるのをやめる' }).click()
+  await expect(editor(page)).toContainText('閉じる前の追記')
+})
+
+test('only when neither version could be kept, closing offers 「保存せずに閉じる」 and says the edits will not be kept', async ({ page }) => {
+  await open(page)
+  await typeAtEnd(page, '\n閉じる前の追記')
+  await page.evaluate(p => { (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles[p] += '\nAI の追記' }, SCRIPT)
+  await closeButton(page, SCRIPT).click()
+  await expect(page.getByTestId('external-compare')).toBeVisible()
+  await expect(anyDialog(page)).toHaveCount(0)
+
+  // The backups cannot be written: both choices stop, and only now may closing drop the edits.
+  await page.evaluate(() => { (window as unknown as { __acbFailBackups: { on: boolean } }).__acbFailBackups.on = true })
+  await page.getByRole('button', { name: '自分の版を保存' }).click()
+  await expect(page.getByText('届いた版をバックアップに残せなかったため、保存していません。', { exact: false })).toBeVisible()
+  await closeButton(page, SCRIPT).click()
+  const dialog = anyDialog(page)
+  await expect(dialog).toContainText('この編集は残りません')
+  await dialog.getByRole('button', { name: 'キャンセル' }).click()
+  await expect(tab(page, SCRIPT)).toHaveCount(1)
+
+  await closeButton(page, SCRIPT).click()
+  await anyDialog(page).getByRole('button', { name: '保存せずに閉じる' }).click()
+  await expect(tab(page, SCRIPT)).toHaveCount(0)
+  expect(await writes(page)).toEqual([])
 })
 
 test('a preview tab is kept (pinned) when it is double-clicked', async ({ page }) => {

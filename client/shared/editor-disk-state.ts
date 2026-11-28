@@ -5,8 +5,10 @@
  * `originalContent` is the disk version the tab last loaded or saved. A tab
  * with no edits follows the disk (the AI's edit, a sync pull). A tab with
  * edits never silently loses either side: a disk change shows a banner and
- * pauses autosave, and a save whose disk version is no longer the one the tab
- * loaded asks first — and backs the disk version up before overwriting it.
+ * pauses autosave; the member compares the two and picks one with a single
+ * press (［自分の版を保存］ / ［届いた版を採用］), and the side not picked is
+ * kept in the backups (the disk version before overwriting it, the edits
+ * before dropping them).
  */
 import type { BackupReason } from './backup-reasons'
 
@@ -87,6 +89,27 @@ export function decideSave(file: EditorFileState, disk: string | null): SaveDeci
   return { action: 'ask', diskContent: disk }
 }
 
+export type CompareChoice = 'mine' | 'arrived'
+
+export type CompareChoiceDecision =
+  /** The disk is still the version the member compared: do what they picked. */
+  | { action: 'go' }
+  /** The disk already holds the tab's edits: nothing to choose any more. */
+  | { action: 'already-saved' }
+  /** The file changed again (or went) while they compared: change nothing, compare again. */
+  | { action: 'compare-again'; external: ExternalChange }
+
+/**
+ * At the press of ［自分の版を保存］ / ［届いた版を採用］, the disk read again
+ * (`disk`, null = gone) against the version the member was shown
+ * (`compared`): never act on a version they did not see.
+ */
+export function decideCompareChoice(file: Pick<EditorFileState, 'content'>, compared: string, disk: string | null): CompareChoiceDecision {
+  if (disk === compared) return { action: 'go' }
+  if (disk === file.content) return { action: 'already-saved' }
+  return { action: 'compare-again', external: disk === null ? { kind: 'deleted' } : { kind: 'changed', diskContent: disk } }
+}
+
 /** Autosave runs only for a tab with edits and nothing unresolved on disk. */
 export function canAutosave(file: EditorFileState): boolean {
   return isDirty(file) && !file.external
@@ -97,13 +120,16 @@ export function canAutosave(file: EditorFileState): boolean {
 // ---------------------------------------------------------------------------
 
 export const EDITOR_OVERWRITE_REASON = 'editor_overwrite' satisfies BackupReason
+/** The tab's edits, kept before ［届いた版を採用］ replaces them (they were never on disk). */
+export const EDITOR_EDITS_REASON = 'editor_edits' satisfies BackupReason
 
 /**
- * Why the app kept a file's current version before replacing it: the editor
- * overwrote a changed file, a backup was restored over it, or 「元に戻す」 in
- * the sync preview undid it. Also the backup folder's suffix.
+ * Why the app kept a version of a file before replacing it: the editor
+ * overwrote a changed file, the editor dropped the tab's edits for the version
+ * that arrived, a backup was restored over it, or 「元に戻す」 in the sync
+ * preview undid it. Also the backup folder's suffix.
  */
-export type KeepCurrentReason = Extract<BackupReason, typeof EDITOR_OVERWRITE_REASON | 'before_restore' | 'before_revert'>
+export type KeepCurrentReason = Extract<BackupReason, typeof EDITOR_OVERWRITE_REASON | typeof EDITOR_EDITS_REASON | 'before_restore' | 'before_revert'>
 
 export interface EditorOverwriteBackupMetadata {
   timestamp: string

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { backupBeforeOverwrite, createDirectory, readFile, writeFile, saveRefusal } from '../api'
-import { canAutosave, decideSave, isDirty } from '../../../../shared/editor-disk-state'
+import { backupBeforeOverwrite, backupEdits, createDirectory, readFile, writeFile, saveRefusal } from '../api'
+import { canAutosave, decideCompareChoice, decideSave, isDirty } from '../../../../shared/editor-disk-state'
 import { registerUnsavedEditsSaver } from '../../../shared/lib/unsavedEdits'
 import type { OpenFile } from './useOpenFiles'
 
@@ -20,14 +20,17 @@ interface Deps {
   rootPath: string | null
   setError: (message: string | null) => void
   setNotice: (message: string | null) => void
+  /** Brings a tab to the front (closing a tab changed on disk shows its compare view instead). */
+  showFile: (filePath: string) => void
 }
 
 /**
  * Saving: autosave a second after the last keystroke, an explicit save
- * (`editor.save`, ⌘S), saving before a tab closes, and loading the disk version instead — each one never silently over
- * someone else's version (files-and-editor.md, External changes).
+ * (`editor.save`, ⌘S), saving before a tab closes, and the compare view's two choices
+ * (［自分の版を保存］ / ［届いた版を採用］) — never silently over someone else's version, and
+ * the version not picked is kept in the backups first (files-and-editor.md, External changes).
  */
-export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, updateFile, rootPath, setError, setNotice }: Deps) {
+export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, updateFile, rootPath, setError, setNotice, showFile }: Deps) {
   const [, setIsSaving] = useState(false)
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
@@ -36,11 +39,15 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
   const askConfirm = useCallback((request: Omit<ConfirmRequest, 'resolve'>) =>
     new Promise<boolean>(resolve => setConfirmRequest({ ...request, resolve })), [])
 
+  const markSaved = useCallback((filePath: string, content: string) => updateFile(filePath, f => ({
+    ...f, originalContent: content, missing: false, external: undefined, comparing: false, changedWhileComparing: false, keepFailed: false,
+  })), [updateFile])
+
   /**
    * Save `content`, never silently over someone else's version: the disk is
-   * compared with the version this tab loaded first (decideSave). Autosave
-   * (`interactive: false`) stops at a difference and shows the banner; an
-   * explicit save asks, backs the disk version up, then overwrites.
+   * compared with the version this tab loaded first (decideSave). At a
+   * difference nothing is written: the banner shows and, for a save the member
+   * asked for, the compare view opens (they pick a version there).
    * Resolves true when the content is on disk.
    */
   const saveFile = useCallback(async (filePath: string, content: string, { interactive }: { interactive: boolean }): Promise<boolean> => {
@@ -51,37 +58,24 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     try {
       const disk = await readFile(filePath)
       const decision = decideSave({ ...current, content }, disk)
-      const markSaved = () => updateFile(filePath, f => ({ ...f, originalContent: content, missing: false, external: undefined, keepMine: false }))
 
       if (decision.action === 'already-saved') {
-        markSaved()
+        markSaved(filePath, content)
         return true
       }
 
       if (decision.action === 'ask') {
         // Show the banner whatever happens next, so the change is never unnoticed.
-        updateFile(filePath, f => ({ ...f, external: { kind: 'changed', diskContent: decision.diskContent }, missing: false }))
-        if (!interactive) return false
-        const ok = await askConfirm({
-          title: 'このファイルは外部で変更されています',
-          message: 'このタブで開いてから、AI やほかのメンバーの同期などでファイルの内容が変わりました。\n上書きすると、いまのディスクの内容をバックアップに保存してから（タイトルバーの［バックアップ履歴］で見られます）、あなたの編集で置き換えます。',
-          confirmText: '外部の変更を上書きして保存',
-          danger: true,
-        })
-        if (!ok) return false
-        if (rootPath) {
-          const backup = await backupBeforeOverwrite(rootPath, filePath)
-          if (!backup.success) {
-            setError('外部の変更をバックアップできなかったため、保存を中止しました。')
-            return false
-          }
-          if (backup.backupPath) {
-            setNotice('外部で変更された内容をバックアップしてから上書きしました（タイトルバーの［バックアップ履歴］で見られます）')
-          }
-        }
+        updateFile(filePath, f => ({
+          ...f,
+          external: { kind: 'changed', diskContent: decision.diskContent },
+          missing: false,
+          ...(interactive ? { comparing: true, changedWhileComparing: false } : {}),
+        }))
+        return false
       }
 
-      if (decision.action === 'write' && decision.recreate) {
+      if (decision.recreate) {
         // The file (or its folder) was deleted: saving puts it back.
         const parent = filePath.substring(0, filePath.lastIndexOf('/'))
         if (parent) await createDirectory(parent)
@@ -89,7 +83,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
 
       const success = await writeFile(filePath, content)
       if (success) {
-        markSaved()
+        markSaved(filePath, content)
         return true
       }
       setError(await saveRefusal(filePath) ?? '保存に失敗しました')
@@ -100,7 +94,99 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     } finally {
       setIsSaving(false)
     }
-  }, [askConfirm, rootPath, updateFile, fileContentsRef, setError, setNotice])
+  }, [markSaved, updateFile, fileContentsRef, setError])
+
+  /**
+   * The disk at the press of a compare button, against the version the member
+   * was shown. Resolves true when that version is still on disk; otherwise the
+   * tab is updated (saved already, or compare again) and nothing is replaced.
+   */
+  const stillShown = useCallback(async (filePath: string, compared: string): Promise<boolean> => {
+    const current = fileContentsRef.current.get(filePath)
+    if (!current) return false
+    const decision = decideCompareChoice(current, compared, await readFile(filePath))
+    if (decision.action === 'go') return true
+    if (decision.action === 'already-saved') markSaved(filePath, current.content)
+    else {
+      updateFile(filePath, f => ({
+        ...f,
+        external: decision.external,
+        missing: decision.external.kind === 'deleted',
+        comparing: decision.external.kind === 'changed',
+        changedWhileComparing: decision.external.kind === 'changed',
+      }))
+    }
+    return false
+  }, [fileContentsRef, markSaved, updateFile])
+
+  /**
+   * ［自分の版を保存］: keep the version that arrived in the backups, then write
+   * the tab's edits — in one press. No backup, no write.
+   */
+  const saveMine = useCallback(async (filePath: string, compared: string): Promise<boolean> => {
+    const content = fileContentsRef.current.get(filePath)?.content
+    if (content === undefined) return false
+    setError(null)
+    try {
+      if (!await stillShown(filePath, compared)) return false
+      const backup = rootPath ? await backupBeforeOverwrite(rootPath, filePath) : null
+      // 'missing': the file went after the check — there is nothing on disk to lose.
+      if (!backup?.success || (!backup.backupPath && backup.skipped !== 'missing')) {
+        setError('届いた版をバックアップに残せなかったため、保存していません。あなたの編集はこのタブにそのまま残っています。')
+        updateFile(filePath, f => ({ ...f, keepFailed: true }))
+        return false
+      }
+      // Changed again while it was being kept: what was kept is not what the member saw.
+      if (!await stillShown(filePath, compared)) return false
+      if (!await writeFile(filePath, content)) {
+        setError(await saveRefusal(filePath) ?? '保存に失敗しました')
+        return false
+      }
+      markSaved(filePath, content)
+      setNotice('あなたの版を保存しました。届いた版はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')
+      return true
+    } catch {
+      setError('保存できませんでした。少し待ってから、もう一度選んでください')
+      return false
+    }
+  }, [fileContentsRef, stillShown, rootPath, markSaved, setError, setNotice])
+
+  /**
+   * ［届いた版を採用］: keep the tab's edits in the backups, then show the version
+   * that arrived — in one press, no confirm. No backup, edits stay.
+   */
+  const takeArrived = useCallback(async (filePath: string, compared: string): Promise<boolean> => {
+    const edits = fileContentsRef.current.get(filePath)?.content
+    if (edits === undefined) return false
+    setError(null)
+    try {
+      if (!await stillShown(filePath, compared)) return false
+      const backup = rootPath ? await backupEdits(rootPath, filePath, edits) : null
+      if (!backup?.success || !backup.backupPath) {
+        setError('あなたの編集をバックアップに残せなかったため、届いた版にしていません。あなたの編集はこのタブにそのまま残っています。')
+        updateFile(filePath, f => ({ ...f, keepFailed: true }))
+        return false
+      }
+      // Typing went on while the edits were being kept: what was kept is not all of them.
+      if (fileContentsRef.current.get(filePath)?.content !== edits) {
+        setError('残している間に編集が続いたため、届いた版にしていません。もう一度選んでください。')
+        return false
+      }
+      // Changed again while the edits were being kept: show that one to compare, replace nothing.
+      if (!await stillShown(filePath, compared)) return false
+      const now = fileContentsRef.current.get(filePath)?.external
+      if (now?.kind !== 'changed' || now.diskContent !== compared) return false
+      // A watcher event in the meantime is newer than the read above: never mark it clean.
+      updateFile(filePath, f => (f.content !== edits || f.external?.kind !== 'changed' || f.external.diskContent !== compared ? f : {
+        ...f, content: compared, originalContent: compared, missing: false, external: undefined, comparing: false, changedWhileComparing: false, keepFailed: false,
+      }))
+      setNotice('届いた版にしました。あなたの編集はバックアップに残しています（タイトルバーの［バックアップ履歴］で見られます）')
+      return true
+    } catch {
+      setError('届いた版にできませんでした。少し待ってから、もう一度選んでください')
+      return false
+    }
+  }, [fileContentsRef, stillShown, rootPath, updateFile, setError, setNotice])
 
   // Auto save with debounce (1 second after last keystroke) — paused while
   // something changed on disk that the member has not decided about.
@@ -135,29 +221,29 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     await saveFile(activeFilePath, file.content, { interactive: true })
   }, [activeFilePath, hasChanges, fileContents, saveFile])
 
-  /** 「ディスクの内容を読み込む」: drop the tab's edits (after a confirm) for the disk version. Resolves true when loaded. */
-  const loadDiskVersion = useCallback(async (filePath: string): Promise<boolean> => {
-    const ok = await askConfirm({
-      title: 'ディスクの内容を読み込みますか？',
-      message: 'このタブでの編集内容は破棄され、いまのディスクの内容に置き換わります。',
-      confirmText: '編集を破棄して読み込む',
-      danger: true,
-    })
-    if (!ok) return false
-    const disk = await readFile(filePath)
-    if (disk === null) {
-      setError('ファイルを読み込めませんでした（削除された可能性があります）')
-      return false
-    }
-    updateFile(filePath, f => ({ ...f, content: disk, originalContent: disk, missing: false, external: undefined, keepMine: false }))
-    return true
-  }, [askConfirm, updateFile, setError])
-
-  /** Saves before closing — asking first if the file changed on disk; resolves false to keep the tab open. */
+  /**
+   * Saves before closing; resolves false to keep the tab open. A file changed
+   * on disk is not closed: its compare view opens (`showFile`) so the member picks —
+   * unless neither version could be kept there (`keepFailed`): then, and only then,
+   * closing without saving is offered, saying the edits will not be kept.
+   */
   const saveBeforeClose = async (path: string): Promise<boolean> => {
     const file = fileContents.get(path)
     if (file && !file.isLoading && isDirty(file)) {
       const saved = await saveFile(path, file.content, { interactive: true })
+      const now = fileContentsRef.current.get(path)
+      if (!saved && now?.external?.kind === 'changed') {
+        if (!now.keepFailed) {
+          showFile(path)
+          return false
+        }
+        return askConfirm({
+          title: '保存せずに閉じますか？',
+          message: 'このファイルは、どちらの版もバックアップに残せませんでした。\n閉じると、この編集は残りません（バックアップ履歴にも入りません）。',
+          confirmText: '保存せずに閉じる',
+          danger: true,
+        })
+      }
       if (!saved) {
         const discard = await askConfirm({
           title: '保存せずに閉じますか？',
@@ -186,5 +272,5 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
 
   const answerConfirm = (ok: boolean) => { confirmRequest?.resolve(ok); setConfirmRequest(null) }
 
-  return { hasChanges, handleSave, loadDiskVersion, saveBeforeClose, confirmRequest, answerConfirm }
+  return { hasChanges, handleSave, saveMine, takeArrived, saveBeforeClose, confirmRequest, answerConfirm }
 }

@@ -144,7 +144,6 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.insertText('\n私の追記')
       await page.getByTestId('external-edit').click()
       const banner = page.locator('[data-external-change]')
-      await banner.getByRole('button', { name: '自分の編集を残す' }).click()
       await expect(banner).toContainText('自動保存は止めています')
       expect(await style(banner, 'backgroundColor')).toBe(await token(page, 'warning-bg'))
       expect(await style(banner, 'borderTopColor')).toBe(await token(page, 'warning-border'))
