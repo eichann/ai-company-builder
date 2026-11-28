@@ -77,6 +77,18 @@ test('refused because someone changed it first: says neither was changed, and of
   await expect(card(page).getByRole('button', { name: '返した', exact: true })).toBeVisible()
 })
 
+test('［取り消す］ after someone else changed the contact is refused: the card sends the versions the finish answered, never the ones it read later', async ({ page }) => {
+  await openPreview(page, 'inbox', { contact: 'changed' })
+  await openCard(page)
+  await card(page).getByRole('button', { name: '返した', exact: true }).click()
+  await expect(card(page).getByRole('status')).toContainText('返したことにしました')
+  // The card has read the contact again (version 9 now); the undo still names 8, so the change in between is not taken back.
+  await card(page).getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toHaveText('undo {"interaction":{"version":8,"expectedVersion":8},"replyRequest":{"id":"reply_request-prev01a","version":5,"expectedVersion":5}}')
+  await expect(card(page).getByRole('alert')).toContainText('ほかの人か AI が先に変えたため、取り消せませんでした（どちらもそのままです）')
+  await expect(card(page).getByRole('button', { name: '取り消す' })).toHaveCount(0)
+})
+
 test('a contact whose reply is over with a やること left is in 「確認したもの」 and its card lists the やること', async ({ page }) => {
   await openPreview(page, 'inbox', { contact: 'made' })
   await expect(row(page)).toHaveCount(0)

@@ -122,7 +122,7 @@ const planView = (id: string): BrowserPlanView => ({
 
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
-// `?contact=own|draft|waiting|other|made|conflict`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
+// `?contact=own|draft|waiting|other|made|conflict|changed`: 「連絡」1枚 (inbox.md "One contact") — a 来た連絡 and its 返事のお願い, each
 // with a notice; a fake server keeps the two records like the real one (one finish ends both, its undo brings both back,
 // `conflict` refuses the finish as 「先に変えた」). What a press sent shows in `#acted`. Synthetic data only.
 const CONTACT = params.get('contact')
@@ -168,12 +168,19 @@ function finishOnServer(input: ContactFinishRequest): ContactFinishAnswer {
     interaction: settles ? { ...now.interaction, state: 'handled', version: now.interaction.version + 1, maySettle: false } : now.interaction,
     replyRequests: [{ ...reply, state: input.replyRequest.action === 'drop' ? 'dropped' : 'closed', version: reply.version + 1, drafts: [], may: { replied_elsewhere: false, close: false, drop: false } }],
   }
+  // `?contact=changed`: someone (another person, the AI) changes the contact right after the finish answered.
+  if (CONTACT === 'changed') contactNow = { ...contactNow, interaction: { ...contactNow.interaction, version: contactNow.interaction.version + 1 } }
   return { success: true, result: {
     interaction: settles ? { recordId: IID, outcome: 'done', state: 'handled', recordVersion: now.interaction.version + 1, version: now.interaction.version + 1 } : { recordId: IID, outcome: 'unchanged', state: now.interaction.state, recordVersion: now.interaction.version, version: null },
     replyRequest: { recordId: RID, outcome: 'done', state: contactNow.replyRequests[0].state, recordVersion: reply.version + 1, version: reply.version + 1 },
   } }
 }
 function undoOnServer(input: ContactUndoRequest): ContactUndoAnswer {
+  // Like the engine's undo: the version the card saw must still be the record's (something changed since → refused).
+  const now = contactNow!
+  if ((input.interaction && input.interaction.expectedVersion !== now.interaction.version) || input.replyRequest.expectedVersion !== now.replyRequests[0].version) {
+    return { success: false, offline: false, gone: false, code: 'VERSION_CONFLICT', part: 'interaction', error: 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください' }
+  }
   const before = contactBefore!
   contactNow = { ...before, interaction: { ...before.interaction, version: before.interaction.version + (input.interaction ? 2 : 0) }, replyRequests: before.replyRequests.map(r => ({ ...r, version: r.version + 2 })) }
   contactBefore = null

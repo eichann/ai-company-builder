@@ -136,21 +136,10 @@ export function finishRequestOf(view: ContactView, button: Extract<ContactButton
 }
 
 /**
- * ［取り消す］ at the versions the card shows now (it read the contact again after the press): a note written after the
- * answer — 「Gmail でもアーカイブしました」 on the contact — moves the version without changing anything, and the server
- * still refuses an undo when something did change since the entry (`CHANGED_SINCE`). A part the view no longer has keeps
- * the answer's version.
+ * What ［取り消す］ sends: each part's entry and the record's version the finish answered — never a version read later,
+ * so a change someone made in between (a person, the AI) refuses the undo instead of being taken back with it. Nothing to
+ * take back → null.
  */
-export function undoAtShown(req: ContactUndoRequest, view: ContactView | undefined): ContactUndoRequest {
-  if (!view) return req
-  const reply = view.replyRequests.find(r => r.id === req.replyRequest.id)
-  return {
-    ...(req.interaction ? { interaction: { ...req.interaction, expectedVersion: view.interaction.version } } : {}),
-    replyRequest: { ...req.replyRequest, expectedVersion: reply?.version ?? req.replyRequest.expectedVersion },
-  }
-}
-
-/** What ［取り消す］ sends: each part's entry and the record's version now. Nothing to take back → null. */
 export function undoRequestOf(r: ContactFinishResult): ContactUndoRequest | null {
   const rr = r.replyRequest
   if (rr.version === null) return null

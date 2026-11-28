@@ -484,9 +484,13 @@ pressing each record's own action.
   a dialog). A button whose action the server did not allow is not drawn; someone else's open 返事のお願い is one read-only
   line (「田中さんが返します（期限 12/2）」, the name from the task list's members through AppShell, else 「ほかの人」). The card
   acts on the first open 返事のお願い the member may finish. ［取り消す］ after a press sends both entries
-  (`undoRequestOf`: the contact's only when its part was written) at the versions the card shows then (`undoAtShown`: a note
-  written after the answer, such as 「Gmail でもアーカイブしました」, moves the contact's version without changing it; the
-  server's `CHANGED_SINCE` still refuses a real change); every refusal says 「どちらも変えていません」 / 「どちらもそのままです」
+  (`undoRequestOf`: the contact's only when its part was written) at **the versions the finish answered**, never ones read
+  later: the engine's undo takes back the entry's own fields only when nothing moved the record since (`expectedVersion`
+  = its latest version; `CHANGED_SINCE` compares only the entry's own fields, so a change that came back to the same
+  value, or one of another field, would pass it) — a change by another person or the AI in between refuses the undo
+  (`contact-card.spec.ts` 「［取り消す］ after someone else changed…」). A quiet note written after the answer (the inbox's
+  「Gmail でもアーカイブしました」) also moves the version: the server's contact undo passes over such notes alone
+  (main-bound server PR, "One contact" above); every refusal says 「どちらも変えていません」 / 「どちらもそのままです」
   (both or neither); a press that did not reach the server (or whose answer was lost) says to check what is shown and
   offers ［もう一度送る］ — the same request; the server answers `already` for a part it wrote, with the entry to undo — and
   an undo not reached keeps ［取り消す］; two clicks before the next draw are one press; every press reads the contact again,

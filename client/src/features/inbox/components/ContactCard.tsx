@@ -5,7 +5,7 @@ import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { CALM, NEXT_STEP } from '../../../../shared/thing-words'
 import { finishContact, undoContactFinish, type ContactWrites } from '../api'
-import { contactLook, finishRequestOf, undoAtShown, type ContactButton, type ContactTone } from '../contactModel'
+import { contactLook, finishRequestOf, type ContactButton, type ContactTone } from '../contactModel'
 import { pressFinish, pressUndo, type ContactResend, type ContactSaid } from '../contactPress'
 import type { ContactStore, EraPort } from '../contactStore'
 import { useContacts } from '../hooks/useContacts'
@@ -70,8 +70,8 @@ export function ContactCard({ companyId, contactId, store, readKey, writes, name
   }
   const undo = () => run(async () => {
     if (!said?.undo) return
-    // At the versions shown now: the card read the contact again after the press.
-    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), undoAtShown(said.undo, view), { era, say: setSaid, reread })
+    // At the versions the finish answered (`undoRequestOf`): a change made in between refuses it on the server.
+    await pressUndo(req => undoContactFinish(companyId, view.interaction.id, req, writes), said.undo, { era, say: setSaid, reread })
   })
   const press = (b: ContactButton) => {
     if (b.kind === 'checkDraft') onCheckDraft(b.draftId)
