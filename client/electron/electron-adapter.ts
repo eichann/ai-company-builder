@@ -5,11 +5,12 @@
 
 import path from 'path'
 import { pathToFileURL } from 'url'
-import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebFrameMain, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget, localVideoTarget, videoFileResponse } from './local-file-protocol'
 import { MEDIA_SCHEME } from '../shared/video-files'
 import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
+import { srcdocFrameNavigationAllowed } from '../shared/srcdoc-frames'
 import type { PluginFileServer } from './features/plugins/protocol'
 import { DOC_SCHEME } from '../shared/doc-frame'
 import { DRIVE_PLAYER_SCHEME } from '../shared/doc-drive-player'
@@ -109,6 +110,7 @@ export interface WindowBounds { x?: number; y?: number; width: number; height: n
  * own browser instead (http / https only; anything else is just refused).
  * Without this, Electron opened such links in a new app window. Only the main
  * frame: the PDF preview's iframe is Chromium's viewer and navigates itself.
+ * Subframes: a plugin's frame and a frame showing a srcdoc (a rich reply) navigate nowhere.
  */
 export function keepAppPageInWindow(contents: WebContents, page: AppPage): void {
   const openInBrowser = (url: string) => {
@@ -126,10 +128,27 @@ export function keepAppPageInWindow(contents: WebContents, page: AppPage): void 
     if (!isPluginAddress(event.url)) openInBrowser(event.url)
   })
   // A frame showing a plugin's page navigates nowhere; only the app's own frames load one (plugin-frame.md).
+  // A frame showing a srcdoc (a rich reply) stays on it: main's backstop behind the renderer's (srcdoc-frames.ts).
   contents.on('will-frame-navigate', event => {
     if (event.isMainFrame) return
-    if (!pluginFrameNavigationAllowed(event.frame?.url, event.url)) event.preventDefault()
+    const from = event.frame?.url
+    const srcdocOk = srcdocFrameNavigationAllowed({ frameUrl: from, ancestorUrls: ancestorUrls(event.frame), initiatorUrl: frameUrl(event.initiator), targetUrl: event.url })
+    if (!srcdocOk || !pluginFrameNavigationAllowed(from, event.url)) event.preventDefault()
   })
+}
+
+/** A frame's address; a frame already gone reads as none. */
+function frameUrl(frame: WebFrameMain | null | undefined): string | undefined {
+  try { return frame?.url } catch { return undefined }
+}
+
+/** Where each frame above `frame` is, its parent first. */
+function ancestorUrls(frame: WebFrameMain | null | undefined): string[] {
+  const urls: string[] = []
+  try {
+    for (let above = frame?.parent; above; above = above.parent) urls.push(above.url)
+  } catch { /* a frame gone meanwhile: what was read stands */ }
+  return urls
 }
 
 /** Saved bounds only when they still lie on a connected display (a monitor may be gone); else only the size. */
