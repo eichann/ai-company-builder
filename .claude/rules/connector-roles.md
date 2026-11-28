@@ -58,7 +58,7 @@ the company's on / off (Google: its client's `enabled`) and the operator's stop 
 (`<PLUGINS_DIR>/stopped` naming `google` or `*`). Google stays where its code is (`google-*.ts`,
 plan §5-2); it registers with `usable` = set up, on, vault on, not operator-stopped
 (`googleConnector.usable`). Google serves `calendar` read, `mail` read + send (capability `sent_samples`: `google-writing.ts`), `meetings` read
-(capabilities `transcript`, `attendees`). Slack serves `chat` receive + reply (`slack-connector.md`;
+(capabilities `transcript`, `attendees`). Slack serves `chat` receive + reply (capability `sent_samples`: `slack-writing.ts`; `slack-connector.md`;
 usable = its app set up and on, vault on, not operator-stopped).
 
 The admin's 「つないでいるサービス」 (`services/core-connectors.ts`, `routes/core-connectors.ts`,

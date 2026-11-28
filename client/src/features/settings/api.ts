@@ -10,6 +10,7 @@ import type { WorkSwitch } from '../../../shared/work-switches'
 import type { BrowserRecordingEdit } from '../../../shared/browser-recorder'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
+import type { WritingAudience, WritingStyle } from '../../../../shared/core/writing-style'
 import { googlePermission } from '../../shared/lib/googlePermission'
 
 /** Reading on this computer: which git binary the app runs. */
@@ -302,4 +303,20 @@ export const browserRecordingCalls = (port: BrowserRecordingPort = window.electr
   edit: (companyId: string, change: BrowserRecordingEdit) => port.editBrowserRecording(companyId, change),
   send: (companyId: string) => port.sendBrowserRecording(companyId),
   discard: (companyId: string) => port.discardBrowserRecording(companyId),
+})
+
+/** 「返事の下書きを、わたしの書き方に合わせる」: the check and the member's own summaries, kept on this computer only. */
+export type WritingStyleReads = ElectronPort<'getWritingStyle'>
+/** Turning it on (main reads the member's sent messages through the server to make the summaries), correcting, removing. */
+export type WritingStyleWrites = ElectronPort<'setWritingStyleEnabled' | 'rebuildWritingStyle' | 'updateWritingStyle' | 'removeWritingStyle'>
+
+export function getWritingStyle(companyId: string, reads: WritingStyleReads = window.electronAPI) {
+  return reads.getWritingStyle(companyId)
+}
+
+export const writingStyleCalls = (port: WritingStyleWrites = window.electronAPI) => ({
+  setEnabled: (companyId: string, on: boolean) => port.setWritingStyleEnabled(companyId, on),
+  rebuild: (companyId: string) => port.rebuildWritingStyle(companyId),
+  update: (companyId: string, connectorId: string, audience: WritingAudience, style: WritingStyle) => port.updateWritingStyle(companyId, connectorId, audience, style),
+  remove: (companyId: string, connectorId?: string, audience?: WritingAudience) => port.removeWritingStyle(companyId, connectorId ?? null, audience ?? null),
 })

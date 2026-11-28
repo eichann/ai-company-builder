@@ -2212,8 +2212,3 @@ preload withdrawJobProposal -> invoke jobProposals:withdraw($0, $1)
 preload withdrawJobProposal : (companyId: string, proposalId: string) => Promise<JobProposalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
-unmatched.preloadApiUnusedByRenderer getWritingStyle
-unmatched.preloadApiUnusedByRenderer rebuildWritingStyle
-unmatched.preloadApiUnusedByRenderer removeWritingStyle
-unmatched.preloadApiUnusedByRenderer setWritingStyleEnabled
-unmatched.preloadApiUnusedByRenderer updateWritingStyle

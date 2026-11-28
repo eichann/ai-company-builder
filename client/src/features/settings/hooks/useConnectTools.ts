@@ -18,7 +18,8 @@ type Waiting =
 
 const slackKey = (s: MySlack | null) => (s ? `${s.connected}|${s.status}|${s.features.join()}` : '')
 
-export function useConnectTools(companyId: string) {
+/** `onConnected`: a connection just changed after the browser (the writing-style check makes its summaries again). */
+export function useConnectTools(companyId: string, onConnected?: () => void) {
   const [google, setGoogle] = useState<MyGoogle | null>(null)
   const [slack, setSlack] = useState<MySlack | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -53,10 +54,12 @@ export function useConnectTools(companyId: string) {
       if (waiting.service === 'google' && now.google && googleKey(now.google) !== waiting.before) {
         setWaiting(null)
         setMessage(googleDeclinedText(googleDeclined(waiting.asked, now.google)))
+        onConnected?.()
       }
       if (waiting.service === 'slack' && now.slack && slackKey(now.slack) !== waiting.before) {
         setWaiting(null)
         setMessage(null)
+        onConnected?.()
       }
     })
   }, waiting ? POLL_MS : null)

@@ -17,6 +17,10 @@ const CORE_FILES = [
   'server/src/services/writing-samples.ts',
   'server/src/routes/writing-samples.ts',
   'client/shared/writing-style.ts',
+  // The renderer's check and summaries (the tools' names are the labels the server answers).
+  'client/src/features/settings/writingStyle.ts',
+  'client/src/features/settings/hooks/useWritingStyle.ts',
+  'client/src/features/settings/components/WritingStyleSection.tsx',
   ...readdirSync(join(ROOT, 'client/electron/features/writing-style')).map(f => `client/electron/features/writing-style/${f}`),
 ]
 

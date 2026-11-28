@@ -87,7 +87,7 @@ export const BUILTIN_CONNECTORS = {
     label: 'Slack',
     summary: 'メンバーが自分で許可すると、自分あての DM とメンションを ACB が受け取り、本人が確かめた返事を送れます。大事な知らせを会社のボットが DM で届けます。',
     servings: [
-      { role: 'chat', operations: ['receive', 'reply'], capabilities: [] },
+      { role: 'chat', operations: ['receive', 'reply'], capabilities: ['sent_samples'] },
     ],
     capabilities: [],
     deliveryPlaces: [],

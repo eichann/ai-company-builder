@@ -55,6 +55,11 @@ const MAIL_TEXT_2 = '追加で THREAD-MARK-TWO もお願いします。'
 const SLACK_TEXT = 'Slack で THREAD-MARK-SLACK の件です'
 const SLACK_CHANNEL = 'C0SALES'
 const SLACK_ROOT = '1793400000.000100'
+const SHARED_CHANNEL = 'C0SHARED'
+const SATO_DM = 'D0SATODM'
+/** A Slack ts `days` (and `minutes`) ago: within the year the samples read back. */
+const slackTs = (days: number, minutes = 0) => `${Math.floor(Date.now() / 1000) - days * 86_400 + minutes * 60}.000100`
+const SHARED_ROOT = slackTs(1)
 const ts = () => new Date().toISOString()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,6 +71,7 @@ let kekDir: string, shelfDir: string
 const logLines: string[] = []
 let mailInteraction: string
 let chatInteraction: string
+let sharedInteraction: string
 
 async function call(user: string | null, method: string, path: string, body?: unknown) {
   currentUser.id = user
@@ -122,7 +128,24 @@ beforeAll(async () => {
 
   const seed = defaultSlackSeed()
   seed.users.push({ id: 'U0SATO', email: GOOGLE_SEED.member, teamId: 'T0DIV', name: '佐藤' }, { id: 'U0TANAKA', email: GOOGLE_SEED.colleague, teamId: 'T0DIV' })
-  seed.threads = [{ teamId: 'T0DIV', channel: SLACK_CHANNEL, ts: SLACK_ROOT, messages: [{ ts: SLACK_ROOT, user: 'U0ONE', text: `<@U0SATO> ${SLACK_TEXT}` }] }]
+  seed.threads = [
+    { teamId: 'T0DIV', channel: SLACK_CHANNEL, ts: SLACK_ROOT, messages: [{ ts: SLACK_ROOT, user: 'U0ONE', text: `<@U0SATO> ${SLACK_TEXT}` }] },
+    // A Slack Connect channel: U0THREE is of another workspace; Sato answered in the thread.
+    { teamId: 'T0DIV', channel: SHARED_CHANNEL, ts: SHARED_ROOT, messages: [
+      { ts: SHARED_ROOT, user: 'U0THREE', text: '<@U0SATO> THEIR-MARK-SHARED お願いします' },
+      { ts: slackTs(1, 1), user: 'U0SATO', text: 'SLACK-MARK-OUT 承知しました、確認します。' },
+    ] },
+  ]
+  // Sato's DM with a colleague (his own lines, a join notice, a bot's line), and a DM ACB never took anything in from.
+  seed.channels = [
+    { teamId: 'T0DIV', channel: SATO_DM, messages: [
+      { ts: slackTs(3), user: 'U0TWO', text: 'THEIR-MARK-DM 明日の件どうなってる？' },
+      { ts: slackTs(2, 5), user: 'U0SATO', text: 'SLACK-MARK-IN りょうかいです〜 <@U0TWO> にも共有します' },
+      { ts: slackTs(2, 4), user: 'U0SATO', text: 'SLACK-MARK-JOIN joined', subtype: 'channel_join' },
+      { ts: slackTs(2, 3), user: 'U0SATO', text: 'SLACK-MARK-BOT', bot_id: 'B0X' },
+    ] },
+    { teamId: 'T0DIV', channel: 'D0NEVER', messages: [{ ts: slackTs(1), user: 'U0SATO', text: 'SLACK-MARK-NEVER' }] },
+  ]
   slack = createFakeSlack(seed)
   slackServer = serve({ fetch: slack.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
@@ -190,6 +213,14 @@ beforeAll(async () => {
     occurredAt: '2026-11-02T03:00:00.000Z', subject: null, from: { address: 'slack:U0ONE' }, to: [{ address: 'slack-member:th-sato', memberId: 'th-sato' }],
   })).toBe('created')
   chatInteraction = interactionOf(`${SLACK_CHANNEL}:${SLACK_ROOT}`)
+  // The Slack Connect mention and the colleague's DM, as Slack's events bring them to the inbox (pointers only).
+  for (const [channel, at, from] of [[SHARED_CHANNEL, SHARED_ROOT, 'U0THREE'], [SATO_DM, slackTs(3), 'U0TWO']] as const) {
+    expect(services.inbox.receive(CO, 'th-sato', {
+      channel: 'chat', messageId: `${channel}:${at}`, references: [], threadRef: `slack:${channel}:${at}`, sourceRef: `slack:${channel}:${at}`,
+      occurredAt: new Date(Number(at) * 1000).toISOString(), subject: null, from: { address: `slack:${from}` }, to: [{ address: 'slack-member:th-sato', memberId: 'th-sato' }],
+    })).toBe('created')
+  }
+  sharedInteraction = interactionOf(`${SHARED_CHANNEL}:${SHARED_ROOT}`)
 })
 
 afterAll(async () => {
@@ -234,9 +265,16 @@ describe('元のスレッド: read now, with the viewer\'s own permission, shown
     expect(r.body.data.thread).toMatchObject({ channel: 'chat', unavailable: null })
     expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual([`@佐藤 ${SLACK_TEXT}`])
     expect(r.body.data.thread.messages[0].mine).toBe(false)
-    // The chat role's connector has no 本人が送った文を読む yet: no summary key, the AI drafts as before.
-    expect(r.body.data.thread.writing).toBeNull()
+    // Everyone else in the thread is of the company's workspace: Slack's 身内 summary fits a reply.
+    expect(r.body.data.thread.writing).toEqual({ connectorId: 'slack', audience: 'inside' })
     expect((await person('th-tanaka', 'GET', `/threads/${chatInteraction}`)).status).toBe(404)
+  })
+
+  it('a Slack Connect thread (someone of another workspace): Slack\'s よそ summary fits', async () => {
+    const r = await person('th-sato', 'GET', `/threads/${sharedInteraction}`)
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual(['@佐藤 THEIR-MARK-SHARED お願いします', 'SLACK-MARK-OUT 承知しました、確認します。'])
+    expect(r.body.data.thread.writing).toEqual({ connectorId: 'slack', audience: 'outside' })
   })
 })
 
@@ -375,7 +413,7 @@ describe('a Slack reply into the thread', () => {
 describe('「わたしの書き方に合わせる」: the member\'s own sent mail, handed to their PC', () => {
   it('only with their own 受信を読む: their own words, 身内 / よそ by the company\'s domain, the quoted part cut off', async () => {
     const sources = await person('th-sato', 'GET', '/me/writing-sources')
-    expect(sources.body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: true }])
+    expect(sources.body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: true }, { connectorId: 'slack', label: 'Slack', readable: true }])
     const r = await person('th-sato', 'GET', '/me/writing-sources/google/samples')
     expect(r.status, r.text).toBe(200)
     expect(r.body.data.samples.map((x: Json) => [x.audience, x.text])).toEqual([
@@ -384,7 +422,7 @@ describe('「わたしの書き方に合わせる」: the member\'s own sent mai
     ])
     expect(r.text).not.toContain('QUOTED-MARK-THEIRS')
     // Tanaka allowed nothing: nothing of his is read, and never Sato's.
-    expect((await person('th-tanaka', 'GET', '/me/writing-sources')).body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: false }])
+    expect((await person('th-tanaka', 'GET', '/me/writing-sources')).body.data.sources).toEqual([{ connectorId: 'google', label: 'Google Workspace', readable: false }, { connectorId: 'slack', label: 'Slack', readable: false }])
     const tanaka = await person('th-tanaka', 'GET', '/me/writing-sources/google/samples')
     expect([tanaka.status, tanaka.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
   })
@@ -396,8 +434,41 @@ describe('「わたしの書き方に合わせる」: the member\'s own sent mai
     expect([r.status, r.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
     expect(google.requests.slice(before).filter(q => q.path.includes('/gmail/'))).toEqual([])
     expect((await person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: true })).status).toBe(200)
-    const slackId = await person('th-sato', 'GET', '/me/writing-sources/slack/samples')
-    expect([slackId.status, slackId.body.code]).toEqual([404, 'WRITING_SOURCE_NOT_FOUND'])
+    const other = await person('th-sato', 'GET', '/me/writing-sources/hubspot/samples')
+    expect([other.status, other.body.code]).toEqual([404, 'WRITING_SOURCE_NOT_FOUND'])
+  })
+
+  it('Slack: only the places ACB took in for her, her own plain messages, 身内 / よそ by workspace', async () => {
+    slack.reads.length = 0
+    const r = await person('th-sato', 'GET', '/me/writing-sources/slack/samples')
+    expect(r.status, r.text).toBe(200)
+    const samples = r.body.data.samples.map((x: Json) => [x.audience, x.text])
+    expect(samples).toContainEqual(['outside', 'SLACK-MARK-OUT 承知しました、確認します。'])
+    // A mention becomes 「@Slack の人」: no name is looked up for a sample.
+    expect(samples).toContainEqual(['inside', 'SLACK-MARK-IN りょうかいです〜 @Slack の人 にも共有します'])
+    // Never another's words, a join notice, a bot's line, or a DM ACB never took anything in from.
+    for (const mark of ['THEIR-MARK', 'SLACK-MARK-JOIN', 'SLACK-MARK-BOT', 'SLACK-MARK-NEVER', 'THREAD-MARK-SLACK']) expect(r.text).not.toContain(mark)
+    expect(slack.reads).not.toContain('conversations.history:D0NEVER')
+    expect(slack.reads).toContain(`conversations.history:${SATO_DM}`)
+    // Tanaka allowed no Slack: nothing of his is read.
+    const tanaka = await person('th-tanaka', 'GET', '/me/writing-sources/slack/samples')
+    expect([tanaka.status, tanaka.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
+  })
+
+  it('Slack with her 受信を読む off, or her 読む turned off: refused before anything is read', async () => {
+    const member = { companyId: CO, userId: 'th-sato', role: 'member' }
+    for (const [off, on] of [
+      [() => person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: false }), () => person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: true })],
+      [() => services.slackConnector.setFeature(member, { feature: 'read', on: false }), () => services.slackConnector.setFeature(member, { feature: 'read', on: true })],
+    ] as const) {
+      await off()
+      slack.reads.length = 0
+      const r = await person('th-sato', 'GET', '/me/writing-sources/slack/samples')
+      expect([r.status, r.body.code]).toEqual([409, 'WRITING_SOURCE_NOT_READABLE'])
+      expect(slack.reads).toEqual([])
+      await on()
+    }
+    expect((await person('th-sato', 'GET', '/me/writing-sources/slack/samples')).status).toBe(200)
   })
 })
 
@@ -405,7 +476,7 @@ describe('nothing of a thread is kept', () => {
   it('no table and no log line holds a thread\'s text', () => {
     const all = everyTable()
     const logs = logLines.join('\n')
-    for (const mark of ['THREAD-MARK-ONE', 'THREAD-MARK-TWO', 'THREAD-MARK-SLACK', 'WRITING-MARK-IN', 'WRITING-MARK-OUT']) {
+    for (const mark of ['THREAD-MARK-ONE', 'THREAD-MARK-TWO', 'THREAD-MARK-SLACK', 'WRITING-MARK-IN', 'WRITING-MARK-OUT', 'SLACK-MARK-IN', 'SLACK-MARK-OUT', 'THEIR-MARK']) {
       expect(all).not.toContain(mark)
       expect(logs).not.toContain(mark)
     }

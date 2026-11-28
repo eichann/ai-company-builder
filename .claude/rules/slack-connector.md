@@ -6,6 +6,7 @@ paths:
   - "server/src/services/slack-notices.ts"
   - "server/src/services/slack-chat.ts"
   - "server/src/services/slack-names.ts"
+  - "server/src/services/slack-writing.ts"
   - "server/src/routes/slack.ts"
   - "server/src/routes/slack-connection.ts"
   - "shared/core/slack.ts"
@@ -114,6 +115,13 @@ label, `<url>` → the url, then `&lt;` `&gt;` `&amp;` undone. It is text, never
 injection attempt). The AI reads the same plain text. `reply`: only with `reply` granted and not off;
 `chat.postMessage { channel, thread_ts, text }` (≤ 4,000), a write: never re-sent. Nothing stored
 or logged (`outbound-mail.md` "Replies").
+
+## The member's own messages (`services/slack-writing.ts`, `writing-style.md`)
+
+The `chat` serving declares `sent_samples`: for 「わたしの書き方に合わせる」 the member's own newest Slack messages are read,
+with the `read` scopes only (no `search:read`, no `*:read`), from the DMs and threads the inbox took in for them, and
+handed to their PC; 身内 / よそ by the authors' workspace. Nothing stored or logged. The thread read marks each message
+`external` (another workspace than the app's `team_id`) for the summary key.
 
 ## Names (`services/slack-names.ts`)
 

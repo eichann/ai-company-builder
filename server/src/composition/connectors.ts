@@ -38,6 +38,7 @@ import { createSlackNames } from '../services/slack-names'
 import { createSlackNotices } from '../services/slack-notices'
 import { createThreadService } from '../services/threads'
 import { createGoogleSentSamples } from '../services/google-writing'
+import { createSlackSentSamples } from '../services/slack-writing'
 import { createWritingSamples } from '../services/writing-samples'
 import type { ReplySent } from '../services/outbound-mail'
 import type { ConnectorRoleChoiceRepository } from '../ports/connector-roles'
@@ -205,6 +206,9 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
     internalDomains: companyId => deps.internalDomains(companyId),
     emailOf,
     nowMs: () => clock.nowMs(),
+  }))
+  writingSamples.register(BUILTIN_CONNECTORS.slack.id, createSlackSentSamples({
+    slack: slackClient, companyData, slackData, readsIncoming: deps.readsIncoming, nowMs: () => clock.nowMs(),
   }))
 
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now through the roles, with the viewer's own permission.

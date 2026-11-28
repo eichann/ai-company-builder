@@ -73,8 +73,8 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   const generation = new Map<string, number>()
   /** When a stale summary's making was last started from a thread read, per account and company (memory only). */
   const refreshTried = new Map<string, number>()
-  /** Builds running, per account and company: one at a time. */
-  const building = new Map<string, { job: Promise<void>; generation: number }>()
+  /** Builds running, per account and company: one at a time (`full`: every summary, else only the missing or stale). */
+  const building = new Map<string, { job: Promise<void>; generation: number; full: boolean }>()
   /** Still the sign-in a piece of work started under. */
   const sameSignIn = (userId: string, session: unknown) => deps.userId() === userId && (deps.session?.() ?? null) === session
 
@@ -99,16 +99,17 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   }
 
   /**
-   * Make every summary again from the member's newest sent messages. Only connectors readable now keep a summary;
-   * an audience with too few messages has none. Written only when the same account is still signed in.
+   * Make every summary again from the member's newest sent messages (`full`), or only the ones missing or older than a
+   * month (a thread read: a fresh summary is never made twice). Only connectors readable now keep a summary; an
+   * audience with too few messages has none. Written only when the same account is still signed in.
    */
-  async function build(userId: string, companyId: string): Promise<void> {
+  async function build(userId: string, companyId: string, full = true): Promise<void> {
     const key = `${userId}\u0000${companyId}`
     const running = building.get(key)
     const startedAt = generation.get(key) ?? 0
     if (running) {
-      // One started before a 「消す」 saves nothing: this press makes them again after it.
-      return running.generation === startedAt ? running.job : running.job.then(() => build(userId, companyId))
+      // One started before a 「消す」 saves nothing, and one making only the missing ones is not 「作り直す」: this one runs after it.
+      return running.generation === startedAt && (running.full || !full) ? running.job : running.job.then(() => build(userId, companyId, full))
     }
     const session = deps.session?.() ?? null
     const current = () => (generation.get(key) ?? 0) === startedAt && sameSignIn(userId, session)
@@ -125,8 +126,17 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       // Pairs whose making failed for a passing reason (offline, the server or the AI not answering): the kept one stays.
       const keepOld = new Set<string>()
       const controller = new AbortController()
+      /** Kept and made within the month: a thread read's making leaves it as it is. */
+      const fresh = (connectorId: string, a: WritingAudience) => {
+        const k = before.styles[connectorId]?.[a]
+        return !full && k !== undefined && !writingStyleStale(k, now())
+      }
       for (const source of sources.sources) {
         if (!source.readable || !isWritingConnectorId(source.connectorId)) continue
+        if (WRITING_AUDIENCES.every(a => fresh(source.connectorId, a))) {
+          for (const a of WRITING_AUDIENCES) keepOld.add(`${source.connectorId}:${a}`)
+          continue
+        }
         const r = await deps.server.samples(companyId, source.connectorId)
         // 409 / 404: no longer readable or served — its summaries go. Anything else passes: they stay.
         if (!r || (!r.ok && r.status !== 409 && r.status !== 404)) {
@@ -138,8 +148,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
         const samples = r.value.samples
         const audiences = audiencesToSummarize(samples)
         if (audiences.length < WRITING_AUDIENCES.length) few = true
+        for (const a of WRITING_AUDIENCES) if (fresh(source.connectorId, a)) keepOld.add(`${source.connectorId}:${a}`)
         for (const audience of audiences) {
-          if (before.styles[source.connectorId]?.[audience]?.edited) continue
+          if (before.styles[source.connectorId]?.[audience]?.edited || fresh(source.connectorId, audience)) continue
           if (deps.aiAllowed?.() === false) { failed = true; keepOld.add(`${source.connectorId}:${audience}`); continue }
           const mine = samples.filter(s => s.audience === audience)
           let style: WritingStyle | null = null
@@ -170,7 +181,7 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       log.info(`[writing-style] made ${made} summaries`)
     })().catch(() => { log.warn('[writing-style] making the summaries failed') })
       .finally(() => building.delete(key))
-    building.set(key, { job, generation: startedAt })
+    building.set(key, { job, generation: startedAt, full })
     return job
   }
 
@@ -258,8 +269,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     /**
      * What the drafting AI of one turn is handed beside a thread it reads for a reply, bound to the sign-in the turn
      * started under (another sign-in since: nothing): the member's own summary for the thread's connector and audience
-     * (or the other audience standing in), only while the check is on. A month-old one is made again in the background
-     * (at most every `REFRESH_RETRY_MS`); this answer uses what is kept.
+     * (or the other audience standing in), only while the check is on. A month-old one, or none yet for the thread's
+     * connector (a tool connected or allowed after the check was turned on), is made in the background (only those; at
+     * most every `REFRESH_RETRY_MS`); this answer uses what is kept.
      */
     forTurn(companyId: string): ((key: WritingStyleKey | null | undefined) => string | null) | null {
       const userId = deps.userId()
@@ -270,11 +282,12 @@ export function createWritingStyles(deps: WritingStylesDeps) {
         const kept = read(userId, companyId)
         if (!kept.enabled) return null
         const tryKey = `${userId}\u0000${companyId}`
-        if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
-          && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
-          // Tried at most every few hours: a making that keeps failing never costs one AI call per thread read.
+        const stale = Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
+        const missing = !Object.prototype.hasOwnProperty.call(kept.styles, key.connectorId)
+        if ((stale || missing) && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
+          // Tried at most every few hours: a making that keeps failing (or too few messages) never costs a read per thread.
           refreshTried.set(tryKey, now())
-          void build(userId, companyId)
+          void build(userId, companyId, false)
         }
         const choice = chooseWritingStyle(kept.styles, key.connectorId, key.audience)
         return choice ? writingStyleForAi(choice) : null
