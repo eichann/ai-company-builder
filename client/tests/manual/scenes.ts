@@ -2333,8 +2333,8 @@ export const scenes: Scene[] = [
       { click: 'role=button[name="比べて選ぶ"]' }, { waitFor: 'role=button[name="自分の版を保存"]' },
     ],
     annotations: [
-      { box: 'role=button[name="届いた版を採用"]' }, { marker: { target: 'role=button[name="届いた版を採用"]', label: '1', at: 'above' } },
-      { box: 'role=button[name="自分の版を保存"]' }, { marker: { target: 'role=button[name="自分の版を保存"]', label: '2', at: 'above' } },
+      { box: 'role=button[name="届いた版を採用"]' }, { marker: { target: 'role=button[name="届いた版を採用"]', label: '1', at: 'top-left' } },
+      { box: 'role=button[name="自分の版を保存"]' }, { marker: { target: 'role=button[name="自分の版を保存"]', label: '2', at: 'top-left' } },
     ],
   },
 
