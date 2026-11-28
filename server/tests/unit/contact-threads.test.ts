@@ -21,7 +21,7 @@ import { ensureCoreTypes } from '../../src/services/record-index'
 import { createRecordEngine, createServiceRecordWriter, type RecordEngine, type ServiceActor } from '../../src/services/record-engine'
 import { createIdentityService } from '../../src/services/identities'
 import { createInboxService, type InboxService } from '../../src/services/inbox'
-import { createContactThreads, type ContactThreads } from '../../src/services/contact-threads'
+import { CONTACT_READ_LIMIT, createContactThreads, type ContactThreads } from '../../src/services/contact-threads'
 import type { Member } from '../../src/services/access'
 import { defaultTaskSettings } from '../../../shared/core/task-settings'
 import { AI_ASKED_PER_TURN } from '../../../shared/core/record-types'
@@ -182,6 +182,20 @@ describe('the contact as one card (view)', () => {
   })
 })
 
+describe('a contact with very many linked records', () => {
+  it('says `truncated` rather than look complete', () => {
+    const c = contactWithReply()
+    expect(ok(contacts.view(m('u-alice'), c.id)).truncated).toBeUndefined()
+    for (let i = 0; i < CONTACT_READ_LIMIT + 1; i++) {
+      const t = writer.create('a', { type: 'task', title: `仕事 ${i}`, personalOwner: 'u-alice', fields: { assignee: 'u-alice', requested_by: 'u-alice' }, links: { interaction: [c.id] }, actor: { id: 'u-alice', kind: 'human', source: null }, quiet: true })
+      if (!t.ok) throw new Error(t.reason)
+    }
+    const v = ok(contacts.view(m('u-alice'), c.id))
+    expect(v.truncated).toBe(true)
+    expect(v.tasks).toHaveLength(CONTACT_READ_LIMIT)
+  })
+})
+
 describe('a members-only contact (「この人たちだけ」)', () => {
   it('its listed members read the card, owners and admins do not; inside, each reads only what is theirs; only its 担当 may finish', async () => {
     const made = writer.create('a', {
@@ -318,6 +332,16 @@ describe('finish: the 返事のお願い and the contact together (both or neith
     const c = unsureWithReply()
     const body = finishBody(c)
     ok(await engine.act(m('u-alice'), { kind: 'ai', source: 'claude-code' }, c.rr, 'set_due', { expectedVersion: stateOf(c.rr).version, args: { due: '2026-11-20' } }))
+    expect(await contacts.finish(m('u-alice'), PERSON, c.id, body)).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT', part: 'replyRequest' } })
+    expect(stateOf(c.id).state).toBe('unsure')
+    expect(stateOf(c.rr).state).toBe('preparing')
+  })
+
+  it('her own change taken back since (an undo, a reopen): a retry with the old card is VERSION_CONFLICT, never `already`, and the contact stays', async () => {
+    const c = unsureWithReply()
+    const body = finishBody(c)
+    const closed = ok(await engine.act(m('u-alice'), PERSON, c.rr, 'replied_elsewhere', { expectedVersion: body.replyRequest.expectedVersion }))
+    ok(engine.undo(m('u-alice'), PERSON, c.rr, { version: closed.entry!.version, expectedVersion: stateOf(c.rr).version }))
     expect(await contacts.finish(m('u-alice'), PERSON, c.id, body)).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT', part: 'replyRequest' } })
     expect(stateOf(c.id).state).toBe('unsure')
     expect(stateOf(c.rr).state).toBe('preparing')

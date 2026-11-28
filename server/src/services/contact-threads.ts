@@ -36,7 +36,8 @@ export const CONTACT_REPLY_ENDS: readonly ContactReplyEnd[] = ['replied_elsewher
 const SETTLE = 'settle'
 const SETTLE_FROM = 'unsure'
 const REPLY_FINAL = ['closed', 'dropped']
-const READ_LIMIT = 50
+/** At most this many linked records of one type are read for one contact; beyond it the view says `truncated`. */
+export const CONTACT_READ_LIMIT = 200
 
 export const NOT_THIS_CONTACT = { error: 'この返事のお願いは、この連絡のものではありません。画面を読み直してください', code: 'NOT_THIS_CONTACT' } as const
 export const NOT_A_FINISH = { error: 'この変更は連絡の［返した］・［済んだ］ではないため、ここからは取り消せません', code: 'NOT_A_FINISH' } as const
@@ -81,10 +82,15 @@ export function createContactThreads(deps: ContactThreadDeps) {
   const interactionOf = (handle: CompanyData, replyRequestId: string): string | null =>
     handle.records.linksFrom([replyRequestId]).find(l => l.name === 'interaction' && l.targetId)?.targetId ?? null
 
-  /** The records of `type` linking the contact by `link`, live and read by the member. */
-  function linkedTo(handle: CompanyData, reader: RecordReader, interactionId: string, type: string, link: string): RecordRow[] {
-    const ids = handle.records.candidates({ types: [type], link: { name: link, id: interactionId } }, READ_LIMIT).map(r => r.id)
-    return handle.records.byIds(ids).filter(r => r.removedAt === null && reader.record(r))
+  /**
+   * The records of `type` linking the contact by `link`, live and read by the member. `cut` is set when more were linked
+   * than `CONTACT_READ_LIMIT` (counted before the reader: the flag tells nothing of who reads them), so the view never
+   * looks complete when it is not (review of this PR).
+   */
+  function linkedTo(handle: CompanyData, reader: RecordReader, interactionId: string, type: string, link: string, cut: { truncated: boolean }): RecordRow[] {
+    const found = handle.records.candidates({ types: [type], link: { name: link, id: interactionId } }, CONTACT_READ_LIMIT + 1)
+    if (found.length > CONTACT_READ_LIMIT) cut.truncated = true
+    return handle.records.byIds(found.slice(0, CONTACT_READ_LIMIT).map(r => r.id)).filter(r => r.removedAt === null && reader.record(r))
   }
 
   function partResult(handle: CompanyData, recordId: string, outcome: ContactPartResult['outcome'], version: number | null): ContactPartResult {
@@ -97,8 +103,13 @@ export function createContactThreads(deps: ContactThreadDeps) {
    * press (the request seen twice)? Then that entry — the "done" record — else null (someone else changed it: stale).
    */
   function alreadyWritten(handle: CompanyData, recordId: string, expectedVersion: number, action: string, member: Member): number | null {
-    const next = handle.records.ledger(recordId).find(e => e.version === expectedVersion + 1)
-    return next && next.action === action && next.actorId === member.userId && next.actorKind === 'human' ? next.version : null
+    const ledger = handle.records.ledger(recordId)
+    const next = ledger.find(e => e.version === expectedVersion + 1)
+    if (!next || next.action !== action || next.actorId !== member.userId || next.actorKind !== 'human') return null
+    // …and still in force: nothing after it moved the state (a reopen, an undo, the thread going on — review of this PR:
+    // a retry would else answer `already` for a change taken back). Notes after it (the mailbox's 「Gmail でもアーカイブ
+    // しました」, a draft's discard) change no state and keep it.
+    return ledger.some(e => e.version > next.version && e.fromState !== e.toState) ? null : next.version
   }
 
   return {
@@ -114,6 +125,7 @@ export function createContactThreads(deps: ContactThreadDeps) {
         })()
       if (!asked) return notFound()
       const cur = stateOf(handle, asked.id)
+      const cut = { truncated: false }
       const maySettle = deps.engine.whoMay(member, asked.id, [SETTLE])?.may[SETTLE] === true
       // The card's own reply drafts to this contact, and each request's prepared ones: still 下書き, read by the member.
       const draftsOf = (ids: string[]) => handle.records.byIds([...new Set(ids)])
@@ -121,8 +133,8 @@ export function createContactThreads(deps: ContactThreadDeps) {
         .map(r => ({ id: r.id, ...stateOf(handle, r.id) }))
         .filter(d => d.state === 'draft')
         .map(d => ({ id: d.id, version: d.version }))
-      const threadDrafts = linkedTo(handle, reader, asked.id, 'outbound_message', 'interaction').map(r => r.id)
-      const replyRequests: ContactReplyView[] = linkedTo(handle, reader, asked.id, 'reply_request', 'interaction').map(r => {
+      const threadDrafts = linkedTo(handle, reader, asked.id, 'outbound_message', 'interaction', cut).map(r => r.id)
+      const replyRequests: ContactReplyView[] = linkedTo(handle, reader, asked.id, 'reply_request', 'interaction', cut).map(r => {
         const s = stateOf(handle, r.id)
         const prepared = handle.records.linksFrom([r.id]).filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string)
         const may = deps.engine.whoMay(member, r.id, CONTACT_REPLY_ENDS)?.may
@@ -134,13 +146,14 @@ export function createContactThreads(deps: ContactThreadDeps) {
         }
       })
       replyRequests.sort((a, b) => Number(REPLY_FINAL.includes(a.state ?? '')) - Number(REPLY_FINAL.includes(b.state ?? '')))
-      const tasks = linkedTo(handle, reader, asked.id, 'task', 'interaction').map(t => {
+      const tasks = linkedTo(handle, reader, asked.id, 'task', 'interaction', cut).map(t => {
         const s = stateOf(handle, t.id)
         return { id: t.id, title: t.title, state: s.state, version: s.version, assignee: str(s.fields.assignee) }
       })
       return ok({
         interaction: { id: asked.id, title: asked.title, state: cur.state, version: cur.version, assignee: str(cur.fields.assignee), maySettle },
         replyRequests, tasks,
+        ...(cut.truncated ? { truncated: true as const } : {}),
       })
     },
 

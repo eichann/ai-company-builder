@@ -304,8 +304,18 @@ export function acting(ctx: EngineContext) {
         throw error
       }
       if (lost) return withStep(lost.result === false ? conflict(VERSION_CONFLICT_TEXT, 'VERSION_CONFLICT') : lost.result, lost.step)
+      // Every one's follow-ups run even when an earlier one's throws (all are written by now); the first error is then
+      // thrown on, as a single action's would be.
       const answers: ActAnswer[] = []
-      for (const p of prepared) answers.push(p.unchanged ?? await p.finish())
+      let failure: { error: unknown } | null = null
+      for (const p of prepared) {
+        try {
+          answers.push(p.unchanged ?? await p.finish())
+        } catch (error) {
+          failure ??= { error }
+        }
+      }
+      if (failure) throw failure.error
       return ok(answers)
     },
   }

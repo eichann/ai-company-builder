@@ -256,6 +256,8 @@ export interface ContactView {
   replyRequests: ContactReplyView[]
   /** The やること made from it (`interaction` link) that the member reads. */
   tasks: Array<{ id: string; title: string; state: string | null; version: number; assignee: string | null }>
+  /** More records were linked than the server reads for one card (200 of a kind): the lists may be incomplete. */
+  truncated?: true
 }
 
 /** How the 返事のお願い ends: 「もう返した」, 「終わりにする」 (済んだ・もう待たない), 「返事をしない」 (note required). */

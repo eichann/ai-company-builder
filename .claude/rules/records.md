@@ -1978,7 +1978,7 @@ clock's, a separate service writing through the service writer: `notifications.m
   (`prepare` / `prepareUndo`: duties 1–2, every refusal, the entry; nothing written) and its write (duty 3:
   `writeAllOrNone` runs every write in **one transaction**, each with its own compare-and-set; the first refused or lost
   rolls all back — also the AI's per-turn count). Only after the commit does each tell, run `afterAct`, its history line
-  and `afterAction`, **in the order given**. A refusal carries `step` (which one). `act` / `undo` are the same code with
+  and `afterAction`, **in the order given** (each runs even when an earlier one throws; the first error is thrown on). A refusal carries `step` (which one). `act` / `undo` are the same code with
   one step, so nothing a single action does changes. `undoTogether` is a person's only (the AI's 「取り消して」 stays one
   entry). Not a cascade: the engine still never starts an action of its own; the caller names each one. Test:
   `server/tests/unit/contact-threads.test.ts` (refused while checking or while writing — a write that lost its

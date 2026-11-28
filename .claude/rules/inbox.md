@@ -419,7 +419,9 @@ pressing each record's own action.
   「返事をしない」), and the やること made from it (`interaction` link) that the member reads. Everything goes through
   `recordReader`: a contact the member cannot read (someone else's owner-only one — owners and admins included —, a
   members-only one they are not on, another company's) is the missing record's 404; inside a readable one, another
-  member's own やること or draft is simply absent. No body, no folder name.
+  member's own やること or draft is simply absent. No body, no folder name. At most `CONTACT_READ_LIMIT` (200) linked
+  records of a kind are read; beyond it the view says `truncated: true` (counted before the reader, so it says nothing
+  of who reads them) instead of looking complete.
 - **Finish** `POST /inbox/items/:interactionId/finish { interaction: { expectedVersion }, replyRequest: { id,
   expectedVersion, action: replied_elsewhere | close | drop, note? } }` — the card's ［返した］ (`replied_elsewhere`: the
   drafts are dropped by the existing `afterAct`), 返事待ち's ［済んだ（もう待たない）］ and 確かめ中's ［済んだ］ (`close`),
@@ -432,8 +434,9 @@ pressing each record's own action.
   (the refusal names `part`). The 返事のお願い is written first in the transaction and its follow-ups run first, so the
   contact's 「済んだ」 sees no open work (the mailbox archive's rule, "Mail archived in the mailbox").
 - **Twice, at the same time, already done, stale**: a part whose version is the one the card read is written; one whose
-  next ledger entry is **this same action by this member as a person** is `already` (a second press, a retry after a
-  lost answer — the ledger entry is the "done" record, nothing written again); anything else moved it (the AI, another
+  next ledger entry is **this same action by this member as a person, still in force** (no later entry moved the state:
+  an undo or a reopen since makes it stale; notes such as 「Gmail でもアーカイブしました」 do not) is `already` (a second
+  press, a retry after a lost answer — the ledger entry is the "done" record, nothing written again); anything else moved it (the AI, another
   press, the thread going on) → 409 `VERSION_CONFLICT` with that part's `version` and `part`, nothing written. Two
   presses at the same time: one writes both, the other loses a compare-and-set inside the transaction and writes
   nothing (`VERSION_CONFLICT`); its retry answers `already`. One part done before by the member's own press (the old
@@ -450,7 +453,7 @@ pressing each record's own action.
 - Tests: `server/tests/unit/contact-threads.test.ts` (the view per reader — owner-only, members-only, owner / admin /
   another company as missing, another's やること and draft absent —; finish on a judged and on a 確認待ち contact; refused
   while checking and while writing — a concurrent 「済んだ」, the AI's cap — with nothing written; twice; at the same
-  time; stale; her AI's same change is not `already`; one part done before; 「使う機能」 off; undo both, twice, changed
+  time; stale; a change taken back since is not `already`; her AI's same change is not `already`; one part done before; `truncated`; 「使う機能」 off; undo both, twice, changed
   since, only a finish's entries — mutation-checked), permission matrix rows + `CROSS`.
 
 ## Core types (`shared/core/core-types.ts`, reserved versions)
