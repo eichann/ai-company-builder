@@ -37,7 +37,13 @@ const MEMBER_TEXT_SOURCES = [
   'src/features/editor/components/EditorNotices.tsx',
   'src/features/editor/hooks/useFileSaving.ts',
   'src/features/settings/components/DownloadFoldersSection.tsx',
-  'src/features/company/components/FolderChoice.tsx',
+  // The join screen (its place, refusals and the working folder's notes) and the setup screen.
+  'src/features/company/components/JoinScreen.tsx',
+  'src/features/company/components/SetupProgress.tsx',
+  'src/features/company/components/DepartmentPicker.tsx',
+  'src/features/company/components/CompanySelector.tsx',
+  'src/features/company/folderSetup.ts',
+  'src/features/company/folderPlan.ts',
 ]
 
 /**
