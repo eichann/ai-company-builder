@@ -109,6 +109,7 @@ contract.invoke companySetup:openWorkingFolder
 contract.invoke config:getAgentEnvPassthrough
 contract.invoke config:getApiKeyStatus
 contract.invoke config:getAuthMode
+contract.invoke config:getBrowserOperatorToolset
 contract.invoke config:getClaudeCodeStatus
 contract.invoke config:getPermissionMode
 contract.invoke config:getServerUrl
@@ -116,6 +117,7 @@ contract.invoke config:hasApiKey
 contract.invoke config:setAgentEnvPassthrough
 contract.invoke config:setApiKey
 contract.invoke config:setAuthMode
+contract.invoke config:setBrowserOperatorToolset
 contract.invoke config:setPermissionMode
 contract.invoke config:setServerUrl
 contract.invoke config:validateServerUrl
@@ -490,6 +492,7 @@ contract.type ElectronAPI.getArchivedTasks = getArchivedTasks: Invoke<'tasks:arc
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
 contract.type ElectronAPI.getBrowserInspection = getBrowserInspection: Invoke<'browserLines:card'>
+contract.type ElectronAPI.getBrowserOperatorToolset = getBrowserOperatorToolset: Invoke<'config:getBrowserOperatorToolset'>
 contract.type ElectronAPI.getBrowserPc = getBrowserPc: Invoke<'browserDevice:get'>
 contract.type ElectronAPI.getBrowserPlan = getBrowserPlan: Invoke<'browserPlans:get'>
 contract.type ElectronAPI.getBrowserRecording = getBrowserRecording: Invoke<'browserRecording:get'>
@@ -677,6 +680,7 @@ contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundM
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setBrowserOperatorToolset = setBrowserOperatorToolset: Invoke<'config:setBrowserOperatorToolset'>
 contract.type ElectronAPI.setDocViewBounds = setDocViewBounds: Invoke<'docView:setBounds'>
 contract.type ElectronAPI.setDocViewReview = setDocViewReview: Invoke<'docView:review'>
 contract.type ElectronAPI.setDocViewZoom = setDocViewZoom: Invoke<'docView:setZoom'>
@@ -949,6 +953,7 @@ contract.type IpcInvokeChannels.'companySetup:openWorkingFolder' = 'companySetup
 contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
 contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
 contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
+contract.type IpcInvokeChannels.'config:getBrowserOperatorToolset' = 'config:getBrowserOperatorToolset': { args: []; result: BrowserOperatorToolset }
 contract.type IpcInvokeChannels.'config:getClaudeCodeStatus' = 'config:getClaudeCodeStatus': { args: [root?: string]; result: ClaudeCodeStatus }
 contract.type IpcInvokeChannels.'config:getPermissionMode' = 'config:getPermissionMode': { args: []; result: PermissionMode }
 contract.type IpcInvokeChannels.'config:getServerUrl' = 'config:getServerUrl': { args: []; result: string | null }
@@ -956,6 +961,7 @@ contract.type IpcInvokeChannels.'config:hasApiKey' = 'config:hasApiKey': { args:
 contract.type IpcInvokeChannels.'config:setAgentEnvPassthrough' = 'config:setAgentEnvPassthrough': { args: [names: string[]]; result: { names: string[]; invalid: string[]; denied: string[] } }
 contract.type IpcInvokeChannels.'config:setApiKey' = 'config:setApiKey': { args: [apiKey: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'config:setAuthMode' = 'config:setAuthMode': { args: [mode: AuthMode]; result: boolean }
+contract.type IpcInvokeChannels.'config:setBrowserOperatorToolset' = 'config:setBrowserOperatorToolset': { args: [toolset: BrowserOperatorToolset]; result: boolean }
 contract.type IpcInvokeChannels.'config:setPermissionMode' = 'config:setPermissionMode': { args: [mode: PermissionMode]; result: boolean }
 contract.type IpcInvokeChannels.'config:setServerUrl' = 'config:setServerUrl': { args: [url: string]; result: boolean }
 contract.type IpcInvokeChannels.'config:validateServerUrl' = 'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
@@ -1325,6 +1331,7 @@ main.handle companySetup:openWorkingFolder @ features/company-setup/ipc.ts (fold
 main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
 main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
 main.handle config:getAuthMode @ features/settings/ipc.ts ()
+main.handle config:getBrowserOperatorToolset @ features/settings/ipc.ts ()
 main.handle config:getClaudeCodeStatus @ features/settings/ipc.ts (root?: string)
 main.handle config:getPermissionMode @ features/settings/ipc.ts ()
 main.handle config:getServerUrl @ features/settings/ipc.ts ()
@@ -1332,6 +1339,7 @@ main.handle config:hasApiKey @ features/settings/ipc.ts ()
 main.handle config:setAgentEnvPassthrough @ features/settings/ipc.ts (names: string[])
 main.handle config:setApiKey @ features/settings/ipc.ts (apiKey: string)
 main.handle config:setAuthMode @ features/settings/ipc.ts (mode: 'claude-code' | 'codex' | 'api-key')
+main.handle config:setBrowserOperatorToolset @ features/settings/ipc.ts (toolset: BrowserOperatorToolset)
 main.handle config:setPermissionMode @ features/settings/ipc.ts (mode: PermissionMode)
 main.handle config:setServerUrl @ features/settings/ipc.ts (url: string)
 main.handle config:validateServerUrl @ features/settings/ipc.ts (url: string)
@@ -1706,6 +1714,8 @@ preload getAutoTurnSettings -> invoke aiTurns:settings($0)
 preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
 preload getBrowserInspection -> invoke browserLines:card($0, $1)
 preload getBrowserInspection : (companyId: string, planId: string) => Promise<BrowserInspectionGetResult>
+preload getBrowserOperatorToolset -> invoke config:getBrowserOperatorToolset()
+preload getBrowserOperatorToolset : () => Promise<"current" | "compact">
 preload getBrowserPc -> invoke browserDevice:get($0)
 preload getBrowserPc : (companyId: string) => Promise<BrowserPcResult>
 preload getBrowserPlan -> invoke browserPlans:get($0, $1)
@@ -2080,6 +2090,8 @@ preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setBrowserOperatorToolset -> invoke config:setBrowserOperatorToolset($0)
+preload setBrowserOperatorToolset : (toolset: "current" | "compact") => Promise<boolean>
 preload setDocViewBounds -> invoke docView:setBounds($0, $1)
 preload setDocViewBounds : (viewId: number, bounds: DocViewBounds | null) => Promise<void>
 preload setDocViewReview -> invoke docView:review($0, $1)

@@ -36,6 +36,7 @@ import { wireBrowserWork } from '../../electron/features/browser/work'
 import { createBrowserContext } from '../../electron/features/browser/context'
 import type { PreviewOperator } from '../../electron/features/browser/preview'
 import type { BrowserLinesAnswer } from '../../electron/features/browser/lines-api'
+import type { BrowserOperatorToolset } from '../../shared/browser-operator-toolsets'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
@@ -207,7 +208,10 @@ async function run() {
   result.browse = await browseScenarios(win, sites)
   result.work = await workScenarios(win, sites)
   result.workPress = await workPressScenario(win, sites)
-  result.workFlow = await workFlowScenario(win, sites)
+  result.workFlow = await workFlowScenario(win, sites, 'current')
+  // The same regression in the compact tool set (agent-browser.md "The operator's tool sets"): the site starts afresh.
+  sites.flow.length = 0
+  result.workFlowCompact = await workFlowScenario(win, sites, 'compact')
   result.verify = await verifyScenarios(win)
 
   // The login: a cookie and storage of the site, then cleared.
@@ -852,10 +856,20 @@ async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
  * each within its frame and once, must reach the site: any later guard that stops this flow fails it. Since the run's
  * promise (agent-browser.md "The run's promise", "Sent is not done") the Skill binds the registration's name and date to
  * the person's values and lists the copy's body: the promise is made, nothing is asked, the copy's id counts as made by
- * the run, and reading the copy back matches what was promised — "済みました".
+ * the run, and reading the copy back matches what was promised — "済みました". Run once per tool set (agent-browser.md "The
+ * operator's tool sets"): the operator answers in that set's words; its steps and stops are counted for comparison.
  */
-async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
-  const out: Record<string, unknown> = {}
+async function workFlowScenario(win: BrowserShellWindow, sites: Sites, toolset: BrowserOperatorToolset) {
+  const out: Record<string, unknown> = { toolset }
+  const toolsets: Array<string | null> = []
+  let stops = 0
+  // Today's action in the set's words (the compact set puts a value with `set`, whatever the element).
+  const inSet = (o: Record<string, unknown>): Record<string, unknown> => {
+    if (toolset !== 'compact') return o
+    if (o.do === 'type') return { do: 'set', ref: o.ref, value: o.text }
+    if (o.do === 'select') return { do: 'set', ref: o.ref, value: o.option }
+    return o
+  }
   await win.webContents.loadURL('https://op.test/flow')
   await wait(300)
   const RUN = `bf_${'f'.repeat(32)}`
@@ -907,7 +921,11 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
     async step(job) {
       const m = job.material as Material
       materials.push(m)
-      const answer = (o: unknown) => ({ ok: true as const, text: JSON.stringify(o) })
+      toolsets.push(job.toolset ?? null)
+      const answer = (o: Record<string, unknown>) => {
+        if (o.do === 'stop') stops++
+        return { ok: true as const, text: JSON.stringify(inSet(o)) }
+      }
       if (job.prompt === 'work-preview') {
         return answer({ do: 'plan', summary: '秋の回をコピーして登録します', affects: 'なし', values: [{ label: 'コピー元', value: '秋の回' }], unread: [] })
       }
@@ -950,6 +968,7 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
     registered: () => true, api: api as never, operator: () => operator, cliPath: () => '/bin/true', parentEnv: () => ({}),
     skillSteps: async () => ({ kind: 'text', text: STEPS }),
     writeStartMs: 200, pressGapMs: 300,
+    toolset: () => toolset,
   })
   const started = Date.now()
   const working = works.work({
@@ -971,6 +990,11 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
   out.workMaterials = materials.filter(m => m.phase === 'work').map(m => ({ person: m.person, steps: m.steps, plan: m.plan, request: m.request }))
   out.promises = promises
   out.checks = checks
+  // For comparing the tool sets: the operator's steps (the preview's and the work's), its stops and the set each was started with.
+  out.operatorSteps = materials.length
+  out.workSteps = materials.filter(m => m.phase === 'work').length
+  out.stops = stops
+  out.toolsets = toolsets
   const card = works.card('company-1', RUN)
   out.cardState = card?.ok ? card.view.card?.state ?? null : null
   await win.webContents.loadURL('https://op.test/').catch(() => {})

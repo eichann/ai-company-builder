@@ -12,9 +12,11 @@ import {
   type BrowserExploreRead, type BrowserOperation,
 } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserExploreItem } from './browser-runner'
-import { BROWSER_BROWSE_LIMITS, BROWSER_OPERATOR_BROWSE_PROMPT } from './browser-browse'
+import { BROWSER_BROWSE_LIMITS } from './browser-browse'
 export type { BrowserOperatorImage } from './browser-browse'
-import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from './browser-frame-writes'
+import {
+  DEFAULT_BROWSER_OPERATOR_TOOLSET, browserOperatorToolset, browserToolsetPrompt, type BrowserOperatorToolset, type BrowserToolsetPrompt,
+} from './browser-operator-toolsets'
 
 export const BROWSER_OPERATOR_LIMITS = {
   /** Steps (one CLI start each) per request. */
@@ -60,21 +62,19 @@ export const BROWSER_OPERATOR_SYSTEM_PROMPT = [
  * window tools' (agent-browser.md "The operator's window tools"), or a write run's preview and work (step ⑤b, "Writes
  * within frames, in the app"). A closed choice: nothing else can be passed.
  */
-export type BrowserOperatorPrompt = 'preview' | 'browse' | 'work-preview' | 'work'
+export type BrowserOperatorPrompt = 'preview' | BrowserToolsetPrompt
 
-const OPERATOR_PROMPTS: Readonly<Record<BrowserOperatorPrompt, string>> = {
-  preview: BROWSER_OPERATOR_SYSTEM_PROMPT,
-  browse: BROWSER_OPERATOR_BROWSE_PROMPT,
-  'work-preview': BROWSER_OPERATOR_WORK_PREVIEW_PROMPT,
-  work: BROWSER_OPERATOR_WORK_PROMPT,
-}
+/** The system prompt of a kind in a tool set (agent-browser.md "The operator's tool sets"; the preview's is every set's). */
+const operatorPrompt = (prompt: BrowserOperatorPrompt, toolset: BrowserOperatorToolset): string =>
+  prompt === 'preview' ? BROWSER_OPERATOR_SYSTEM_PROMPT : browserToolsetPrompt(toolset, prompt)
 
 /**
- * The CLI's arguments, exactly (design memo §33 1-2; a test holds them). Only the system prompt differs per kind. The
- * material goes in as ONE stream-json user message (`operatorInput`, electron/agents/claude-browser-operator.ts): its text block, and for the window tools the screen
- * image beside it ("The operator sees the screen"; checked on the real CLI 2.1.329–2.1.332).
+ * The CLI's arguments, exactly (design memo §33 1-2; a test holds them). Only the system prompt differs per kind and tool
+ * set (a closed choice of fixed prompts). The material goes in as ONE stream-json user message (`operatorInput`,
+ * electron/agents/claude-browser-operator.ts): its text block, and for the window tools the screen image beside it ("The
+ * operator sees the screen"; checked on the real CLI 2.1.329–2.1.332).
  */
-export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt = 'preview'): string[] {
+export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt = 'preview', toolset: BrowserOperatorToolset = DEFAULT_BROWSER_OPERATOR_TOOLSET): string[] {
   return [
     '-p', '--model', model,
     '--safe-mode',
@@ -87,7 +87,7 @@ export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt
     '--max-turns', '1',
     '--input-format', 'stream-json',
     '--output-format', 'stream-json', '--verbose',
-    '--system-prompt', OPERATOR_PROMPTS[prompt],
+    '--system-prompt', operatorPrompt(prompt, browserOperatorToolset(toolset)),
   ]
 }
 

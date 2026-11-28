@@ -6,6 +6,7 @@ import { BROWSER_WORDS, type BrowserSiteView } from '../../../../shared/browser-
 import { clearBrowserLogin, openBrowserSite } from '../api'
 import { BrowserPcSection } from './BrowserPcSection'
 import { BrowserRecordingSection } from './BrowserRecordingSection'
+import { BrowserToolsetSection } from './BrowserToolsetSection'
 
 export function BrowserSection({ companyId, sites }: { companyId: string; sites: BrowserSiteView[] }) {
   const [busy, setBusy] = useState(false)
@@ -46,6 +47,7 @@ export function BrowserSection({ companyId, sites }: { companyId: string; sites:
       </Card>
       {sites.length > 0 && <BrowserRecordingSection companyId={companyId} sites={sites} />}
       <BrowserPcSection companyId={companyId} />
+      {sites.length > 0 && <BrowserToolsetSection />}
     </div>
   )
 }

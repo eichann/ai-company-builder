@@ -29,6 +29,7 @@ import type { VoiceCapabilities, VoiceDeviceList, VoiceEvent, VoiceInputAPI } fr
 import type { VoicePromptSettings } from './voice-prompt'
 import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession, ChatSessionSummary } from './chat-history'
 import type { PermissionMode } from './permission-mode'
+import type { BrowserOperatorToolset } from './browser-operator-toolsets'
 import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
@@ -853,6 +854,8 @@ export interface IpcInvokeChannels {
   'claudeSignIn:openPage': { args: []; result: boolean }
   'config:getPermissionMode': { args: []; result: PermissionMode }
   'config:setPermissionMode': { args: [mode: PermissionMode]; result: boolean }
+  'config:getBrowserOperatorToolset': { args: []; result: BrowserOperatorToolset }
+  'config:setBrowserOperatorToolset': { args: [toolset: BrowserOperatorToolset]; result: boolean }
   'config:getServerUrl': { args: []; result: string | null }
   'config:setServerUrl': { args: [url: string]; result: boolean }
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
@@ -1179,6 +1182,8 @@ export interface ElectronAPI {
   openClaudeSignInPage: Invoke<'claudeSignIn:openPage'>
   getPermissionMode: Invoke<'config:getPermissionMode'>
   setPermissionMode: Invoke<'config:setPermissionMode'>
+  getBrowserOperatorToolset: Invoke<'config:getBrowserOperatorToolset'>
+  setBrowserOperatorToolset: Invoke<'config:setBrowserOperatorToolset'>
 
   // Server URL config
   getServerUrl: Invoke<'config:getServerUrl'>

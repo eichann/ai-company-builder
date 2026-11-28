@@ -1,11 +1,12 @@
 // Settings: the API key, which AI the member signs in with (and whether its
 // CLI is there), the chat's permission mode, the server URL, and which extra
-// environment variable names AI processes may see.
+// environment variable names AI processes may see; 「ブラウザ操作」's operator tool set on this PC.
 //   config:*, codex:status
 
 import type { CodexStatus } from '../../../shared/agent'
 import { isAgentId } from '../../../shared/agents/registry'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../../../shared/permission-mode'
+import { BROWSER_OPERATOR_TOOLSETS, browserOperatorToolset, type BrowserOperatorToolset } from '../../../shared/browser-operator-toolsets'
 import { normalizePassthroughNames, refusedPassthroughNames } from '../../agents/agent-env'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { ApiKeyStore } from '../../services/api-key-store'
@@ -79,6 +80,18 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
     if (!PERMISSION_MODES.includes(mode)) return false
     const current = config.load()
     current.permissionMode = mode
+    config.save(current)
+    return true
+  })
+
+  // 「ブラウザ操作」's operator tool set on this PC (agent-browser.md "The operator's tool sets"): what the operator is told
+  // and how its answer is read — never what it may do. Anything not a known set is refused, never stored.
+  ipc.handle('config:getBrowserOperatorToolset', () => browserOperatorToolset(config.load().browserOperatorToolset))
+
+  ipc.handle('config:setBrowserOperatorToolset', (_, toolset: BrowserOperatorToolset) => {
+    if (!(BROWSER_OPERATOR_TOOLSETS as readonly unknown[]).includes(toolset)) return false
+    const current = config.load()
+    current.browserOperatorToolset = toolset
     config.save(current)
     return true
   })

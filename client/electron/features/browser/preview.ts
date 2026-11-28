@@ -27,6 +27,7 @@ import {
   type BrowserOperatorFailure, type BrowserOperatorImage, type BrowserOperatorPage, type BrowserOperatorRequest, type BrowserOperatorStopReason,
 } from '../../../shared/browser-operator'
 import type { BrowserExploreItem, BrowserJsonExploreReader, BrowserPreviewReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
+import type { BrowserOperatorToolset } from '../../../shared/browser-operator-toolsets'
 import type { BrowserAiSwitch } from './ai-switch'
 
 /** The CLI fixed for a request (agents/claude-browser-operator.ts `BrowserOperatorCli`). */
@@ -44,6 +45,8 @@ export interface PreviewOperator {
     parentEnv: Readonly<Record<string, string | undefined>>
     /** The window tools' fixed prompt (agent-browser.md "The operator's window tools"); absent: the preview's. */
     prompt?: 'browse' | 'work-preview' | 'work'
+    /** The window tools' tool set (this PC's setting; agent-browser.md "The operator's tool sets"); absent: `current`. */
+    toolset?: BrowserOperatorToolset
     /** The window tools' screen image (memory only, for this step: agent-browser.md "The operator sees the screen"). */
     image?: BrowserOperatorImage | null
   }): Promise<{ ok: true; text: string } | { ok: false; code: BrowserOperatorFailure | 'cancelled' }>

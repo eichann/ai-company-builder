@@ -14,6 +14,7 @@ import type { ChatMetadataPatch, ChatSaveReceipt, ChatSession } from '../shared/
 import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
+import type { BrowserOperatorToolset } from '../shared/browser-operator-toolsets'
 import type { CreatePrivateFolderRequest, SetPrivateFolderMembersRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature, GoogleRelayService } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
@@ -369,6 +370,8 @@ const api: ElectronAPI = {
   getPermissionMode: () => invoke('config:getPermissionMode'),
   setPermissionMode: (mode: PermissionMode) =>
     invoke('config:setPermissionMode', mode),
+  getBrowserOperatorToolset: () => invoke('config:getBrowserOperatorToolset'),
+  setBrowserOperatorToolset: (toolset: BrowserOperatorToolset) => invoke('config:setBrowserOperatorToolset', toolset),
 
   // Server URL config
   getServerUrl: () => invoke('config:getServerUrl'),

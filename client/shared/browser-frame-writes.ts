@@ -26,7 +26,7 @@ import type { BrowserWriteOutcome, BrowserWriteSteps } from './browser-runner'
 import { BROWSER_ANSWER_PROBLEM_WORDS, stopQuestion, type BrowserAnswerProblem, type BrowserStopNext } from './browser-operator-trail'
 import {
   BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_STOPS, OPERATOR_ACTION_LINES, OPERATOR_MEMO_KEYS, OPERATOR_OUTSIDE_LINE, OPERATOR_REASON_LINE, OPERATOR_SCREEN_LINES, browseHeading, operatorReason, parseBrowseAnswer,
-  type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserPageSnapshot,
+  type BrowserBrowseAction, type BrowserBrowseStop, type BrowserOperatorHistoryEntry, type BrowserPageSnapshot,
 } from './browser-browse'
 
 /** The chat AI's one generic write tool (`mcp__acb_browser__browser_work`). */
@@ -601,33 +601,44 @@ const WORK_STOP_LINE = '{"do":"stop","why":"need-login|need-person|not-found|blo
 const WORK_SOURCE_LINE = (work: boolean) => `することと入れる値は person（本人の言葉）・steps（会社の Skill の手順）・${work ? 'plan（承認された下見の計画。null は下見なし）・' : ''}request（頼み）のとおりに、記号もそのまま。person.said の禁止・制約は steps より先に守る。`
 /** When the operator may stop: these only (incident 2026-11-27: four stops, half of them on words the prompt itself gave). */
 const WORK_STOP_WHEN = (work: boolean) => `stop は、ログインが要る（need-login）、頼まれたものがない（not-found）、${work ? 'writes に「分からない」（blocked）、' : ''}どこにも答えのない分かれ道（need-person。question は「はい」で進められる問い）のときだけ。person.said と steps がぶつかるときは、書く前に一度だけ need-person で聞く。ほかは手順に沿って進める。`
-const COMMON_LINES = [OPERATOR_OUTSIDE_LINE, ...OPERATOR_SCREEN_LINES, OPERATOR_REASON_LINE]
+const commonLines = (screen: readonly string[]) => [OPERATOR_OUTSIDE_LINE, ...screen, OPERATOR_REASON_LINE]
 const WORK_INTRO = (what: string) => `あなたは会社が登録したサイトで${what}係。毎回 JSON と画面の画像を受け取り、次の1つの JSON だけを返す。`
 
+/** A tool set's lines (agent-browser.md "The operator's tool sets"): only these differ between the sets' prompts. */
+export interface OperatorToolLines { actions: readonly string[]; screen: readonly string[] }
+
 /** The write run's preview (read only): the operator reads what it needs and answers the plan for the member's card. */
-export const BROWSER_OPERATOR_WORK_PREVIEW_PROMPT = [
-  WORK_INTRO('、頼まれた書く作業の下見をする'),
-  ...ACTION_LINES,
-  '{"do":"plan","summary":"<これからすること>","affects":"<ほかに影響する人・もの>","values":[{"label":"<名前>","value":"<下見で読んだ大事な値>"}],"writes":<下>,"unread":[<読めなかった items の番号>]}',
-  WORK_STOP_LINE,
-  '下見なので読むだけ。変えるボタンは押さない。',
-  'writes は frames が null のときだけ [{"method":"POST|PUT|PATCH|DELETE","path":"/<決まった語で始まる。数字は {n}、ほかの1区切りは {x}>","max":<1〜20>}]。',
-  WORK_SOURCE_LINE(false),
-  WORK_STOP_WHEN(false),
-  ...COMMON_LINES,
-].join('\n')
+export function workPreviewOperatorPrompt(lines: OperatorToolLines): string {
+  return [
+    WORK_INTRO('、頼まれた書く作業の下見をする'),
+    ...lines.actions,
+    '{"do":"plan","summary":"<これからすること>","affects":"<ほかに影響する人・もの>","values":[{"label":"<名前>","value":"<下見で読んだ大事な値>"}],"writes":<下>,"unread":[<読めなかった items の番号>]}',
+    WORK_STOP_LINE,
+    '下見なので読むだけ。変えるボタンは押さない。',
+    'writes は frames が null のときだけ [{"method":"POST|PUT|PATCH|DELETE","path":"/<決まった語で始まる。数字は {n}、ほかの1区切りは {x}>","max":<1〜20>}]。',
+    WORK_SOURCE_LINE(false),
+    WORK_STOP_WHEN(false),
+    ...commonLines(lines.screen),
+  ].join('\n')
+}
 
 /** The write run itself: the operator may now press what writes, within the frames; it reports what it checked. */
-export const BROWSER_OPERATOR_WORK_PROMPT = [
-  WORK_INTRO('、人が承認した書く作業をする'),
-  ...ACTION_LINES,
-  '{"do":"done","result":"<したこと。4000字まで>","unread":[<番号>],"checks":[{"item":"<60字まで>","before":"<前>","after":"<いま>","compared":"<比べ元>","ok":true|false}],"compared_name":"<比べ元の呼び名>"}',
-  WORK_STOP_LINE,
-  WORK_SOURCE_LINE(true),
-  WORK_STOP_WHEN(true),
-  '書き終えたら steps の確かめることをページで確かめ、checks に書いて done。',
-  ...COMMON_LINES,
-].join('\n')
+export function workOperatorPrompt(lines: OperatorToolLines): string {
+  return [
+    WORK_INTRO('、人が承認した書く作業をする'),
+    ...lines.actions,
+    '{"do":"done","result":"<したこと。4000字まで>","unread":[<番号>],"checks":[{"item":"<60字まで>","before":"<前>","after":"<いま>","compared":"<比べ元>","ok":true|false}],"compared_name":"<比べ元の呼び名>"}',
+    WORK_STOP_LINE,
+    WORK_SOURCE_LINE(true),
+    WORK_STOP_WHEN(true),
+    '書き終えたら steps の確かめることをページで確かめ、checks に書いて done。',
+    ...commonLines(lines.screen),
+  ].join('\n')
+}
+
+const CURRENT_LINES: OperatorToolLines = { actions: ACTION_LINES, screen: OPERATOR_SCREEN_LINES }
+export const BROWSER_OPERATOR_WORK_PREVIEW_PROMPT = workPreviewOperatorPrompt(CURRENT_LINES)
+export const BROWSER_OPERATOR_WORK_PROMPT = workOperatorPrompt(CURRENT_LINES)
 
 /** What the operator is told of each held write so far: fixed words only. */
 export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> = {
@@ -710,7 +721,7 @@ export function workMaterial(input: {
   plan?: WorkApprovedPlan | null
   frames: readonly WorkFrame[] | null
   page: BrowserPageSnapshot
-  history: readonly BrowserBrowseHistoryEntry[]
+  history: readonly BrowserOperatorHistoryEntry[]
   /** Each held write so far: the kept ones, then the ones still being sent (`sending`). */
   writes: readonly WorkWriteSeen[]
   notes: string

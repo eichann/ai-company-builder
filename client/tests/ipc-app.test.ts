@@ -54,6 +54,17 @@ test('settings: defaults, validation, persisted in userData/config.json', async 
   await h.invoke('config:setPermissionMode', 'auto')
 })
 
+test('settings: 「ブラウザ操作」\'s operator tool set is today\'s by default, only a known set is stored, and an unknown stored value reads as today\'s', async () => {
+  const configFile = path.join(h.userData, 'config.json')
+  assert.equal(await h.invoke('config:getBrowserOperatorToolset'), 'current')
+  for (const bad of ['mcp', 'COMPACT', '', 1, null]) assert.equal(await h.invoke('config:setBrowserOperatorToolset', bad as never), false)
+  assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf-8')).browserOperatorToolset, undefined)
+  assert.equal(await h.invoke('config:setBrowserOperatorToolset', 'compact'), true)
+  assert.equal(await h.invoke('config:getBrowserOperatorToolset'), 'compact')
+  assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf-8')).browserOperatorToolset, 'compact')
+  assert.equal(await h.invoke('config:setBrowserOperatorToolset', 'current'), true)
+})
+
 test('settings: no OS encryption → a new API key is refused, never stored in plain text', async () => {
   const configFile = path.join(h.userData, 'config.json')
   h.fake.encryptionAvailable = false

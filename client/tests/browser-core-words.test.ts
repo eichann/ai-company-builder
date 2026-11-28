@@ -26,6 +26,7 @@ import type { BrowserMap } from '../../shared/core/browser-map'
 import { BROWSER_CATALOG_NONE, browserLineCatalog, browserOperationCatalog } from '../shared/browser-tool-catalog'
 import { browserBrowseDescription, browserBrowseSchema, browserInspectDescription, browserInspectSchema, browserWorkDescription, browserWorkSchema, browserWriteDescription, browserWriteSchema, createBrowserInspectTools } from '../electron/browser-request/inspect-tool'
 import { BROWSER_OPERATOR_BROWSE_PROMPT } from '../shared/browser-browse'
+import { BROWSER_OPERATOR_TOOLSETS, browserToolsetPrompt } from '../shared/browser-operator-toolsets'
 import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from '../shared/browser-frame-writes'
 import { browserRequestDescription, browserRequestSchema, createBrowserRequestTools } from '../electron/browser-request/tools'
 
@@ -203,6 +204,8 @@ describe('the core\'s texts name no site (design memo §3 I10)', () => {
       browserBrowseDescription([]), BROWSER_OPERATOR_BROWSE_PROMPT,
       // The write task (step ⑤b): its tool and the operator's two prompts.
       browserWorkDescription([]), BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT,
+      // Every tool set's prompts (agent-browser.md "The operator's tool sets").
+      ...BROWSER_OPERATOR_TOOLSETS.flatMap(set => (['browse', 'work-preview', 'work'] as const).map(p => browserToolsetPrompt(set, p))),
       JSON.stringify([browserInspectSchema, browserWriteSchema, browserRequestSchema, browserBrowseSchema, browserWorkSchema].map(s => Object.values(s.shape).map(f => f.description))),
     ].join('\n')
     assert.deepEqual(found(names, shared), [])

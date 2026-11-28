@@ -132,6 +132,7 @@ import { LINES as LSTEP_LINES } from '../browser-lines/lstep'
 import { wireBrowserInspections } from './features/browser/inspect'
 import { wireBrowserWriteLines } from './features/browser/write-lines'
 import { wireBrowserBrowse } from './features/browser/browse'
+import { browserOperatorToolset } from '../shared/browser-operator-toolsets'
 import { wireBrowserWork } from './features/browser/work'
 import { createPendingEnds } from './features/browser/pending-ends'
 import { readBrowserSkillSteps } from './features/browser/skill-steps'
@@ -740,6 +741,8 @@ const browserBrowses = wireBrowserBrowse({
   parentEnv: () => shellEnv.env(),
   busyWindows: browserPlans.busyWindows,
   pendingEnds: browserPendingEnds,
+  // This PC's tool set for the operator (Settings → ブラウザ操作; agent-browser.md "The operator's tool sets").
+  toolset: () => browserOperatorToolset(config.load().browserOperatorToolset),
 })
 // Its write task on a registered domain (agent-browser.md "Writes within frames, in the app", step ⑤b): the chat's
 // `browser_work`, the server's frames run (a company Skill's approved declaration, or the plan the member approves on the
@@ -761,6 +764,7 @@ const browserWorks = wireBrowserWork({
   skillSteps: (companyRoot, skill) => readBrowserSkillSteps(companyRoot, skill, p => allowedRoots.validate(p)),
   busyWindows: browserPlans.busyWindows,
   pendingEnds: browserPendingEnds,
+  toolset: () => browserOperatorToolset(config.load().browserOperatorToolset),
 })
 // Its read-only inspection (agent-browser.md "The inspection in the chat"): the chat's `browser_inspect`, the read runner
 // over the member's own window and the card's IPC — the same switch and context as the plans; the site's map and lines are
