@@ -1,5 +1,5 @@
 // The parts of a task's card under its title (新しい画面のデモ C): where it came from, 「終わったら」,
-// its 案件, the due with 「延ばす」 and the tags, and the notices of the member's last press
+// its 案件, the due (pressed to change it in place) and the tags, and the notices of the member's last press
 // (「〇〇さんに返しました［取り消す］」, 「〇〇さんが先に変えました…」).
 import { useState, type ReactNode } from 'react'
 import { CalendarBlank, Warning } from '@phosphor-icons/react'
@@ -7,8 +7,7 @@ import type { RecordCardHistoryLine } from '../../../../shared/record-views'
 import type { TaskCardData, TaskCardOrigin } from '../../../../shared/task-card'
 import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
-import { useDismiss } from '../../../shared/hooks/useDismiss'
-import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { InlineDate } from '../../../shared/ui/InlineDate'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { dueText, dueWhen, postponeChoices, type CompanyNow } from '../model'
 
@@ -35,31 +34,25 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
   )
 }
 
-/** 期限 with 「延ばす」, and the tags (`tagField`, `TagField.tsx`). */
-export function DueAndTags({ card, now, busy, onPostpone, tagField }: { card: TaskCardData; now: CompanyNow; busy: boolean; onPostpone: ((due: string) => void) | null; tagField: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const [box, setBox] = useState<HTMLDivElement | null>(null)
-  // A press outside the field (its 延ばす and the choices) or Esc closes the choices.
-  useDismiss(box, open, () => setOpen(false))
+/**
+ * 期限 and the tags (`tagField`, `TagField.tsx`). The date itself is pressed to change it in place (owner 2026-11-27: no
+ * box apart): the chooser holds the due now, 「延ばす」's choices (`postponeChoices`), a calendar and typing — an earlier
+ * day or a time too, which `set_due` takes. `onSetDue` null (the type does not let the member) = plain text.
+ */
+export function DueAndTags({ card, now, busy, onSetDue, tagField }: { card: TaskCardData; now: CompanyNow; busy: boolean; onSetDue: ((due: string) => Promise<string | null>) | null; tagField: ReactNode }) {
   const overdue = card.due ? dueWhen(card.due, now) === 'overdue' : false
+  const shown = <span className={`text-title font-bold tabular-nums ${overdue ? 'text-danger-text' : ''}`}>{card.due ? dueText(card.due, now) : <span className="text-body font-normal text-text-subtle">なし</span>}</span>
   return (
     <div className="grid grid-cols-2 gap-2">
-      <div ref={setBox} className="relative rounded-control bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
-        <div className="flex items-center gap-1 text-caption font-normal text-gray-500"><CalendarBlank size={11} />{overdue ? '期限切れ' : '期限'}</div>
-        <div className="flex items-center gap-2">
-          <span className={`text-title font-bold tabular-nums ${overdue ? 'text-red-600 dark:text-red-400' : ''}`}>{card.due ? dueText(card.due, now) : <span className="text-body font-normal text-gray-400">なし</span>}</span>
-          {onPostpone && <button type="button" disabled={busy} aria-expanded={open} onClick={() => setOpen(o => !o)} className={SMALL_BUTTON}>延ばす</button>}
-        </div>
-        {open && onPostpone && (
-          <div role="group" aria-label="延ばす" className="absolute left-0 top-full z-30 mt-1 w-[250px] rounded-control border border-gray-200 bg-white p-1 text-small shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-            {postponeChoices(now, card.holidays).map(c => (
-              <button key={c.label} type="button" onClick={() => { setOpen(false); onPostpone(c.due) }} className="flex w-full justify-between rounded-small px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-700">
-                <span>{c.label}</span><span className="tabular-nums text-gray-400">{dueText(c.due, now)}</span>
-              </button>
-            ))}
-            {card.names.requester && !card.roles.requester && <p className="px-2 pt-1 text-[10px] text-gray-400">延ばすと、頼んだ{card.names.requester}さんに知らせます</p>}
-          </div>
-        )}
+      <div className="rounded-control bg-surface-sunken px-3 py-2">
+        <div className="flex items-center gap-1 text-caption font-normal text-text-muted"><CalendarBlank size={11} />{overdue ? '期限切れ' : '期限'}</div>
+        {onSetDue
+          ? <InlineDate value={card.due} label={card.due ? '期限を変える' : '期限を決める'} busy={busy} onSave={onSetDue} choicesLabel="延ばす"
+              choices={postponeChoices(now, card.holidays).map(c => ({ label: c.label, due: c.due, shown: dueText(c.due, now) }))}
+              {...(card.names.requester && !card.roles.requester ? { note: `変えると、頼んだ${card.names.requester}さんに知らせます` } : {})}>
+              {shown}
+            </InlineDate>
+          : <div>{shown}</div>}
       </div>
       {tagField}
     </div>

@@ -9,7 +9,7 @@ import type { AiRunView } from '../../shared/types/ai-runs'
 import { aiOnRecord } from '../electron/features/record-views/ipc'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { parseTypeFile } from '../../shared/core/record-types'
-import { bundleActionsOf, bundleDetailOf, recordDetailOf } from '../shared/record-details'
+import { BUNDLE_TILE_FIELDS, bundleActionsOf, bundleDetailOf, bundleMenuActions, bundleTileAction, DETAIL_FIELDS, recordDetailOf } from '../shared/record-details'
 
 const people = { 'u-sato': '佐藤', 'u-abe': '阿部' }
 
@@ -151,4 +151,26 @@ test('a business plugin\'s 案件 gets its own type\'s actions the same way; the
   assert.deepEqual(names(open), { main: '受注にする', more: ['失注にする'] })
   assert.deepEqual([open!.more[0].ends, open!.more[0].noteRequired], [true, true])
   assert.deepEqual(names(bundleActionsOf(deal, 'lost', { owner: 'u-sato' }, 'u-sato', people)), { main: '商談に戻す', more: [] })
+})
+
+// Owner 2026-11-27 (「その場で直す」): a プロジェクト's なんのため・責任者・期限 are corrected in their tiles. Guards: only an action the
+// member may run that sets exactly that one field and asks nothing else is taken there (a reason the type requires keeps it
+// in 「…」's window); what a tile takes is not offered again in 「…」; nobody else gets a tile editor; the 期限 tile shows the
+// stored due (and it is not repeated under 「ほかの項目」).
+test('a プロジェクト\'s tiles: なんのため・責任者・期限 corrected in place by its 責任者 only, and gone from 「…」', () => {
+  const fields = { owner: 'u-sato', purpose: '窓口を3つに', due: '2026-12-01T17:00' }
+  const active = bundleActionsOf(project, 'active', fields, 'u-sato', people)!
+  assert.deepEqual(BUNDLE_TILE_FIELDS.map(f => bundleTileAction(active, f)?.action), ['set_purpose', 'set_owner', 'set_due'])
+  assert.deepEqual(bundleMenuActions(active).map(a => a.title), ['やめる'])
+  // Someone the type does not name gets no editor (plain text).
+  assert.equal(bundleTileAction(bundleActionsOf(project, 'active', { owner: 'u-abe' }, 'u-sato', people) ?? undefined, 'due'), null)
+  // Without a 責任者 a reader may only name one: 責任者 is a tile editor, the other tiles are text.
+  const none = bundleActionsOf(project, 'active', {}, 'u-sato', people)!
+  assert.deepEqual(BUNDLE_TILE_FIELDS.map(f => bundleTileAction(none, f)?.action ?? null), [null, 'set_owner', null])
+  // A type that requires a reason keeps that action in 「…」 (its window asks for the reason).
+  const withNote = { ...active, more: active.more.map(a => (a.action === 'set_due' ? { ...a, noteRequired: true } : a)) }
+  assert.equal(bundleTileAction(withNote, 'due'), null)
+  assert.deepEqual(bundleMenuActions(withNote).map(a => a.title), ['やめる', '期限を変える'])
+  assert.equal(bundleDetailOf({ fields }, [], 'u-sato', people).due, '2026-12-01T17:00')
+  assert.ok(DETAIL_FIELDS.bundle.has('due'))
 })

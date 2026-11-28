@@ -6,6 +6,17 @@ import { APPROVE_HASH_NOTE, type ApprovalView, type SimilarRecord } from '../../
 import { approveApproval, getApproval, sameAsApproval, sendBackApproval, withdrawApproval, type ApprovalOutbound } from '../api'
 import { putApproval } from '../approvalStore'
 import { useApproval } from '../hooks/useApproval'
+import { useUnknownResult } from '../hooks/useUnknownResult'
+import { unknownMessage, type PressOutcome, type UnknownWords } from '../unknownResult'
+
+type PressKind = 'approve' | 'send-back' | 'withdraw' | 'same-as'
+/** What the card says when a press's answer did not come (it never says 「開き直すと分かります」). */
+const PRESS_WORDS: Record<PressKind, UnknownWords> = {
+  approve: { whether: '承認できたかどうか', notDone: '承認はまだ届いていません' },
+  'send-back': { whether: '差し戻せたかどうか', notDone: '差し戻しはまだ届いていません' },
+  withdraw: { whether: '取り下げられたかどうか', notDone: '取り下げはまだ届いていません' },
+  'same-as': { whether: '「同じ」と伝えられたかどうか', notDone: '「同じ」はまだ届いていません' },
+}
 
 const TONE_CLASS = STATE_BOX
 
@@ -50,11 +61,31 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
   // 「別の…として作る」: the person looked at the similar records and this is a new one.
   const [distinct, setDistinct] = useState(false)
   const [linkMeeting, setLinkMeeting] = useState(true)
+  // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
+  const unknown = useUnknownResult()
+  const [unknownPress, setUnknownPress] = useState<{ kind: PressKind; before: ApprovalView['state'] } | null>(null)
   const reason = edited ?? view?.proposedReason ?? ''
+  const locked = busy || unknown.unsure !== null
+
+  /** One read of the request: whether the press moved it from `before` (null: it could not be read). */
+  const readAfter = (before: ApprovalView['state']) => async (): Promise<PressOutcome | null> => {
+    if (!view) return null
+    const r = await (outbound ? getApproval(card.companyId, view.id, outbound) : getApproval(card.companyId, view.id))
+    if (!r.success || !r.approval) return null
+    putApproval(key, r)
+    return r.approval.state !== before ? 'done' : 'not-done'
+  }
+  /** After an unknown answer: read again by itself; done → the state line says what happened, not done → press again. */
+  const settle = async (kind: PressKind, before: ApprovalView['state'], how: 'start' | 'checkNow') => {
+    setUnknownPress({ kind, before })
+    setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'checking') })
+    const outcome = await unknown[how](readAfter(before))
+    setMessage(outcome === 'done' ? null : { tone: 'info', text: unknownMessage(PRESS_WORDS[kind], outcome) })
+  }
 
   /** 「これと同じ…です（作らない）」: nothing is made; the request ends (and the meeting may belong to that record). */
   const sameAs = async (recordId: string) => {
-    if (!view || busy) return
+    if (!view || locked) return
     setBusy(true)
     setMessage(null)
     try {
@@ -62,14 +93,15 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       const r = await (outbound ? sameAsApproval(card.companyId, view.id, recordId, withMeeting, outbound) : sameAsApproval(card.companyId, view.id, recordId, withMeeting))
       putApproval(key, r)
       if (r.success) setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` })
-      else setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
+      else if (r.offline) void settle('same-as', view.state, 'start')
+      else setMessage({ tone: 'error', text: r.error })
     } finally {
       setBusy(false)
     }
   }
 
   const act = async (kind: 'approve' | 'send-back' | 'withdraw') => {
-    if (!view || busy) return
+    if (!view || locked) return
     setBusy(true)
     setMessage(null)
     try {
@@ -79,8 +111,9 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
           ? await (outbound ? sendBackApproval(card.companyId, view.id, reason, outbound) : sendBackApproval(card.companyId, view.id, reason))
           : await (outbound ? withdrawApproval(card.companyId, view.id, outbound) : withdrawApproval(card.companyId, view.id))
       putApproval(key, r)
-      if (!r.success) {
-        setMessage({ tone: r.offline ? 'info' : 'error', text: r.offline ? `${r.error} 承認できたかどうかは、開き直すと分かります。` : r.error })
+      if (!r.success && r.offline) void settle(kind, view.state, 'start')
+      else if (!r.success) {
+        setMessage({ tone: 'error', text: r.error })
         // The content changed (or the state moved): show what the server holds now.
         if (!r.approval && (r.code === 'CONTENT_CHANGED' || r.code === 'NOT_PENDING')) {
           putApproval(key, await (outbound ? getApproval(card.companyId, view.id, outbound) : getApproval(card.companyId, view.id)))
@@ -136,7 +169,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
           <p className="text-caption font-normal text-gray-500 dark:text-zinc-400">
             {[x.status, x.assignee ? `担当 ${nameOf(names, x.assignee)}さん` : null, `更新 ${x.updatedAt.slice(0, 10)}`, matchedText(x, view.systemLabel)].filter(Boolean).join('・')}
           </p>
-          {canSayDuplicate && <button type="button" disabled={busy} onClick={() => void sameAs(x.recordId)} className={`${PLAIN_BUTTON} mt-1`}>
+          {canSayDuplicate && <button type="button" disabled={locked} onClick={() => void sameAs(x.recordId)} className={`${PLAIN_BUTTON} mt-1`}>
             これと同じ{similar.typeLabel}です（作らない）
           </button>}
         </li>)}</ul>}
@@ -145,7 +178,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
           {view.basis.meetingId && <label className="flex items-center gap-1 text-caption font-normal text-gray-600 dark:text-zinc-300">
             <input type="checkbox" checked={linkMeeting} onChange={e => setLinkMeeting(e.target.checked)} />同じだったら、会議もその{similar.typeLabel}につなぐ
           </label>}
-          <button type="button" disabled={busy} onClick={() => setDistinct(true)} className={PLAIN_BUTTON}>別の{similar.typeLabel}として作る</button>
+          <button type="button" disabled={locked} onClick={() => setDistinct(true)} className={PLAIN_BUTTON}>別の{similar.typeLabel}として作る</button>
         </div>}
       </div>}
       {view.similarRequests && view.similarRequests.length > 0 && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
@@ -177,8 +210,13 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
       <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>
       {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
-      {canAnswer && <div className="mt-2">
+      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>
+        {message.text}
+        {/* Only a read: 「結果を確かめる」 never sends the press again. */}
+        {unknown.unsure && !unknown.unsure.checking && unknownPress && <button type="button" onClick={() => void settle(unknownPress.kind, unknownPress.before, 'checkNow')}
+          className={`${PLAIN_BUTTON} ml-2 mt-1`}>結果を確かめる</button>}
+      </div>}
+      {canAnswer && !unknown.unsure && <div className="mt-2">
         <label className="block text-xs text-gray-600 dark:text-zinc-300">
           理由（必ず書いてください。AI の下書きを直せます）
           <textarea value={reason} onChange={e => setEdited(e.target.value)} rows={3} maxLength={2000}
@@ -193,7 +231,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
         </div>
       </div>}
       {canWithdraw && !canAnswer && <div className="mt-2">
-        <button type="button" disabled={busy} onClick={() => void act('withdraw')}
+        <button type="button" disabled={locked} onClick={() => void act('withdraw')}
           className={`${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}>取り下げる</button>
       </div>}
     </div>

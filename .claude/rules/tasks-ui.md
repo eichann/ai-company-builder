@@ -338,13 +338,20 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    one entry; the server allows only its actor and refuses when something changed since). Since task
    version 9 完了 starts from every state but 準備中; a company's own type that still completes only
    what was started runs 着手 first (`startFirst`), each step at the version the previous one moved
-   to (no 取り消す for such a two-step press). **延ばす** sits on the
-   due (owner 2026-11-03, 使い心地のメモ #7: more choices, no date picker; `postponeChoices`, `model.ts`):
-   1時間あと / 今日の夕方 / あしたの朝 / あさって / 今週の金曜 / 来週の月曜 / 来週の金曜 / 2週間後 /
-   来月のはじめ — a weekend or holiday (Japan's and the company's, `card.holidays`) moves to the next
-   business day, one already past or on the same day (time) as an earlier one is left out. It closes
-   on Esc and a press outside (`useDismiss`, `src/shared/hooks/`; so does ［＋ファイル・フォルダをつなぐ］'s
-   picker). The server tells the requester. Tests: `model.test.ts`, `task-card.spec.ts` (「延ばす」). **Someone changed it first** (`VERSION_CONFLICT`, plan H): the card reads the latest
+   to (no 取り消す for such a two-step press). **The due is changed where it is shown** (owner 2026-11-27, 「その場で
+   直す」; the 「延ばす」 button beside it is gone): for whom the type's `set_due` allows (`card.actions`; anyone else sees
+   plain text) the date itself is a button (「期限を変える」, 「期限を決める」 while none; a pencil on hover) that opens a
+   small chooser right under it (`src/shared/ui/InlineDate.tsx`, generic: opens, keeps the draft, closes; no rule) holding
+   the due now: **延ばす**'s choices (owner 2026-11-03, 使い心地のメモ #7; `postponeChoices`, `model.ts`): 1時間あと / 今日の
+   夕方 / あしたの朝 / あさって / 今週の金曜 / 来週の月曜 / 来週の金曜 / 2週間後 / 来月のはじめ — a weekend or holiday
+   (Japan's and the company's, `card.holidays`) moves to the next business day, one already past or on the same day (time)
+   as an earlier one is left out — then the browser's date field (calendar or typing) and an optional time with
+   ［この日にする］ (Enter too). Any day the server takes (`set_due`: a date or a date with a time, earlier too); **no
+   「外す」** — the engine refuses an empty `due` (`ARG_REQUIRED`). The same day again sends nothing. It closes on Esc and
+   a press outside (`useDismiss`, `src/shared/hooks/`; so does ［＋ファイル・フォルダをつなぐ］'s picker); a refusal stays
+   in it. 「期限を〇〇にしました」 with ［取り消す］; the server tells the requester (said in the chooser before:
+   「変えると、頼んだ〇〇さんに知らせます」). Tests: `model.test.ts`, `task-card.spec.ts` (「延ばす」, 「期限: pressing the
+   date…」). **Someone changed it first** (`VERSION_CONFLICT`, plan H): the card reads the latest
    and says 「〇〇さんが先に変えました。最新を読み込みました。もう一度押してください」 with each change
    since the version shown (経緯's lines, `RecordCardHistoryLine.version` / `who`) and that the press
    did not happen. Under the title: where it came from (`origin`: 「会議『…』（11/5）から AI が作りました」
@@ -414,9 +421,14 @@ whose turn and the due and opening the task; the right column starts with its �
 whose turn. **Its buttons** (owner FB #30, 2026-11-11: a プロジェクト could not be ended in the app;
 `BundleDetailView.actions` from `bundleActionsOf`, `client/shared/record-details.ts`, built by main with the
 server's type; `BundleActions.tsx`): the core プロジェクト shows **［終える］** beside the title (one press) and in
-「…」 **［やめる］** (a window with an optional reason; 「一覧から外れ、このタブは閉じます。消しません（経緯は残ります）」),
-責任者を替える (the members, 自分 first), 期限を変える, なんのためを書く (each prefilled); a done or cancelled one only
-**［もう一度始める］**. Generic over the type: any type implementing `bundle` (a business plugin's 案件 too) gets its
+「…」 **［やめる］** (a window with an optional reason; 「一覧から外れ、このタブは閉じます。消しません（経緯は残ります）」);
+a done or cancelled one only **［もう一度始める］**. **なんのため・責任者・期限 are corrected in their tiles** (owner
+2026-11-27, 「その場で直す」; `BundleBody.tsx`, the 期限 tile from the record's `due`, `BundleDetailView.due`, not repeated
+under ほかの項目): なんのため as words in place (`InlineText`), 責任者 by choosing among the members in place (自分 first;
+a choice saves at once, Esc or leaving puts it back), 期限 with the date chooser (`InlineDate`, no quick choices here) —
+each only where an action of the type the member may run sets exactly that one field and asks nothing else
+(`bundleTileAction`, `client/shared/record-details.ts`: no reason required, ending nothing); such an action is not in
+「…」 (`bundleMenuActions`), one that requires a reason stays there with its window. Anyone else sees text. Generic over the type: any type implementing `bundle` (a business plugin's 案件 too) gets its
 own actions the same way — the main button is the first action into a final state (on a finished one, the first
 back out of it), the rest in 「…」; never the AI's own steps (`who: [ai]`), actions setting record links, or
 arguments other than person / date / text. **Offered only as the task card decides** (`personInWho`,
@@ -427,13 +439,13 @@ what the server refuses). **A プロジェクト without a 責任者** (owner FB
 creates named the creator showed 責任者 「—」 and nothing to press): the type's `who_fallback` counts too
 (`personInWhoOrFallback`, the server's `whoWithFallback` narrowed to what the app knows — only while none of
 `who`'s person fields holds anyone; never with a `link:<link>.<field>` entry): project v2's 責任者を替える has
-`who_fallback: [anyone]`, so every reader gets **only 「…」 責任者を替える** (no ［終える］ / やめる / other fields);
+`who_fallback: [anyone]`, so every reader gets **only 責任者を替える** (its tile, in place since 2026-11-27) (no ［終える］ / やめる / other fields);
 once named, the card is the 責任者's again. An older server's project v1 offers nothing, as before. **Long words
 wrap** (FB #36): the なんのため / 責任者 / 進み具合 tiles are `min-w-0` with `overflow-wrap: anywhere`, so a long
 URL stays in its tile (the task card's 目的 and the AI's 下ごしらえ text wrap the same way). Each press at the card's version, the type's words after it with ［取り消す］
 (`bundleDoneWords`); a refusal is said where it was pressed and the card reads again. 見るだけ (feature off):
 none. Tests: `client/tests/record-details.test.ts` (the 責任者 only, ［終える］ / 「…」, a finished one, a plugin
-type's own actions and what is left out, one without a 責任者), `tests/ui/record-card.spec.ts` (`?record=project`,
+type's own actions and what is left out, one without a 責任者, the tiles), `tests/ui/record-card.spec.ts` (`?record=project`,
 `&owner=other`, `&owner=none`, `&purpose=url`),
 `tests/ui/tasks-layout.spec.ts` (the tab closes) — mutation-checked. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,

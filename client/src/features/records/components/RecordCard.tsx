@@ -14,7 +14,7 @@ import { ProjectParticipants } from './ProjectParticipants'
 import { MakePrivateDialog } from './MakePrivateDialog'
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
-import { AiBand, BundleBody } from './BundleBody'
+import { AiBand, BundleBody, type BundleTileEdit } from './BundleBody'
 import { BundleActions, type BundleActInput } from './BundleActions'
 import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
 import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton, ReplyRequestActions } from './RecordDetails'
@@ -172,6 +172,10 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       : card.detail?.kind === 'bundle' && (card.detail.actions || extra.length > 0) && card.version !== undefined
         ? <BundleActions actions={card.detail.actions ?? { main: null, more: [], people: [] }} busy={busy} onAct={actBundle} extra={extra} />
         : null
+  // なんのため・責任者・期限 corrected in their tiles, at the card's version like the buttons.
+  const bundleEdit: BundleTileEdit | undefined = !viewOnly && card.detail?.kind === 'bundle' && card.detail.actions && card.version !== undefined
+    ? { actions: card.detail.actions, busy, onAct: (a, args) => actBundle(a, { args }) }
+    : undefined
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = !viewOnly && renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
     ? renderBundleField({
@@ -247,7 +251,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
         return failure
       }} />
     : null
-  return <>{makePrivateDialog}<CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  return <>{makePrivateDialog}<CardBody bundleEdit={bundleEdit} participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} driveRows={driveRows} driveExtra={driveExtra}
     drop={{ label: `ファイル・フォルダ・${driveExtra ? 'Drive のリンク・' : ''}やること・相談`,
       // A Drive link dragged from the browser is linked too, where the card offers Drive.
@@ -257,7 +261,8 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} /></>
 }
 
-function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants, driveRows, driveExtra }: {
+function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants, driveRows, driveExtra, bundleEdit }: {
+  bundleEdit?: BundleTileEdit
   /** Linked Google Drive files' rows, and ［Google Drive のファイルをつなぐ］ where the card offers it. */
   driveRows: LinkedRow[]
   driveExtra: LinkedGroupExtra | null
@@ -296,7 +301,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
     actions = incoming
-    body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} /></>
+    body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} {...(bundleEdit ? { edit: bundleEdit } : {})} /></>
   } else if (detail?.kind === 'reply') {
     actions = incoming
   }

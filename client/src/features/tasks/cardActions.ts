@@ -16,7 +16,7 @@ const TEAM_ACTIONS = new Set(['start', 'request_review', 'send_back'])
 const ASKED_ACTIONS = new Set(['decline'])
 /** Actions that take the task out of the member's turn: confirmed first, then 「取り消す」. */
 export const LEAVING_ACTIONS = new Set(['decline', 'wait', 'assign', 'cancel', 'request_review'])
-/** Shown elsewhere on the card (the due's 「延ばす」). */
+/** Shown elsewhere on the card (the due itself, changed in place: TaskHead's DueAndTags). */
 const ELSEWHERE = new Set(['set_due'])
 /** 確かめる人を決める and 終わったらを決める are one item, 「終わったら」 (owner decision 2026-11-03). */
 const WHEN_DONE_PARTS = new Set(['set_when_done', 'set_reviewer'])

@@ -44,7 +44,7 @@ test('prepared things on top; completing on whose OK; 受けられない needs a
   await returned.getByRole('button', { name: '取り消す' }).click()
   await expect(page.locator('#acted')).toContainText('undo 4@4')
 
-  await page.getByRole('button', { name: '延ばす' }).click()
+  await page.getByRole('button', { name: '期限を変える' }).click()
   await page.getByRole('group', { name: '延ばす' }).getByRole('button', { name: /あしたの朝/ }).click()
   await expect(page.locator('#acted')).toContainText(/set_due@3:due=\d{4}-\d{2}-\d{2}T09:00/)
 
@@ -543,7 +543,7 @@ test('「タグ」: a word that is a 案件\'s name offers ［案件につなぐ
 test('「延ばす」: more choices; Esc and a press outside close it', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
-  const button = card.getByRole('button', { name: '延ばす' })
+  const button = card.getByRole('button', { name: '期限を変える' })
   const choices = page.getByRole('group', { name: '延ばす' })
   await button.click()
   await expect(choices.getByRole('button', { name: /あしたの朝/ })).toBeVisible()
@@ -565,9 +565,37 @@ test('「延ばす」: more choices; Esc and a press outside close it', async ({
   expectNoPageErrors(state)
 })
 
+// Owner 2026-11-27 (「その場で直す」): the date itself is pressed; the chooser opens holding the due now, and a day picked on the
+// calendar or typed — earlier too, with or without a time — is sent as it is (set_due takes any date). The old 「延ばす」 button
+// beside it is gone.
+test('期限: pressing the date opens a chooser with the due now; a typed earlier day, with a time or without, is sent', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  await expect(card.getByRole('button', { name: '延ばす', exact: true })).toHaveCount(0)
+  await card.getByRole('button', { name: '期限を変える' }).click()
+  const chooser = page.getByRole('dialog', { name: '期限を変える' })
+  await expect(chooser.getByLabel('日付')).toHaveValue('2026-11-07')
+  await expect(chooser.getByLabel('時刻（なくてもかまいません）')).toHaveValue('17:00')
+  // Unchanged: nothing to send.
+  await expect(chooser.getByRole('button', { name: 'この日にする' })).toBeDisabled()
+  await chooser.getByLabel('日付').fill('2026-11-05')
+  await chooser.getByRole('button', { name: 'この日にする' }).click()
+  await expect(page.locator('#acted')).toContainText('set_due@3:due=2026-11-05T17:00')
+  await expect(chooser).toHaveCount(0)
+  await expect(card.getByRole('status')).toContainText('期限を')
+  // No time: the day alone; Enter in the field sends it.
+  await card.getByRole('button', { name: '期限を変える' }).click()
+  await chooser.getByLabel('時刻（なくてもかまいません）').fill('')
+  await chooser.getByLabel('日付').fill('2026-11-20')
+  await chooser.getByLabel('日付').press('Enter')
+  await expect(page.locator('#acted')).toContainText('set_due@3:due=2026-11-20')
+  await expect(page.locator('#acted')).not.toContainText('due=2026-11-20T')
+  expectNoPageErrors(state)
+})
+
 test('someone changed it first: the card says who and what, and that the press did not happen', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { conflict: '1' })
-  await page.getByRole('button', { name: '延ばす' }).click()
+  await page.getByRole('button', { name: '期限を変える' }).click()
   await page.getByRole('group', { name: '延ばす' }).getByRole('button', { name: /あしたの朝/ }).click()
   const alert = page.getByTestId('task-card').getByRole('alert')
   await expect(alert).toContainText('阿部さんが先に変えました。最新を読み込みました。もう一度押してください')

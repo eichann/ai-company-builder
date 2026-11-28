@@ -4,11 +4,27 @@ import { Button, StatusBadge } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import {
   JOB_CANDIDATE_DISCARDED_TEXT, JOB_CANDIDATE_GONE_TEXT, JOB_CANDIDATE_NOTES, JOB_PROPOSAL_READ_AGAIN_CODES, jobCandidateLines, jobProposalCardState, jobProposalStateLine,
-  jobProposalStateWord, type JobProposalCardRef,
+  jobProposalStateWord, type JobCandidateResult, type JobProposalCardRef,
 } from '../../../../shared/job-proposals'
 import { discardJobCandidate, submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
-import { putJobProposal, reloadJobCandidate } from '../../../shared/lib/jobProposalStore'
+import { putJobProposal, readJobCandidateNow, reloadJobCandidate } from '../../../shared/lib/jobProposalStore'
 import { useJobProposal } from '../hooks/useJobProposal'
+import { useUnknownResult } from '../hooks/useUnknownResult'
+import { unknownMessage, type PressOutcome, type UnknownWords } from '../unknownResult'
+
+type PressKind = 'submit' | 'withdraw' | 'discard'
+/** What the card says when a press's answer did not come (it never says 「開き直すと分かります」). */
+const PRESS_WORDS: Record<PressKind, UnknownWords> = {
+  submit: { whether: '管理者に出せたかどうか', notDone: 'まだ管理者に出されていません' },
+  withdraw: { whether: '取り下げられたかどうか', notDone: 'まだ取り下げられていません' },
+  discard: { whether: 'やめられたかどうか', notDone: 'まだやめていません' },
+}
+/** What the server's answer shows when the press happened. */
+const PRESS_DONE: Record<PressKind, (r: Extract<JobCandidateResult, { success: true }>) => boolean> = {
+  submit: r => r.proposal !== null,
+  withdraw: r => r.proposal !== null && r.proposal.state !== 'submitted',
+  discard: r => r.discarded === true,
+}
 
 const STATE_BADGE: Record<string, 'awaiting' | 'success' | 'warning' | 'paused' | 'neutral'> = {
   submitted: 'awaiting', approved: 'success', returned: 'warning', withdrawn: 'paused',
@@ -25,11 +41,29 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
   const [declined, setDeclined] = useState(false)
   const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
   const state = jobProposalCardState(result)
+  // A press whose answer never came: no press is offered until a read says what happened (never sent twice).
+  const unknown = useUnknownResult()
+  const [unknownPress, setUnknownPress] = useState<PressKind | null>(null)
+  const locked = busy || unknown.unsure !== null
 
   const readAgain = () => reloadJobCandidate(key)
 
+  /** One read of the candidate: whether the press happened (null: it could not be read). */
+  const readAfter = (kind: PressKind) => async (): Promise<PressOutcome | null> => {
+    const r = await readJobCandidateNow(key)
+    if (!r || !r.success) return null
+    return PRESS_DONE[kind](r) ? 'done' : 'not-done'
+  }
+  /** After an unknown answer: read again by itself; done → the card shows the state, not done → press again. */
+  const settle = async (kind: PressKind, how: 'start' | 'checkNow') => {
+    setUnknownPress(kind)
+    setMessage({ tone: 'info', text: unknownMessage(PRESS_WORDS[kind], 'checking') })
+    const outcome = await unknown[how](readAfter(kind))
+    setMessage(outcome === 'done' ? null : { tone: 'info', text: unknownMessage(PRESS_WORDS[kind], outcome) })
+  }
+
   const submit = async (candidateId: string, fingerprint: string) => {
-    if (busy) return
+    if (locked) return
     setBusy(true)
     setMessage(null)
     try {
@@ -38,7 +72,8 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
         putJobProposal(key, { success: true, candidate: state.kind === 'candidate' ? state.candidate : null, proposal: r.proposal })
         return
       }
-      setMessage({ tone: r.offline ? 'info' : 'error', text: r.offline ? `${r.error} 出せたかどうかは、開き直すと分かります（もう一度押しても二重には出されません）。` : r.error })
+      if (r.offline) { void settle('submit', 'start'); return }
+      setMessage({ tone: 'error', text: r.error })
       if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
     } finally {
       setBusy(false)
@@ -47,13 +82,14 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
 
   /** 「やめる」: discarded on the server (the card then says so, also when reopened); a server before it only closes the buttons here. */
   const discard = async (candidateId: string) => {
-    if (busy) return
+    if (locked) return
     setBusy(true)
     setMessage(null)
     try {
       const r = await (port ? discardJobCandidate(card.companyId, candidateId, port) : discardJobCandidate(card.companyId, candidateId))
       if (r.success && r.supported) putJobProposal(key, { success: true, candidate: null, proposal: null, discarded: true })
       else if (r.success) setDeclined(true)
+      else if (r.offline) void settle('discard', 'start')
       else {
         setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
         if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
@@ -64,12 +100,13 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
   }
 
   const withdraw = async (proposalId: string) => {
-    if (busy || state.kind !== 'proposal') return
+    if (locked || state.kind !== 'proposal') return
     setBusy(true)
     setMessage(null)
     try {
       const r = await (port ? withdrawJobProposal(card.companyId, proposalId, port) : withdrawJobProposal(card.companyId, proposalId))
       if (r.success) putJobProposal(key, { success: true, candidate: state.candidate, proposal: r.proposal })
+      else if (r.offline) void settle('withdraw', 'start')
       else {
         setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
         if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
@@ -119,21 +156,27 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
         </>
       )}
       {proposal && <p role="status" className="mt-2 text-small text-text">{jobProposalStateLine(proposal)}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[message.tone]}`}>{message.text}</div>}
-      {state.kind === 'candidate' && !declined && (
+      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[message.tone]}`}>
+        {message.text}
+        {/* Only a read: 「結果を確かめる」 never sends the press again. */}
+        {unknown.unsure && !unknown.unsure.checking && unknownPress && (
+          <Button size="sm" variant="secondary" className="ml-2 mt-1" onClick={() => void settle(unknownPress, 'checkNow')}>結果を確かめる</Button>
+        )}
+      </div>}
+      {state.kind === 'candidate' && !declined && !unknown.unsure && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="primary" disabled={busy} onClick={() => void submit(state.submit.candidateId, state.submit.fingerprint)}>
+          <Button size="sm" variant="primary" disabled={locked} onClick={() => void submit(state.submit.candidateId, state.submit.fingerprint)}>
             {busy ? '出しています…' : 'これで管理者に出す'}
           </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void discard(state.submit.candidateId)}>やめる</Button>
+          <Button size="sm" variant="ghost" disabled={locked} onClick={() => void discard(state.submit.candidateId)}>やめる</Button>
         </div>
       )}
       {state.kind === 'candidate' && declined && (
         <p role="status" className="mt-2 text-small text-text-muted">出さないことにしました（このサーバーでは案を消せないため、作ってから24時間で消えます）。</p>
       )}
-      {state.kind === 'proposal' && state.withdraw && (
+      {state.kind === 'proposal' && state.withdraw && !unknown.unsure && (
         <div className="mt-2">
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void withdraw(state.proposal.id)}>取り下げる</Button>
+          <Button size="sm" variant="secondary" disabled={locked} onClick={() => void withdraw(state.proposal.id)}>取り下げる</Button>
         </div>
       )}
     </div>

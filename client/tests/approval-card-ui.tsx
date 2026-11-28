@@ -13,6 +13,8 @@ import { AssistantMessageParts } from '../src/features/chat/components/MessagePa
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import type { ApprovalView } from '../../shared/types/approvals'
 import { installElectronAPI } from './ui/fixtures/electron-api'
+import { JOB_PROPOSAL_PART_TYPE } from '../shared/job-proposals'
+import { MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
 
 const params = new URLSearchParams(location.search)
 // `?theme=dark` for dark mode (the status-colours spec reads the card's awaiting frame in both themes).
@@ -51,26 +53,63 @@ const view = params.get('kind') === 'create' ? createView : params.get('manual')
 const swapped = params.get('manual') === '1' && (!approver || params.get('approver') === 'sato')
 const names = swapped ? { 'u-sato': '山田', 'u-abe': '佐藤' } : { 'u-sato': '佐藤', 'u-abe': '山田' }
 
+// `?offline=1`: the first 「承認」 (and 「これで管理者に出す」 with `?card=job`) gets no answer — the connection drops, and every
+// read fails until the page calls `window.__acbOnline()` (`&recover=auto`: by itself a second later). `&landed=1`: the press
+// had reached the server (the read then shows it done); else it had not, and the next press goes through. `#presses` counts
+// the presses that reached the fake server.
+const OFFLINE = params.get('offline') === '1'
+const LANDED = params.get('landed') === '1'
+const OFFLINE_ANSWER = { success: false as const, offline: true, code: null, error: 'サーバーに接続できませんでした。' }
+const net = { online: true, dropped: false, landed: false, presses: 0 }
+const showPresses = () => { document.getElementById('presses')!.textContent = String(net.presses) }
+;(window as unknown as { __acbOnline: () => void }).__acbOnline = () => { net.online = true }
+/** One press over the fake network: the first one under `?offline=1` drops the connection (reaching the server or not). */
+const press = (): 'answered' | 'dropped' => {
+  if (OFFLINE && !net.dropped) {
+    net.dropped = true
+    net.online = false
+    if (params.get('recover') === 'auto') setTimeout(() => { net.online = true }, 1000)
+    if (LANDED) { net.landed = true; net.presses += 1; showPresses() }
+    return 'dropped'
+  }
+  net.landed = true
+  net.presses += 1
+  showPresses()
+  return 'answered'
+}
+const approvedView = (reason: string): ApprovalView => ({ ...view, state: 'approved', viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: reason, resultOperationId: 'op-1' } })
+const JOB_CANDIDATE_ID = 'jc.' + 'a'.repeat(32)
+const jobCandidate = { id: JOB_CANDIDATE_ID, definition: MANUAL_JOB_DEFINITION, fingerprint: MANUAL_JOB_FINGERPRINT, expiresAt: '2026-11-21T01:30:00.000Z', timeZone: 'Asia/Tokyo' }
+const jobProposal = { id: 'jp.' + 'b'.repeat(32), jobId: 'job.' + '1'.repeat(32), proposerId: 'u-sato', candidateId: JOB_CANDIDATE_ID, submittedVersion: 1, submittedFingerprint: MANUAL_JOB_FINGERPRINT, state: 'submitted' as const, returnReason: null, decidedBy: null, decidedAt: null, createdAt: '2026-11-20T01:30:00.000Z' }
+
 function Preview() {
   const [sent, setSent] = useState<string>('')
   installElectronAPI({
-    getApproval: async () => ({ success: true, approval: view, names }),
+    getApproval: async () => (net.online ? { success: true, approval: net.landed ? approvedView('先方が対象を広げたいと言ったため') : view, names } : OFFLINE_ANSWER),
     approveApproval: async (_companyId, _id, hash, reason) => {
       setSent(JSON.stringify({ hash, reason }))
-      return { success: true, approval: { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: reason, resultOperationId: 'op-1' } }, names }
+      if (press() === 'dropped') return OFFLINE_ANSWER
+      return { success: true, approval: approvedView(reason), names }
     },
+    getJobCandidate: async () => (net.online ? { success: true, candidate: jobCandidate, proposal: net.landed ? jobProposal : null } : OFFLINE_ANSWER),
+    submitJobProposal: async () => (press() === 'dropped' ? OFFLINE_ANSWER : { success: true, proposal: jobProposal }),
     sameAsApproval: async (_companyId, _id, recordId, linkMeeting) => {
       setSent(JSON.stringify({ recordId, linkMeeting }))
       return { success: true, approval: { ...view, state: 'withdrawn', similar: null, viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: 'すでにある記録と同じため、作りませんでした', resultOperationId: null } }, names, meeting: 'linked' }
     },
   })
   const ref: ApprovalCardRef = { id: 'card-1', companyId: 'co-preview', conversationId: 'conv-1', approvalId: view.id, origin: approver ? 'shown' : 'requested', at: '2026-11-05T06:41:00.000Z' }
-  const parts = [{ type: 'text', text: '承認のお願いを出しました。' }, { type: APPROVAL_PART_TYPE, id: 'approval-card-1', data: ref }] as UIMessage['parts']
+  // `?card=job`: a 「定期の仕事の案」 card instead (the same unknown-answer handling).
+  const jobRef = { id: 'jp-card-1', companyId: 'co-preview', conversationId: 'conv-1', candidateId: JOB_CANDIDATE_ID, at: '2026-11-20T01:30:00.000Z' }
+  const parts = (params.get('card') === 'job'
+    ? [{ type: 'text', text: '定期の仕事の案を作りました。' }, { type: JOB_PROPOSAL_PART_TYPE, id: 'job-proposal-card-1', data: jobRef }]
+    : [{ type: 'text', text: '承認のお願いを出しました。' }, { type: APPROVAL_PART_TYPE, id: 'approval-card-1', data: ref }]) as UIMessage['parts']
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番の相談には接続しません。</p>
       <section className="mx-auto max-w-xl"><AssistantMessageParts parts={parts} isStreaming={false} markdown /></section>
       <pre id="sent">{sent}</pre>
+      <pre id="presses">0</pre>
     </main>
   )
 }
